@@ -1,0 +1,9 @@
+/target
+/Cargo.lock
+.DS_Store
+node_modules
+package-lock.json
+todo.md
+temp.md
+app/engine/*
+app/assets/*

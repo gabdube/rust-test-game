@@ -1,0 +1,10 @@
+[package]
+name = "loomz"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+winit = "0.30.5"
+raw-window-handle = { version = "0.6" }
+
+loomz-shared = { path = "../loomz-shared" }

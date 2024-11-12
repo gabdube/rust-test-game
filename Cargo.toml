@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "loomz-shared",
+    "loomz-engine",
+    "loomz-client",
+    "loomz",
+]
+
+[profile.release]
+opt-level = 2
+strip = "debuginfo"
+panic = "abort"
