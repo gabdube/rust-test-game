@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "vk",
     "loomz-shared",
     "loomz-engine",
     "loomz-client",

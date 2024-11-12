@@ -8,3 +8,5 @@ winit = "0.30.5"
 raw-window-handle = { version = "0.6" }
 
 loomz-shared = { path = "../loomz-shared" }
+loomz-client = { path = "../loomz-client" }
+loomz-engine = { path = "../loomz-engine" }
