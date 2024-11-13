@@ -1,14 +1,14 @@
 use loomz_shared::{render_record_err, present_err, CommonError};
-use super::LoomzEngine;
+use super::LoomzEngineCore;
 
 
-pub(crate) fn submit(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+pub(crate) fn submit(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     submit_commands(engine)?;
     present(engine)?;
     Ok(())
 }
 
-fn submit_commands(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+fn submit_commands(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     let submit = &mut engine.submit;
 
     // Note: submit_infos is set in `prepare::prepare_submit`
@@ -18,7 +18,7 @@ fn submit_commands(engine: &mut LoomzEngine) -> Result<(), CommonError> {
     Ok(())
 }
 
-fn present(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+fn present(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     let mut result = vk::VkResult(0);
     let output = &mut engine.output;
     let image_index = output.acquired_image_index;

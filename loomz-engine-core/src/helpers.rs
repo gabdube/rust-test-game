@@ -66,19 +66,6 @@ pub const fn align_device(addr: vk::DeviceSize, align: vk::DeviceSize) -> vk::De
     ((addr + (align - 1)) & -align) as vk::DeviceSize
 }
 
-#[inline]
-pub(crate) fn begin_record(device: &vk::wrapper::Device, cmd: vk::CommandBuffer) -> Result<(), vk::VkResult> {
-    let begin_info = vk::CommandBufferBeginInfo {
-        flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
-        ..Default::default()
-    };
-    device.begin_command_buffer(cmd, &begin_info)
-}
-
-#[inline]
-pub(crate) fn end_record(device: &vk::wrapper::Device, cmd: vk::CommandBuffer) -> Result<(), vk::VkResult> {
-    device.end_command_buffer(cmd)
-}
 
 pub fn fetch_attachments_memory_index(instance: &vk::wrapper::Instance, physical_device: vk::PhysicalDevice) -> u32 {
     let properties = instance.get_physical_device_memory_properties(physical_device);

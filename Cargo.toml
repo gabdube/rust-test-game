@@ -3,9 +3,10 @@ resolver = "2"
 members = [
     "vk",
     "loomz-shared",
+    "loomz-engine-core",
     "loomz-engine",
     "loomz-client",
-    "loomz",
+    "loomz", 
 ]
 
 [profile.release]

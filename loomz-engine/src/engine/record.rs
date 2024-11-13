@@ -1,7 +1,7 @@
 use std::slice;
+use loomz_engine_core::{VulkanContext, VulkanRecordingInfo};
 use loomz_shared::{render_record_err, CommonError};
-use super::helpers::{begin_record, end_record};
-use crate::{context::VulkanContext, LoomzEngine, VulkanRecordingInfo};
+use super::LoomzEngine;
 
 macro_rules! wrap {
     ($call:expr, $message:expr) => {
@@ -10,8 +10,8 @@ macro_rules! wrap {
 }
 
 pub(crate) fn record_commands(engine: &mut LoomzEngine) -> Result<(), CommonError> {
-    let ctx = &engine.ctx;
-    let recording = &engine.recording;
+    let ctx = &engine.core.ctx;
+    let recording = &engine.core.recording;
     let cmd = recording.drawing_command_buffer;
 
     debug_assert!(!cmd.is_null(), "Drawing command buffer was not set during render preparing phase");
@@ -94,4 +94,19 @@ fn finalize_attachments(ctx: &VulkanContext, cmd: vk::CommandBuffer, image: vk::
         ..Default::default()
     };
     ctx.extensions.synchronization2.cmd_pipeline_barrier2(cmd, &dependency);
+}
+
+
+#[inline]
+fn begin_record(device: &vk::wrapper::Device, cmd: vk::CommandBuffer) -> Result<(), vk::VkResult> {
+    let begin_info = vk::CommandBufferBeginInfo {
+        flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
+        ..Default::default()
+    };
+    device.begin_command_buffer(cmd, &begin_info)
+}
+
+#[inline]
+fn end_record(device: &vk::wrapper::Device, cmd: vk::CommandBuffer) -> Result<(), vk::VkResult> {
+    device.end_command_buffer(cmd)
 }

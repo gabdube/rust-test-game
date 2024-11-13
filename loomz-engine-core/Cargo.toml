@@ -1,5 +1,5 @@
 [package]
-name = "loomz-engine"
+name = "loomz-engine-core"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,5 +7,4 @@ edition = "2021"
 raw-window-handle = { version = "0.6" }
 
 loomz-shared = { path = "../loomz-shared" }
-loomz-engine-core = { path = "../loomz-engine-core" }
 vk = { path = "../vk" }

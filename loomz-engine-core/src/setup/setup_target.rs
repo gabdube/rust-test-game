@@ -1,6 +1,6 @@
 use loomz_shared::{backend_init_err, CommonError};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
-use crate::LoomzEngine;
+use crate::LoomzEngineCore;
 
 #[allow(dead_code)]
 pub struct SetupTargetParams {
@@ -8,7 +8,7 @@ pub struct SetupTargetParams {
     pub window: RawWindowHandle,
 }
 
-pub fn setup_target(engine: &mut LoomzEngine, params: &SetupTargetParams) -> Result<(), CommonError> {
+pub fn setup_target(engine: &mut LoomzEngineCore, params: &SetupTargetParams) -> Result<(), CommonError> {
     setup_surface(engine, params)?;
     setup_swapchain(engine)?;
     setup_swapchain_images(engine)?;
@@ -17,7 +17,7 @@ pub fn setup_target(engine: &mut LoomzEngine, params: &SetupTargetParams) -> Res
     Ok(())
 }
 
-pub fn rebuild_target(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+pub fn rebuild_target(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     clean_resources(engine);
     setup_swapchain(engine)?;
     setup_swapchain_images(engine)?;
@@ -35,7 +35,7 @@ pub fn rebuild_target(engine: &mut LoomzEngine) -> Result<(), CommonError> {
 //
 
 #[cfg(windows)]
-fn setup_surface(engine: &mut LoomzEngine, params: &SetupTargetParams) -> Result<(), CommonError> {
+fn setup_surface(engine: &mut LoomzEngineCore, params: &SetupTargetParams) -> Result<(), CommonError> {
     let handle = match params.window {
         RawWindowHandle::Win32(handle) => handle,
         h => {
@@ -66,7 +66,7 @@ fn setup_surface(engine: &mut LoomzEngine, params: &SetupTargetParams) -> Result
 // Swapchain
 //
 
-fn setup_swapchain(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+fn setup_swapchain(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     const FULLSCREEN_RESOLUTION: [u32; 2] = [1920, 1080];
     const VSYNC: bool = true;
     
@@ -210,7 +210,7 @@ fn select_swapchain_format(surface_ext: &vk::wrapper::Surface, physical_device: 
     Err(backend_init_err!("Unsupported surface formats: required: {required:?}, available: {available:?}"))
 }
 
-fn setup_swapchain_images(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+fn setup_swapchain_images(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     const MAX_IMAGE_COUNT: usize = 8; // This should be enough to hold the images (ex: min_image is 4 on my machine)
 
     let swapchain_ext = &engine.ctx.extensions.swapchain;
@@ -233,14 +233,14 @@ fn setup_swapchain_images(engine: &mut LoomzEngine) -> Result<(), CommonError> {
 // Attachments
 //
 
-fn setup_attachments(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+fn setup_attachments(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     setup_images(engine)?;
     setup_attachments_memory(engine)?;
     setup_view(engine)?;
     Ok(())
 }
 
-fn setup_images(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+fn setup_images(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     let device = &engine.ctx.device;
     let info = &engine.info;
     let resources = &mut engine.resources;
@@ -268,7 +268,7 @@ fn setup_images(engine: &mut LoomzEngine) -> Result<(), CommonError> {
     Ok(())
 }
 
-fn setup_attachments_memory(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+fn setup_attachments_memory(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     let attachments = &mut engine.resources.attachments;
 
     let instance = &engine.ctx.instance.instance;
@@ -313,7 +313,7 @@ fn setup_attachments_memory(engine: &mut LoomzEngine) -> Result<(), CommonError>
     Ok(())
 }
 
-fn setup_view(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+fn setup_view(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     let device = &engine.ctx.device;
     let info = &engine.info;
     let attachments = &mut engine.resources.attachments;
@@ -358,7 +358,7 @@ fn setup_view(engine: &mut LoomzEngine) -> Result<(), CommonError> {
 // Sync
 //
 
-fn setup_sync(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+fn setup_sync(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     let device = &engine.ctx.device;
     let output = &mut engine.output;
 
@@ -378,7 +378,7 @@ fn setup_sync(engine: &mut LoomzEngine) -> Result<(), CommonError> {
 // Rebuild
 //
 
-fn clean_resources(engine: &mut LoomzEngine) {
+fn clean_resources(engine: &mut LoomzEngineCore) {
     let ctx = &engine.ctx;
     let output = &engine.output;
     let resource = &mut engine.resources;

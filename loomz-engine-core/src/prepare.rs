@@ -1,5 +1,5 @@
 use loomz_shared::{synchronize_err, CommonError};
-use super::LoomzEngine;
+use super::LoomzEngineCore;
 
 pub enum AcquireReturn {
     Invalid,
@@ -7,7 +7,7 @@ pub enum AcquireReturn {
     Rebuild,
 }
 
-pub(crate) fn acquire_frame(engine: &mut LoomzEngine) -> Result<AcquireReturn, CommonError> {
+pub(crate) fn acquire_frame(engine: &mut LoomzEngineCore) -> Result<AcquireReturn, CommonError> {
     if engine.output.swapchain.is_null() {
         return Ok(AcquireReturn::Invalid);
     }
@@ -20,7 +20,7 @@ pub(crate) fn acquire_frame(engine: &mut LoomzEngine) -> Result<AcquireReturn, C
     acquire_swapchain_image(engine)
 }
 
-fn sync_drawings(engine: &mut LoomzEngine) -> Result<(), CommonError> {
+fn sync_drawings(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     let device = &engine.ctx.device;
     let sync = engine.output.drawings_sync;
     let wait_info = vk::SemaphoreWaitInfo {
@@ -36,7 +36,7 @@ fn sync_drawings(engine: &mut LoomzEngine) -> Result<(), CommonError> {
     }
 }
 
-fn acquire_swapchain_image(engine: &mut LoomzEngine) -> Result<AcquireReturn, CommonError> {
+fn acquire_swapchain_image(engine: &mut LoomzEngineCore) -> Result<AcquireReturn, CommonError> {
     let swapchain = &engine.ctx.extensions.swapchain;
     let output = &mut engine.output;
 
@@ -65,7 +65,7 @@ fn acquire_swapchain_image(engine: &mut LoomzEngine) -> Result<AcquireReturn, Co
     }
 }
 
-fn prepare_recording(engine: &mut LoomzEngine, image_index: u32) {
+fn prepare_recording(engine: &mut LoomzEngineCore, image_index: u32) {
     let resources = &engine.resources;
     let info = &engine.info;
     let recording = &mut engine.recording;
@@ -83,7 +83,7 @@ fn prepare_recording(engine: &mut LoomzEngine, image_index: u32) {
     recording.extent = info.swapchain_extent;
 }
 
-fn prepare_submit(engine: &mut LoomzEngine) {
+fn prepare_submit(engine: &mut LoomzEngineCore) {
     let resources = &engine.resources;
     let output = &mut engine.output;
     let submit = &mut engine.submit;

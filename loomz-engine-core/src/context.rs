@@ -1,11 +1,11 @@
 use vk::wrapper::{Entry, Instance, Device, Surface, Swapchain, Synchronization2, DynamicRendering};
 
-pub(crate) struct VulkanContextInstance {
+pub struct VulkanContextInstance {
     pub entry: Entry,
     pub instance: Instance,
 }
 
-pub(crate) struct VulkanContextExtensions {
+pub struct VulkanContextExtensions {
     pub surface: Surface,
     pub swapchain: Swapchain,
     pub dynamic_rendering: DynamicRendering,
@@ -18,7 +18,7 @@ pub(crate) struct VulkanContextExtensions {
     pub linux_surface: vk::wrapper::WaylandSurface,
 }
 
-pub(crate) struct VulkanContext {
+pub struct VulkanContext {
     pub device: Device,
     pub extensions: VulkanContextExtensions,
     pub instance: VulkanContextInstance,
