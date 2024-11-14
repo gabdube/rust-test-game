@@ -46,7 +46,7 @@ impl<'a> ApplicationHandler for LoomzApplication {
 fn create_window(event_loop: &ActiveEventLoop) -> Result<Window, CommonError> {
     let window_attr = Window::default_attributes()
         .with_title("Loomz App")
-        .with_inner_size(winit::dpi::PhysicalSize::new(800, 600))
+        .with_inner_size(winit::dpi::PhysicalSize::new(1200, 900))
         .with_visible(false);
 
     event_loop.create_window(window_attr)

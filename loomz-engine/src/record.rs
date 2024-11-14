@@ -19,6 +19,9 @@ pub(crate) fn record_commands(engine: &mut LoomzEngine) -> Result<(), CommonErro
     wrap!(begin_record(&ctx.device, cmd), "Begin record failed")?;
     prepare_attachments(ctx, cmd, recording.output_image);
     begin_render_main(ctx, cmd, recording);
+
+    engine.world.render(ctx, cmd);
+
     end_render_main(ctx, cmd);
     finalize_attachments(ctx, cmd, recording.output_image);
     wrap!(end_record(&ctx.device, cmd), "End record failed")?;

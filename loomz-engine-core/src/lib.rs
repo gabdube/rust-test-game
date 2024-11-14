@@ -5,6 +5,9 @@ mod setup;
 mod prepare;
 mod submit;
 
+pub mod pipelines;
+pub mod alloc;
+
 pub use context::VulkanContext;
 
 use loomz_shared::CommonError;
@@ -28,6 +31,7 @@ pub struct VulkanGlobalResources {
     pub command_pool: vk::CommandPool,
     pub drawing_command_buffers: [vk::CommandBuffer; 1],
     pub surface: vk::SurfaceKHR,
+    pub vertex_alloc: alloc::DeviceMemoryAlloc,
     pub attachments: helpers::RenderAttachments,
 }
 
@@ -86,7 +90,6 @@ impl LoomzEngineCore {
 
     pub fn destroy(self) {
         let mut ctx = self.ctx;
-        ctx.device.device_wait_idle().unwrap();
 
         ctx.extensions.swapchain.destroy_swapchain(self.output.swapchain);
         ctx.device.destroy_semaphore(self.output.output_attachment_ready);
@@ -96,6 +99,7 @@ impl LoomzEngineCore {
         ctx.device.destroy_command_pool(self.resources.command_pool);
         ctx.extensions.surface.destroy_surface(self.resources.surface);
         self.resources.attachments.free(&ctx.device);
+        self.resources.vertex_alloc.free(&ctx.device);
 
         ctx.device.destroy();
         ctx.instance.destroy();

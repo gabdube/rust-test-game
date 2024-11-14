@@ -88,3 +88,28 @@ pub fn fetch_attachments_memory_index(instance: &vk::wrapper::Instance, physical
         None => unreachable!("There must be a memory type DEVICE_LOCAL")
     }
 }
+
+pub fn fetch_memory_index(instance: &vk::wrapper::Instance, physical_device: vk::PhysicalDevice, optimal_flags: vk::MemoryPropertyFlags, min_flags: vk::MemoryPropertyFlags) -> Option<u32> {
+    let properties = instance.get_physical_device_memory_properties(physical_device);
+
+    let mut memory_type_index_optimal = None;
+    let mut memory_type_index = None;
+    let count = properties.memory_type_count as usize;
+
+    for (i, memory_type) in properties.memory_types[0..count].iter().enumerate() {
+        if memory_type.property_flags == optimal_flags {
+            memory_type_index_optimal = Some(i as u32);
+            break;
+        }
+
+        if memory_type.property_flags.contains(min_flags) {
+            memory_type_index = Some(i as u32);
+        }
+    }
+
+    if memory_type_index_optimal.is_none() && memory_type_index.is_none() {
+        return None;
+    }
+
+    memory_type_index_optimal.or(memory_type_index)
+}

@@ -99,6 +99,16 @@ macro_rules! err {
 }
 
 #[macro_export]
+macro_rules! chain_err {
+    ($ty:expr, $err:expr, $($arg:tt)*) => {{
+        let message = format!($($arg)*);
+        let file = file!();
+        $err.chain($ty, message, file, line!())
+    }};
+
+}
+
+#[macro_export]
 macro_rules! unimplemented_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::Unimplemented, $($arg)*) }; }
 
 #[macro_export]

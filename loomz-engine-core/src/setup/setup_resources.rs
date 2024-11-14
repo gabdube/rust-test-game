@@ -102,10 +102,12 @@ fn init_resources(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanGlobalResou
         command_pool: vk::CommandPool::null(),
         drawing_command_buffers: [vk::CommandBuffer::null(); 1],
         surface: vk::SurfaceKHR::null(),
+        vertex_alloc: crate::alloc::DeviceMemoryAlloc::default(),
         attachments: helpers::RenderAttachments::default(),
     };
 
     setup_commands(setup, &mut resources)?;
+    setup_memory(setup, &mut resources)?;
 
     Ok(Box::new(resources))
 }
@@ -121,7 +123,7 @@ fn setup_commands(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalRes
     };
 
     resources.command_pool = ctx.device.create_command_pool(&create_info)
-        .map_err(|err| backend_init_err!("Failed to create main command pool: {}", err) )?;
+        .map_err(|err| backend_init_err!("Failed to create main command pool: {err}") )?;
 
     let mut command_buffers = [vk::CommandBuffer::null(); 1];
     let alloc_info = vk::CommandBufferAllocateInfo {
@@ -132,9 +134,26 @@ fn setup_commands(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalRes
     };
 
     ctx.device.allocate_command_buffers(&alloc_info, &mut command_buffers)
-        .map_err(|err| backend_init_err!("Failed to allocate command buffers: {}", err) )?;
+        .map_err(|err| backend_init_err!("Failed to allocate command buffers: {err}") )?;
 
     resources.drawing_command_buffers = command_buffers;
+
+    Ok(())
+}
+
+fn setup_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResources) -> Result<(), CommonError> {
+    use crate::alloc::{DeviceMemoryAlloc, KB};
+
+    let ctx = setup.ctx.as_ref().unwrap();
+    let instance = &ctx.instance.instance;
+    let flags = vk::MemoryPropertyFlags::DEVICE_LOCAL;
+    let device_type_index = crate::helpers::fetch_memory_index(instance, ctx.device.physical_device, flags, flags)
+        .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for staging") )?;
+    
+    let vertex_size = KB*100;
+
+    resources.vertex_alloc = DeviceMemoryAlloc::new(&ctx.device, vertex_size, 16, device_type_index)
+        .map_err(|err| backend_init_err!("Failed to create vertex memory: {err}") )?;
 
     Ok(())
 }
