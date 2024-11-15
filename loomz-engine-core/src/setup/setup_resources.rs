@@ -151,8 +151,9 @@ fn setup_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResou
         .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for staging") )?;
     
     let vertex_size = KB*100;
+    let default_alloc_capacity = 16;
 
-    resources.vertex_alloc = DeviceMemoryAlloc::new(&ctx.device, vertex_size, 16, device_type_index)
+    resources.vertex_alloc = DeviceMemoryAlloc::new(&ctx.device, vertex_size, default_alloc_capacity, device_type_index)
         .map_err(|err| backend_init_err!("Failed to create vertex memory: {err}") )?;
 
     Ok(())

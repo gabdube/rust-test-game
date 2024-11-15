@@ -27,13 +27,13 @@ impl LoomzEngine {
         Ok(engine)
     }
 
-    pub fn destroy(self) {
+    pub fn destroy(mut self) {
         self.core.ctx.device.device_wait_idle().unwrap();
 
         self.store_pipeline_cache();
 
         self.core.ctx.device.destroy_pipeline_cache(self.pipeline_cache);
-        self.world.destroy(&self.core.ctx);
+        self.world.destroy(&mut self.core);
         self.core.destroy();
     }
 
@@ -45,7 +45,7 @@ impl LoomzEngine {
     }
 
     pub fn update(&mut self) {
-
+        self.world.update(&mut self.core);
     }
 
     pub fn render(&mut self) -> Result<(), CommonError> {

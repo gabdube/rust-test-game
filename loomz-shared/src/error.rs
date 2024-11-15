@@ -6,6 +6,7 @@ pub enum CommonErrorType {
     Unimplemented,
     System,
     BackendInit,
+    BackendGeneric,
     Synchronize,
     RenderRecord,
     RenderPresent,
@@ -18,6 +19,7 @@ impl ::std::fmt::Display for CommonErrorType {
             CommonErrorType::Unimplemented => "Unimplemented",
             CommonErrorType::System => "System",
             CommonErrorType::BackendInit => "Backend initialization",
+            CommonErrorType::BackendGeneric => "Backend generic error",
             CommonErrorType::Synchronize => "Gpu synchronisation",
             CommonErrorType::RenderRecord => "Rendering command recording",
             CommonErrorType::RenderPresent => "Rendering presentation",
@@ -100,7 +102,7 @@ macro_rules! err {
 
 #[macro_export]
 macro_rules! chain_err {
-    ($ty:expr, $err:expr, $($arg:tt)*) => {{
+    ($err:expr, $ty:expr, $($arg:tt)*) => {{
         let message = format!($($arg)*);
         let file = file!();
         $err.chain($ty, message, file, line!())
@@ -116,6 +118,9 @@ macro_rules! system_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorTyp
 
 #[macro_export]
 macro_rules! backend_init_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::BackendInit, $($arg)*) } }
+
+#[macro_export]
+macro_rules! backend_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::BackendGeneric, $($arg)*) } }
 
 #[macro_export]
 macro_rules! render_record_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::RenderRecord, $($arg)*) } }

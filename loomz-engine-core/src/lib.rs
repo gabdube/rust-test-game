@@ -7,6 +7,7 @@ mod submit;
 
 pub mod pipelines;
 pub mod alloc;
+pub mod descriptors;
 
 pub use context::VulkanContext;
 
