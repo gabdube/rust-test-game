@@ -16,9 +16,9 @@ pub struct LoomzApplication {
 impl LoomzApplication {
 
     pub fn init() -> Result<Self, CommonError> {
-        let api = LoomzApi::init();
-        let client = LoomzClient::init();
-        let engine = LoomzEngine::init()?;
+        let mut api = LoomzApi::init();
+        let client = LoomzClient::init(&mut api);
+        let engine = LoomzEngine::init(&mut api)?;
 
         let app = LoomzApplication {
             window: None,

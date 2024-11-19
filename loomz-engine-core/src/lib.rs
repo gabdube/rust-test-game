@@ -3,16 +3,20 @@ mod context;
 mod setup;
 
 mod prepare;
+mod upload;
 mod submit;
 
 pub mod pipelines;
-pub mod alloc;
 pub mod descriptors;
+pub mod alloc;
+pub mod staging;
 
 pub use context::VulkanContext;
+pub use prepare::AcquireReturn;
 
 use loomz_shared::CommonError;
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
+use staging::VulkanStaging;
 
 /// Regroup common engine information in one single place
 pub struct VulkanEngineInfo {
@@ -31,6 +35,7 @@ pub struct VulkanEngineInfo {
 pub struct VulkanGlobalResources {
     pub command_pool: vk::CommandPool,
     pub drawing_command_buffers: [vk::CommandBuffer; 1],
+    pub upload_command_buffers: [vk::CommandBuffer; 1],
     pub surface: vk::SurfaceKHR,
     pub vertex_alloc: alloc::DeviceMemoryAlloc,
     pub attachments: helpers::RenderAttachments,
@@ -46,10 +51,12 @@ pub struct VulkanRecordingInfo {
 }
 
 pub struct VulkanSubmitInfo {
+    pub upload_semaphore_signal: [vk::SemaphoreSubmitInfo; 1],
+    pub upload_commands_submit: vk::CommandBufferSubmitInfo,
     pub render_commands_submit: vk::CommandBufferSubmitInfo,
-    pub render_semaphore_wait: [vk::SemaphoreSubmitInfo; 1],
+    pub render_semaphore_wait: [vk::SemaphoreSubmitInfo; 2],
     pub render_semaphore_signal: [vk::SemaphoreSubmitInfo; 2],
-    pub submit_infos: [vk::SubmitInfo2; 1],
+    pub submit_infos: [vk::SubmitInfo2; 2],
     pub graphics_queue: vk::Queue,
 }
 
@@ -70,6 +77,7 @@ pub struct LoomzEngineCore {
     pub recording: Box<VulkanRecordingInfo>,
     pub submit: Box<VulkanSubmitInfo>,
     pub output: Box<VulkanOutputInfo>,
+    pub staging: Box<VulkanStaging>,
 }
 
 impl LoomzEngineCore {
@@ -83,6 +91,7 @@ impl LoomzEngineCore {
             recording: setup.recording(),
             submit: setup.submit(),
             output: setup.output(),
+            staging: setup.staging(),
         };
 
         Ok(engine)
@@ -101,27 +110,27 @@ impl LoomzEngineCore {
         ctx.extensions.surface.destroy_surface(self.resources.surface);
         self.resources.attachments.free(&ctx.device);
         self.resources.vertex_alloc.free(&ctx.device);
+        self.staging.destroy(&ctx.device);
 
         ctx.device.destroy();
         ctx.instance.destroy();
     }
 
-    pub fn acquire_frame(&mut self) -> Result<bool, CommonError> {
+    pub fn acquire_frame(&mut self) -> Result<AcquireReturn, CommonError> {
         use prepare::AcquireReturn;
 
-        match prepare::acquire_frame(self)? {
-            AcquireReturn::Render => {
-                Ok(true)
-            },
-            AcquireReturn::Rebuild => {
-                self.ctx.device.device_wait_idle().unwrap();
-                setup::setup_target::rebuild_target(self)?;
-                Ok(false)
-            },
-            AcquireReturn::Invalid => {
-                Ok(false)
-            },
+        let acquire = prepare::acquire_frame(self)?;
+
+        if let AcquireReturn::Render = acquire {
+            upload::upload(self)?;
         }
+
+        if let AcquireReturn::Rebuild = acquire {
+            self.ctx.device.device_wait_idle().unwrap();
+            setup::setup_target::rebuild_target(self)?;
+        }
+
+        Ok(acquire)
     }
 
     pub fn submit_frame(&mut self) -> Result<(), CommonError> {

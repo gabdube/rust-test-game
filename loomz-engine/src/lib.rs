@@ -3,7 +3,7 @@ mod record;
 
 use std::path::PathBuf;
 use loomz_engine_core::LoomzEngineCore;
-use loomz_shared::{backend_init_err, CommonError};
+use loomz_shared::{backend_init_err, CommonError, api::LoomzApi};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 
 pub struct LoomzEngine {
@@ -14,15 +14,18 @@ pub struct LoomzEngine {
 
 impl LoomzEngine {
 
-    pub fn init() -> Result<Self, CommonError> {
+    pub fn init(api: &mut LoomzApi) -> Result<Self, CommonError> {
         let mut core = LoomzEngineCore::init()?;
-        let world = world::WorldModule::init(&mut core)?;
+        let api = api.engine_api();
+        let world = world::WorldModule::init(&mut core, api.world)?;
         let pipeline_cache = Self::load_pipeline_cache(&core)?;
-        let engine = LoomzEngine {
+        let mut engine = LoomzEngine {
             core,
             world,
             pipeline_cache
         };
+
+        engine.compile_pipelines()?;
 
         Ok(engine)
     }
@@ -39,8 +42,7 @@ impl LoomzEngine {
 
     pub fn set_output(&mut self, display: RawDisplayHandle, window: RawWindowHandle) -> Result<(), CommonError> {
         self.core.set_output(display, window)?;
-        self.compile_pipelines()?;
-        
+        self.world.set_output(&self.core);
         Ok(())
     }
 
@@ -49,10 +51,17 @@ impl LoomzEngine {
     }
 
     pub fn render(&mut self) -> Result<(), CommonError> {
-        let acquired = self.core.acquire_frame()?;
-        if acquired {
-            record::record_commands(self)?;
-            self.core.submit_frame()?;
+        use loomz_engine_core::AcquireReturn;
+
+        match self.core.acquire_frame()? {
+            AcquireReturn::Invalid => {},
+            AcquireReturn::Rebuild => {
+                self.world.rebuild(&self.core);
+            },
+            AcquireReturn::Render => {
+                record::record_commands(self)?;
+                self.core.submit_frame()?;
+            }
         }
 
         Ok(())

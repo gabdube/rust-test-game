@@ -149,6 +149,35 @@ impl<V: Copy> VertexAlloc<V> {
        [(self.index_capacity as vk::DeviceSize) * (size_of::<V>() as vk::DeviceSize)]
     } 
 
+    pub fn set_data(&self, core: &mut LoomzEngineCore, index: &[u32], vertex: &[V]) {
+        if (self.index_capacity as usize) < index.len() || (self.vertex_capacity as usize) < vertex.len() {
+            eprintln!("Warning vertex buffer data is not large enough to upload data. Data will be truncated");
+        }
+
+        let index_count = vk::DeviceSize::min(index.len() as _, self.index_capacity as _);
+        let vertex_count = vk::DeviceSize::min(vertex.len() as _, self.vertex_capacity as _);
+        let index_offset = self.index_offset();
+        let vertex_offset = self.vertex_offset()[0];
+
+        let src_index_offset = core.staging.copy_data(index);
+        let src_vertex_offset = core.staging.copy_data(vertex);
+
+        let index_copy = vk::BufferCopy {
+            size: index_count * (size_of::<u32>() as vk::DeviceSize),
+            src_offset: src_index_offset,
+            dst_offset: index_offset,
+        };
+
+        let vertex_copy = vk::BufferCopy {
+            size: vertex_count * (size_of::<V>() as vk::DeviceSize),
+            src_offset: src_vertex_offset,
+            dst_offset: vertex_offset
+        };
+
+        core.staging.vertex_buffer_copy(self.buffer, index_copy);
+        core.staging.vertex_buffer_copy(self.buffer, vertex_copy);
+    }
+
 }
 
 impl<V: Copy> Default for VertexAlloc<V> {

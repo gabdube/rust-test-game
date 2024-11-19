@@ -1,6 +1,6 @@
 use std::slice;
 use loomz_engine_core::{pipelines::GraphicsPipeline, alloc::VertexAlloc, descriptors::DescriptorsAlloc, LoomzEngineCore, VulkanContext};
-use loomz_shared::{backend_init_err, chain_err, CommonError, CommonErrorType};
+use loomz_shared::{backend_init_err, chain_err, CommonError, CommonErrorType, api::{WorldEngineApi, WorldComponent}};
 
 const WORLD_VERT_SRC: &[u8] = include_bytes!("../../assets/shaders/world.vert.spv");
 const WORLD_FRAG_SRC: &[u8] = include_bytes!("../../assets/shaders/world.frag.spv");
@@ -23,29 +23,50 @@ pub struct WorldVertex {
 }
 
 #[repr(C)]
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, Debug)]
 pub struct WorldBatch {
     pub index_count: u32,
     pub first_index: u32,
     pub vertex_offset: i32,
 }
 
+struct WorldObject {
+    component: WorldComponent,
+    vertex_offset: u32,
+}
+
+struct WorldModuleObjects {
+    pub instances: Vec<WorldObject>,
+    pub index: Vec<u32>,
+    pub vertex: Vec<WorldVertex>,
+}
+
 pub(crate) struct WorldModule {
+    api: WorldEngineApi,
     pipeline: GraphicsPipeline,
     vertex: VertexAlloc<WorldVertex>,
     descriptors: DescriptorsAlloc,
     push_constants: [WorldPushConstant; 1],
-    batches: Vec<WorldBatch>
+    objects: Box<WorldModuleObjects>,
+    batches: Vec<WorldBatch>,
 }
 
 impl WorldModule {
 
-    pub fn init(core: &mut LoomzEngineCore) -> Result<Self, CommonError> {
+    pub fn init(core: &mut LoomzEngineCore, api: WorldEngineApi) -> Result<Self, CommonError> {
+        let objects = WorldModuleObjects {
+            instances: Vec::with_capacity(16),
+            index: Vec::with_capacity(3000),
+            vertex: Vec::with_capacity(2000)
+        };
+
         let mut world = WorldModule {
+            api,
             pipeline: GraphicsPipeline::new(),
             vertex: VertexAlloc::default(),
             descriptors: DescriptorsAlloc::default(),
             push_constants: [WorldPushConstant::default(); 1],
+            objects: Box::new(objects),
             batches: Vec::with_capacity(16)
         };
 
@@ -64,8 +85,33 @@ impl WorldModule {
         &mut self.pipeline
     }
 
+    pub fn set_output(&mut self, core: &LoomzEngineCore) {
+        let extent = core.info.swapchain_extent;
+        self.push_constants[0] = WorldPushConstant {
+            screen_width: extent.width as f32,
+            screen_height: extent.height as f32,
+        };
+    }
+
+    pub fn rebuild(&mut self, core: &LoomzEngineCore) {
+        let swapchain_extent = core.info.swapchain_extent;
+        let push = &mut self.push_constants[0];
+        push.screen_width = swapchain_extent.width as f32;
+        push.screen_height = swapchain_extent.height as f32;
+    }
+
     pub fn update(&mut self, core: &mut LoomzEngineCore) {
-        
+        let mut update_batches = false;
+
+        while let Some(component) = self.api.recv_component() {
+            self.update_component(component);
+            update_batches = true;
+        }
+
+        if update_batches {
+            self.update_batches();
+            self.upload_data(core);
+        }
     }
 
     pub fn render(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
@@ -79,12 +125,84 @@ impl WorldModule {
         device.cmd_push_constants(cmd, layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, self.push_values());
 
         for batch in self.batches.iter() {
+            //println!("{:?}", batch);
             device.cmd_draw_indexed(cmd, batch.index_count, 1, batch.first_index, batch.vertex_offset, 0);
         }
     }
 
     fn push_values(&self) -> &[u8] {
         unsafe { self.push_constants.align_to::<u8>().1 }
+    }
+
+    //
+    // Updates
+    //
+
+    fn update_component(&mut self, component: WorldComponent) {
+        let obj = WorldObject {
+            component,
+            vertex_offset: 0,
+        };
+        
+        self.objects.instances.push(obj);
+    }
+
+    fn update_batches(&mut self) {
+        let objects = &mut self.objects;
+        objects.index.clear();
+        objects.vertex.clear();
+
+        unsafe {
+            objects.index.set_len(objects.instances.len() * 6);
+            objects.vertex.set_len(objects.instances.len() * 4);
+        }
+
+        let mut index_offset = 0;
+        let mut vertex_offset = 0;
+        let mut next_batch = WorldBatch { first_index: 0, index_count: 0, vertex_offset: 0 };
+
+        for instance in objects.instances.iter_mut() {
+            Self::generate_indices(index_offset, vertex_offset, &mut objects.index);
+            Self::generate_vertex(vertex_offset, &mut objects.vertex, instance.component);
+            instance.vertex_offset = vertex_offset;
+            index_offset += 6;
+            vertex_offset += 4;
+            next_batch.index_count += 6;
+        }
+
+        if next_batch.index_count > 0 {
+            self.batches.push(next_batch);
+        }
+    }
+
+    fn generate_indices(index_offset: u32, vertex_offset: u32, indices: &mut [u32]) {
+        let i = index_offset as usize;
+        let v = vertex_offset;
+        indices[i+0] = v;
+        indices[i+1] = v+2;
+        indices[i+2] = v+1;
+        indices[i+3] = v+2;
+        indices[i+4] = v+3;
+        indices[i+5] = v+1;
+    }
+    
+    fn generate_vertex(vertex_offset: u32, vertex: &mut [WorldVertex], component: WorldComponent) {
+        let v = vertex_offset as usize;
+        let color = component.color.splat();
+        let [x, y] = component.position.splat();
+        let size_px = 128.0;
+        vertex[v+0] = WorldVertex { pos: [x,         y],         color };
+        vertex[v+1] = WorldVertex { pos: [x+size_px, y],         color };
+        vertex[v+2] = WorldVertex { pos: [x,         y+size_px], color };
+        vertex[v+3] = WorldVertex { pos: [x+size_px, y+size_px], color };
+    }
+
+    //
+    // Upload
+    //
+
+    pub fn upload_data(&self, core: &mut LoomzEngineCore) {
+        self.vertex.set_data(core, &self.objects.index, &self.objects.vertex);
     }
 
     //
@@ -132,7 +250,7 @@ impl WorldModule {
             PipelineVertexFormat {
                 location: 1,
                 offset: 8,
-                format: vk::Format::R32G32_SFLOAT,
+                format: vk::Format::R8G8B8A8_USCALED,
             },
             PipelineVertexFormat {
                 location: 2,
@@ -179,11 +297,10 @@ impl WorldModule {
 
     fn setup_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let vertex_capacity = 2000;
-        let index_capacity = vertex_capacity + (vertex_capacity / 3);
+        let index_capacity = 3000;
         self.vertex = VertexAlloc::new(core, vertex_capacity, index_capacity)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create vertex alloc: {err}") )?;
         Ok(())
     }
-    
 
 }

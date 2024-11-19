@@ -2,7 +2,7 @@ use std::u32;
 
 use loomz_shared::{backend_init_err, CommonError};
 use vk::CommandBufferSubmitInfo;
-use crate::{helpers, context::VulkanContext, VulkanEngineInfo, VulkanGlobalResources, VulkanRecordingInfo, VulkanSubmitInfo, VulkanOutputInfo};
+use crate::{helpers, context::VulkanContext, VulkanEngineInfo, VulkanGlobalResources, VulkanRecordingInfo, VulkanSubmitInfo, VulkanOutputInfo, VulkanStaging};
 use super::VulkanEngineSetup;
 
 pub(crate) fn setup(setup: &mut VulkanEngineSetup) -> Result<(), CommonError> {
@@ -11,6 +11,7 @@ pub(crate) fn setup(setup: &mut VulkanEngineSetup) -> Result<(), CommonError> {
     setup.recording = Some(init_recording());
     setup.output = Some(init_output(setup)?);
     setup.submit = Some(init_submit(setup));
+    setup.staging = Some(init_staging(setup)?);
 
     Ok(())
 }
@@ -100,6 +101,7 @@ fn depth_format(ctx: &VulkanContext) -> Result<vk::Format, CommonError>  {
 fn init_resources(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanGlobalResources>, CommonError> {
     let mut resources = VulkanGlobalResources {
         command_pool: vk::CommandPool::null(),
+        upload_command_buffers: [vk::CommandBuffer::null(); 1],
         drawing_command_buffers: [vk::CommandBuffer::null(); 1],
         surface: vk::SurfaceKHR::null(),
         vertex_alloc: crate::alloc::DeviceMemoryAlloc::default(),
@@ -125,7 +127,7 @@ fn setup_commands(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalRes
     resources.command_pool = ctx.device.create_command_pool(&create_info)
         .map_err(|err| backend_init_err!("Failed to create main command pool: {err}") )?;
 
-    let mut command_buffers = [vk::CommandBuffer::null(); 1];
+    let mut command_buffers = [vk::CommandBuffer::null(); 2];
     let alloc_info = vk::CommandBufferAllocateInfo {
         level: vk::CommandBufferLevel::PRIMARY,
         command_pool: resources.command_pool,
@@ -136,7 +138,8 @@ fn setup_commands(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalRes
     ctx.device.allocate_command_buffers(&alloc_info, &mut command_buffers)
         .map_err(|err| backend_init_err!("Failed to allocate command buffers: {err}") )?;
 
-    resources.drawing_command_buffers = command_buffers;
+    resources.upload_command_buffers[0] = command_buffers[0];
+    resources.drawing_command_buffers[0] = command_buffers[1];
 
     Ok(())
 }
@@ -148,11 +151,11 @@ fn setup_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResou
     let instance = &ctx.instance.instance;
     let flags = vk::MemoryPropertyFlags::DEVICE_LOCAL;
     let device_type_index = crate::helpers::fetch_memory_index(instance, ctx.device.physical_device, flags, flags)
-        .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for staging") )?;
+        .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for vertex") )?;
     
     let vertex_size = KB*100;
     let default_alloc_capacity = 16;
-
+    
     resources.vertex_alloc = DeviceMemoryAlloc::new(&ctx.device, vertex_size, default_alloc_capacity, device_type_index)
         .map_err(|err| backend_init_err!("Failed to create vertex memory: {err}") )?;
 
@@ -226,22 +229,87 @@ fn init_submit(setup: &mut VulkanEngineSetup) -> Box<VulkanSubmitInfo> {
 
     let mut submit = Box::new(VulkanSubmitInfo {
         graphics_queue: info.graphics_queue_info.handle,
-        render_semaphore_wait: [vk::SemaphoreSubmitInfo::default(); 1],
+        upload_semaphore_signal: [vk::SemaphoreSubmitInfo::default(); 1],
+        upload_commands_submit:  CommandBufferSubmitInfo::default(),
+        render_semaphore_wait: [vk::SemaphoreSubmitInfo::default(); 2],
         render_semaphore_signal: [vk::SemaphoreSubmitInfo::default(); 2],
         render_commands_submit: CommandBufferSubmitInfo::default(),
-        submit_infos: [vk::SubmitInfo2::default(); 1],
+        submit_infos: [vk::SubmitInfo2::default(); 2],
     });  
 
-    let graphics_submit = &mut submit.submit_infos[0];
+    // Submit info #0 is the upload commands
+    let upload_submit = &mut submit.submit_infos[0];
+
+    upload_submit.signal_semaphore_info_count = submit.upload_semaphore_signal.len() as u32;
+    upload_submit.p_signal_semaphore_infos = submit.upload_semaphore_signal.as_ptr();
+
+    upload_submit.command_buffer_info_count = 1;
+    upload_submit.p_command_buffer_infos = &submit.upload_commands_submit;
+
+    // Submit info #1 is the rendering commands
+    let render_submit = &mut submit.submit_infos[1];
     
-    graphics_submit.wait_semaphore_info_count = submit.render_semaphore_wait.len() as u32;
-    graphics_submit.p_wait_semaphore_infos = submit.render_semaphore_wait.as_ptr();
+    render_submit.wait_semaphore_info_count = submit.render_semaphore_wait.len() as u32;
+    render_submit.p_wait_semaphore_infos = submit.render_semaphore_wait.as_ptr();
 
-    graphics_submit.signal_semaphore_info_count = submit.render_semaphore_signal.len() as u32;
-    graphics_submit.p_signal_semaphore_infos = submit.render_semaphore_signal.as_ptr();
+    render_submit.signal_semaphore_info_count = submit.render_semaphore_signal.len() as u32;
+    render_submit.p_signal_semaphore_infos = submit.render_semaphore_signal.as_ptr();
 
-    graphics_submit.command_buffer_info_count = 1;
-    graphics_submit.p_command_buffer_infos = &submit.render_commands_submit;
+    render_submit.command_buffer_info_count = 1;
+    render_submit.p_command_buffer_infos = &submit.render_commands_submit;
 
     submit
+}
+
+//
+// Staging
+//
+
+fn init_staging(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanStaging>, CommonError> {
+    use crate::alloc::KB;
+
+    let ctx = setup.ctx.as_ref().unwrap();
+    let instance = &ctx.instance.instance;
+    let device = &ctx.device;
+
+    // Buffer
+    let flags = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
+ 
+    let staging_size = KB*100;
+    let buffer_info = vk::BufferCreateInfo {
+        size: staging_size as _,
+        usage: vk::BufferUsageFlags::TRANSFER_SRC,
+        ..Default::default()
+    };
+
+    let buffer = device.create_buffer(&buffer_info)
+        .map_err(|err| backend_init_err!("Failed to create staging buffer: {err}") )?;
+
+    // Memory
+    let buffer_info = device.get_buffer_memory_requirements(buffer);
+    let staging_type_index = crate::helpers::fetch_memory_index(instance, ctx.device.physical_device, flags, flags)
+        .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for staging") )?;
+
+    let alloc_info = vk::MemoryAllocateInfo {
+        allocation_size: buffer_info.size,
+        memory_type_index: staging_type_index,
+        ..Default::default()
+    };
+    let memory = device.allocate_memory(&alloc_info)
+        .map_err(|err| backend_init_err!("Failed to allocate staging memory: {err}") )?;
+
+    device.bind_buffer_memory(buffer, memory, 0)
+        .map_err(|err| backend_init_err!("Failed to bind staging memory: {err}") )?;
+
+    // Mapping
+    let mapped_data = device.map_memory(memory, 0, staging_size)
+        .map_err(|err| backend_init_err!("Failed to map staging memory: {err}") )?;
+
+    let mut staging: Box<VulkanStaging> = Box::default();
+    staging.memory = memory;
+    staging.buffer = buffer;
+    staging.mapped_data = Some(mapped_data as *mut u8);
+    staging.buffer_capacity = staging_size;
+    
+    Ok(staging)
 }

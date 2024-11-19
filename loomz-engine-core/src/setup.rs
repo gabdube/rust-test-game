@@ -4,7 +4,7 @@ pub mod setup_target;
 
 use loomz_shared::CommonError;
 use crate::context::VulkanContext;
-use super::{VulkanEngineInfo, VulkanGlobalResources, VulkanRecordingInfo, VulkanSubmitInfo, VulkanOutputInfo};
+use super::{VulkanEngineInfo, VulkanGlobalResources, VulkanRecordingInfo, VulkanSubmitInfo, VulkanOutputInfo, VulkanStaging};
 
 pub(crate) struct VulkanEngineSetup {
     ctx: Option<Box<VulkanContext>>,
@@ -13,6 +13,7 @@ pub(crate) struct VulkanEngineSetup {
     recording: Option<Box<VulkanRecordingInfo>>,
     submit: Option<Box<VulkanSubmitInfo>>,
     output: Option<Box<VulkanOutputInfo>>,
+    staging: Option<Box<VulkanStaging>>,
 }
 
 impl VulkanEngineSetup {
@@ -25,6 +26,7 @@ impl VulkanEngineSetup {
             recording: None,
             submit: None,
             output: None,
+            staging: None,
         };
 
         setup_ctx::setup(&mut setup)?;
@@ -72,6 +74,13 @@ impl VulkanEngineSetup {
         match self.output.take() {
             Some(output) => output,
             None => unreachable!("Output info will always be initialized during build function")
+        }
+    }
+
+    pub fn staging(&mut self) -> Box<VulkanStaging> {
+        match self.staging.take() {
+            Some(staging) => staging,
+            None => unreachable!("Staging info will always be initialized during build function")
         }
     }
 

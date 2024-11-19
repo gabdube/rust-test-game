@@ -3,12 +3,6 @@ use loomz_engine_core::{VulkanContext, VulkanRecordingInfo};
 use loomz_shared::{render_record_err, CommonError};
 use super::LoomzEngine;
 
-macro_rules! wrap {
-    ($call:expr, $message:expr) => {
-        $call.map_err(|err| render_record_err!("{}: {}", $message, err) )
-    };
-}
-
 pub(crate) fn record_commands(engine: &mut LoomzEngine) -> Result<(), CommonError> {
     let ctx = &engine.core.ctx;
     let recording = &engine.core.recording;
@@ -16,7 +10,7 @@ pub(crate) fn record_commands(engine: &mut LoomzEngine) -> Result<(), CommonErro
 
     debug_assert!(!cmd.is_null(), "Drawing command buffer was not set during render preparing phase");
 
-    wrap!(begin_record(&ctx.device, cmd), "Begin record failed")?;
+    begin_record(&ctx.device, cmd)?;
     prepare_attachments(ctx, cmd, recording.output_image);
     begin_render_main(ctx, cmd, recording);
 
@@ -24,7 +18,7 @@ pub(crate) fn record_commands(engine: &mut LoomzEngine) -> Result<(), CommonErro
 
     end_render_main(ctx, cmd);
     finalize_attachments(ctx, cmd, recording.output_image);
-    wrap!(end_record(&ctx.device, cmd), "End record failed")?;
+    end_record(&ctx.device, cmd)?;
 
     Ok(())
 }
@@ -99,17 +93,16 @@ fn finalize_attachments(ctx: &VulkanContext, cmd: vk::CommandBuffer, image: vk::
     ctx.extensions.synchronization2.cmd_pipeline_barrier2(cmd, &dependency);
 }
 
-
-#[inline]
-fn begin_record(device: &vk::wrapper::Device, cmd: vk::CommandBuffer) -> Result<(), vk::VkResult> {
+fn begin_record(device: &vk::wrapper::Device, cmd: vk::CommandBuffer) -> Result<(), CommonError> {
     let begin_info = vk::CommandBufferBeginInfo {
         flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT,
         ..Default::default()
     };
     device.begin_command_buffer(cmd, &begin_info)
+        .map_err(|err| render_record_err!("Begin record failed: {err}") )
 }
 
-#[inline]
-fn end_record(device: &vk::wrapper::Device, cmd: vk::CommandBuffer) -> Result<(), vk::VkResult> {
+fn end_record(device: &vk::wrapper::Device, cmd: vk::CommandBuffer) -> Result<(), CommonError> {
     device.end_command_buffer(cmd)
+        .map_err(|err| render_record_err!("End record failed: {err}") )
 }
