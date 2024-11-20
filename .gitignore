@@ -1,9 +1,9 @@
 /target
 /Cargo.lock
+*.spv
+*.png
+*.ktx2
 .DS_Store
-node_modules
-package-lock.json
 todo.md
 temp.md
-*.spv
 pipeline.cache

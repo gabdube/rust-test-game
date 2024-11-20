@@ -22,6 +22,7 @@ use staging::VulkanStaging;
 pub struct VulkanEngineInfo {
     pub graphics_queue_info: vk::wrapper::QueueInfo,
 
+    pub window_extent: vk::Extent2D,
     pub swapchain_extent: vk::Extent2D,
     pub swapchain_format: vk::Format,
     pub swapchain_image_count: u32,
@@ -126,6 +127,7 @@ impl LoomzEngineCore {
         }
 
         if let AcquireReturn::Rebuild = acquire {
+            println!("Rebuilding");
             self.ctx.device.device_wait_idle().unwrap();
             setup::setup_target::rebuild_target(self)?;
         }
@@ -137,13 +139,28 @@ impl LoomzEngineCore {
         submit::submit(self)
     }
 
-    pub fn set_output(&mut self, display: RawDisplayHandle, window: RawWindowHandle) -> Result<(), CommonError> {
+    pub fn set_output(&mut self, display: RawDisplayHandle, window: RawWindowHandle, window_size: [u32; 2]) -> Result<(), CommonError> {
         let params = crate::setup::setup_target::SetupTargetParams {
             display,
             window,
         };
 
+        self.info.window_extent = vk::Extent2D { width: window_size[0], height: window_size[1] };
+
         crate::setup::setup_target::setup_target(self, &params)?;
+
+        Ok(())
+    }
+
+    pub fn resize_output(&mut self, width: u32, height: u32) -> Result<(), CommonError> {
+        let current_extent = self.info.window_extent;
+        if current_extent.width == width && current_extent.height == height {
+            return Ok(());
+        }
+
+        self.ctx.device.device_wait_idle().unwrap();
+        self.info.window_extent = vk::Extent2D { width, height };
+        setup::setup_target::rebuild_target(self)?;
 
         Ok(())
     }

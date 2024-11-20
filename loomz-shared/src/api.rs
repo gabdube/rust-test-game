@@ -1,11 +1,13 @@
 //! Common data transfer api between loomz-client and loomz-engine
 use kanal::{Sender, Receiver};
-use crate::{RgbaU8, base_types::PosF32};
+use std::sync::Arc;
+use crate::{RgbaU8, base_types::PosF32, assets::{LoomzAssetsBundle, TextureId}};
 
 #[derive(Copy, Clone, Debug)]
 pub struct WorldComponent {
     pub position: PosF32,
     pub color: RgbaU8,
+    pub texture: TextureId,
 }
 
 pub struct WorldClientApi {
@@ -28,7 +30,6 @@ pub struct LoomzClientApi {
     pub world: WorldClientApi,
 }
 
-
 pub struct WorldEngineApi {
     pub components: Receiver<WorldComponent>,
 }
@@ -50,16 +51,19 @@ pub struct LoomzEngineApi {
 }
 
 pub struct LoomzApi {
-    pub client: Option<LoomzClientApi>,
-    pub engine: Option<LoomzEngineApi>,
+    assets: Arc<LoomzAssetsBundle>,
+    client: Option<LoomzClientApi>,
+    engine: Option<LoomzEngineApi>,
 }
 
 impl LoomzApi {
 
     pub fn init() -> Self {
+        let assets = LoomzAssetsBundle::init();
         let (world_component_senders, world_component_receiver) = kanal::unbounded::<WorldComponent>();
 
         LoomzApi {
+            assets,
             client: Some(LoomzClientApi {
                 world: WorldClientApi {
                     components: world_component_senders,
@@ -71,6 +75,10 @@ impl LoomzApi {
                 }
             }),
         }
+    }
+
+    pub fn assets(&self) -> Arc<LoomzAssetsBundle> {
+        Arc::clone(&self.assets)
     }
 
     pub fn client_api(&mut self) -> LoomzClientApi {

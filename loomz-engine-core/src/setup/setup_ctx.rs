@@ -113,11 +113,23 @@ fn setup_instance(setup: &mut VulkanCtxSetup) -> Result<(), CommonError> {
 }
 
 #[cfg(target_os = "linux")]
-fn system_surface_extension(window_handle: &RawWindowHandle) -> &str {
-    match window_handle {
-        RawWindowHandle::Wayland(_) => "VK_KHR_wayland_surface",
-        _ => unreachable!("Validated beforehand")
+fn linux_surface_extensions(entry: &vk::wrapper::Entry, extensions_in: &mut Vec<&'static [u8]>) -> Result<(), CommonError> {
+    let extension_names: &[&[u8]] = &[b"VK_KHR_wayland_surface\0", b"VK_KHR_xcb_surface\0", b"VK_KHR_xlib_surface\0"];
+
+    let available_extensions = entry.enumerate_instance_extension_properties()
+        .map_err(|err| backend_init_err!("Failed to list instance extensions: {err}") )?;
+
+    for ext in extension_names.iter() {
+        let c_ext = CStr::from_bytes_with_nul(ext).unwrap();
+        for ext_property in available_extensions.iter() {
+            let c_ext2 = CStr::from_bytes_until_nul(&ext_property.extension_name).unwrap();
+            if c_ext == c_ext2 {
+                extensions_in.push(ext);
+            }
+        }
     }
+
+    Ok(())
 }
 
 fn setup_layers_and_extensions(entry: &vk::wrapper::Entry, layers: &mut Vec<CString>, extensions: &mut Vec<CString>) -> Result<(), CommonError> {
@@ -134,6 +146,8 @@ fn setup_layers_and_extensions(entry: &vk::wrapper::Entry, layers: &mut Vec<CStr
     #[cfg(windows)]
     extensions_in.push(b"VK_KHR_win32_surface\0");
 
+    #[cfg(target_os = "linux")]
+    linux_surface_extensions(entry, &mut extensions_in)?;
 
     let available_layers = entry.enumerate_instance_layer_properties()
         .map_err(|err| backend_init_err!("Failed to list instance layers: {err}") )?;
@@ -388,17 +402,6 @@ fn load_extensions(setup: &mut VulkanCtxSetup) {
     let dynamic_rendering = DynamicRendering::new(instance, device);
     let synchronization2 = Synchronization2::new(instance, device);
 
-    // #[cfg(target_os="linux")]
-    // {
-    //     setup.linux_surface = match setup.window_handle {
-    //         RawWindowHandle::Wayland(_) => {
-    //             let wayland_surface = vk::wrapper::WaylandSurface::new(entry, instance);
-    //             Some(crate::engine::backend::LinuxSurfaceWrapper::Wayland(wayland_surface))
-    //         },
-    //         _ => unreachable!("Window handle type checked beforehand")
-    //     }
-    // }
-
     setup.extensions = Some(VulkanContextExtensions {
         surface,
         swapchain,
@@ -406,6 +409,11 @@ fn load_extensions(setup: &mut VulkanCtxSetup) {
         synchronization2,
 
         #[cfg(windows)]
-        win32_surface: vk::wrapper::Win32Surface::new(entry, instance)
+        win32_surface: vk::wrapper::Win32Surface::new(entry, instance),
+
+        #[cfg(target_os="linux")]
+        linux_surface: crate::context::VulkanLinuxSurfaces { 
+            wayland_surface: vk::wrapper::WaylandSurface::new(entry, instance)
+        }
     });
 }

@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "vk",
-    "tools",
+    "loomz-tools",
     "loomz-shared",
     "loomz-engine-core",
     "loomz-engine",

@@ -1,10 +1,11 @@
-use loomz_shared::{LoomzApi, LoomzClientApi};
+use loomz_shared::{LoomzApi, LoomzClientApi, LoomzAssetsBundle, TextureId};
 use loomz_shared::{RgbaU8, _2d::{Position, pos}};
+use std::sync::Arc;
 
 pub struct Player {
     pub pos: Position,
     pub color: RgbaU8,
-    pub visible: bool,
+    pub texture: TextureId,
 }
 
 pub enum GameState {
@@ -21,11 +22,14 @@ pub struct LoomzClient {
 impl LoomzClient {
 
     pub fn init(api: &mut LoomzApi) -> Self {
+        let assets = api.assets();
         let api = api.client_api();
+
+        let texture = assets.texture_by_name("creatura").unwrap();
         let player = Player {
             pos: pos(0.0, 0.0),
             color: RgbaU8::rgb(255, 0, 0),
-            visible: false,
+            texture,
         };
 
         LoomzClient {
@@ -44,12 +48,7 @@ impl LoomzClient {
 
     fn uninitialized(&mut self) {
         use loomz_shared::api::WorldComponent;
-
-        self.api.world.update_component(WorldComponent { position: self.player.pos, color: self.player.color });
-
-        self.api.world.update_component(WorldComponent { position: pos(128.0, 128.0), color: RgbaU8::rgb(255, 255, 255) });
-
-        self.player.visible = true;
+        self.api.world.update_component(WorldComponent { position: self.player.pos, color: self.player.color, texture: self.player.texture });
         self.state = GameState::Gameplay;
     }
 

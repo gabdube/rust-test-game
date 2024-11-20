@@ -6,6 +6,7 @@ use loomz_shared::CommonError;
 use crate::context::VulkanContext;
 use super::{VulkanEngineInfo, VulkanGlobalResources, VulkanRecordingInfo, VulkanSubmitInfo, VulkanOutputInfo, VulkanStaging};
 
+
 pub(crate) struct VulkanEngineSetup {
     ctx: Option<Box<VulkanContext>>,
     info: Option<Box<VulkanEngineInfo>>,

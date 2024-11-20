@@ -8,7 +8,7 @@ use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 
 pub struct LoomzEngine {
     core: LoomzEngineCore,
-    world: world::WorldModule,
+    world: Box<world::WorldModule>,
     pipeline_cache: vk::PipelineCache,
 }
 
@@ -40,9 +40,15 @@ impl LoomzEngine {
         self.core.destroy();
     }
 
-    pub fn set_output(&mut self, display: RawDisplayHandle, window: RawWindowHandle) -> Result<(), CommonError> {
-        self.core.set_output(display, window)?;
+    pub fn set_output(&mut self, display: RawDisplayHandle, window: RawWindowHandle, window_size: [u32; 2]) -> Result<(), CommonError> {
+        self.core.set_output(display, window, window_size)?;
         self.world.set_output(&self.core);
+        Ok(())
+    }
+
+    pub fn resize_output(&mut self, width: u32, height: u32) -> Result<(), CommonError> {
+        self.core.resize_output(width, height)?;
+        self.world.rebuild(&self.core);
         Ok(())
     }
 

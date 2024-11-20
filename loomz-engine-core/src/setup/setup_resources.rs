@@ -31,6 +31,7 @@ pub(crate) fn setup_info(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanEngi
 
     Ok(Box::new(VulkanEngineInfo {
         graphics_queue_info,
+        window_extent: vk::Extent2D::default(),
         swapchain_extent: vk::Extent2D::default(),
         swapchain_format: vk::Format::UNDEFINED,
         swapchain_image_count: 0,

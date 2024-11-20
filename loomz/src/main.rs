@@ -6,8 +6,7 @@ use loomz_engine::LoomzEngine;
 use winit::window::Window;
 
 pub struct LoomzApplication {
-    window: Option<Window>,
-    api: LoomzApi,
+    window: Option<Box<Window>>,
     client: LoomzClient,
     engine: LoomzEngine,
     last_error: Option<CommonError>,
@@ -22,7 +21,6 @@ impl LoomzApplication {
 
         let app = LoomzApplication {
             window: None,
-            api,
             client,
             engine,
             last_error: None,
@@ -43,10 +41,12 @@ impl LoomzApplication {
             .map(|(display, window)| (display.as_raw(), window.as_raw()) )
             .map_err(|err| loomz_shared::system_err!("Failed to get system handles: {}", err) )?;
 
-        self.engine.set_output(display_handle, window_handle)?;
+        let size = window.inner_size();
+        self.engine.set_output(display_handle, window_handle, [size.width, size.height])?;
 
         window.set_visible(true);
-        self.window = Some(window);
+        self.window = Some(Box::new(window));
+
         Ok(())
     }
 
@@ -59,6 +59,10 @@ impl LoomzApplication {
         self.engine.render()?;
         self.window().request_redraw();
         Ok(())
+    }
+
+    pub fn resized(&mut self, width: u32, height: u32) -> Result<(), CommonError> {
+        self.engine.resize_output(width, height)
     }
 
     fn window(&self) -> &Window {

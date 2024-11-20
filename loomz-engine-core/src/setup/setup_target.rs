@@ -62,12 +62,31 @@ fn setup_surface(engine: &mut LoomzEngineCore, params: &SetupTargetParams) -> Re
     Ok(())
 }
 
+#[cfg(target_os="linux")]
+fn setup_surface(engine: &mut LoomzEngineCore, params: &SetupTargetParams) -> Result<(), CommonError> {
+    match (params.window, params.display) {
+        (RawWindowHandle::Wayland(h1), RawDisplayHandle::Wayland(h2)) => {
+            let wayland_create_info = vk::WaylandSurfaceCreateInfoKHR {
+                surface: h1.surface.as_ptr(),
+                display: h2.display.as_ptr(),
+                ..Default::default()
+            };
+
+            let ext = &engine.ctx.extensions.linux_surface.wayland_surface;
+            engine.resources.surface = ext.create_wayland_surface(&wayland_create_info)
+                .map_err(|err| backend_init_err!("Failed to create window surface: {err}") )?;
+           
+            Ok(())
+        },
+        _ => panic!("Only Wayland surface is supported for now")
+    }
+}
+
 //
 // Swapchain
 //
 
 fn setup_swapchain(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
-    const FULLSCREEN_RESOLUTION: [u32; 2] = [1920, 1080];
     const VSYNC: bool = true;
     
     let ctx = &engine.ctx;
@@ -89,7 +108,7 @@ fn setup_swapchain(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     
     // Swapchain creation
     let caps = fetch_surface_caps(surface_ext, device.physical_device, surface)?;
-    let image_extent = select_swapchain_extent(&caps, FULLSCREEN_RESOLUTION);
+    let image_extent = select_swapchain_extent(&caps, info.window_extent);
     let image_count = select_image_count(&caps)?;
     let swapchain_format = select_swapchain_format(surface_ext, device.physical_device, surface)?;
     let present_mode = select_present_mode(surface_ext, device.physical_device, surface, VSYNC)?;
@@ -131,11 +150,14 @@ fn fetch_surface_caps(surface_ext: &vk::wrapper::Surface, physical_device: vk::P
         .map_err(|err| backend_init_err!("Failed to list surface capabilities: {err}"))
 }
 
-fn select_swapchain_extent(caps: &vk::SurfaceCapabilitiesKHR, fullscreen_extent: [u32; 2]) -> vk::Extent2D {
+fn select_swapchain_extent(caps: &vk::SurfaceCapabilitiesKHR, requested_extent: vk::Extent2D) -> vk::Extent2D {
     let mut extent = caps.current_extent;
+
+    // On windows, caps.current_extent returns the size of the window
+    // On linux / wayland. The values are always u32::MAX
+
     if extent.width == u32::MAX || extent.height == u32::MAX {
-        extent.width = fullscreen_extent[0];
-        extent.height = fullscreen_extent[1];
+        extent = requested_extent;
     } else if extent.width == 0 || extent.height == 0 {
         // This can happen when a window is minimized on Windows or if the window size is set to 0,0 and invisible.
         // At startup, this cannot happen

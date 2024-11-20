@@ -1,5 +1,10 @@
 use vk::wrapper::{Entry, Instance, Device, Surface, Swapchain, Synchronization2, DynamicRendering};
 
+#[cfg(target_os="linux")]
+pub struct VulkanLinuxSurfaces {
+    pub wayland_surface: vk::wrapper::WaylandSurface,
+}
+
 pub struct VulkanContextInstance {
     pub entry: Entry,
     pub instance: Instance,
@@ -15,7 +20,7 @@ pub struct VulkanContextExtensions {
     pub win32_surface: vk::wrapper::Win32Surface,
 
     #[cfg(target_os="linux")]
-    pub linux_surface: vk::wrapper::WaylandSurface,
+    pub linux_surface: VulkanLinuxSurfaces,
 }
 
 pub struct VulkanContext {

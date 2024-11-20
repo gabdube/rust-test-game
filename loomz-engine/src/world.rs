@@ -53,7 +53,7 @@ pub(crate) struct WorldModule {
 
 impl WorldModule {
 
-    pub fn init(core: &mut LoomzEngineCore, api: WorldEngineApi) -> Result<Self, CommonError> {
+    pub fn init(core: &mut LoomzEngineCore, api: WorldEngineApi) -> Result<Box<Self>, CommonError> {
         let objects = WorldModuleObjects {
             instances: Vec::with_capacity(16),
             index: Vec::with_capacity(3000),
@@ -73,7 +73,7 @@ impl WorldModule {
         world.setup_pipeline(core)?;
         world.setup_buffers(core)?;
 
-        Ok(world)
+        Ok(Box::new(world))
     }
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
