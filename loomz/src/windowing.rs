@@ -27,7 +27,10 @@ impl<'a> ApplicationHandler for LoomzApplication {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::RedrawRequested => {
-                self.update();
+                if let Err(e) = self.update() {
+                    self.last_error = Some(e);
+                    event_loop.exit();
+                }
 
                 if let Err(e) = self.redraw() {
                     self.last_error = Some(e);

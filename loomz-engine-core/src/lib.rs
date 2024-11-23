@@ -10,9 +10,11 @@ pub mod pipelines;
 pub mod descriptors;
 pub mod alloc;
 pub mod staging;
+mod texture;
 
 pub use context::VulkanContext;
 pub use prepare::AcquireReturn;
+pub use texture::Texture;
 
 use loomz_shared::CommonError;
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
@@ -39,6 +41,7 @@ pub struct VulkanGlobalResources {
     pub upload_command_buffers: [vk::CommandBuffer; 1],
     pub surface: vk::SurfaceKHR,
     pub vertex_alloc: alloc::DeviceMemoryAlloc,
+    pub images_alloc: alloc::DeviceMemoryAlloc,
     pub attachments: helpers::RenderAttachments,
 }
 
@@ -111,6 +114,7 @@ impl LoomzEngineCore {
         ctx.extensions.surface.destroy_surface(self.resources.surface);
         self.resources.attachments.free(&ctx.device);
         self.resources.vertex_alloc.free(&ctx.device);
+        self.resources.images_alloc.free(&ctx.device);
         self.staging.destroy(&ctx.device);
 
         ctx.device.destroy();

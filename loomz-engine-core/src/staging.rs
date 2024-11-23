@@ -1,8 +1,11 @@
-
-
 pub(crate) struct StagingBufferCopy {
     pub dst_buffer: vk::Buffer,
     pub copy: vk::BufferCopy  
+}
+
+pub(crate) struct StagingImageCopy {
+    pub dst_image: vk::Image,
+    pub copy: vk::BufferImageCopy,
 }
 
 pub struct VulkanStaging {
@@ -12,7 +15,12 @@ pub struct VulkanStaging {
     pub(crate) upload_offset: vk::DeviceSize,
     pub(crate) buffer_capacity: vk::DeviceSize,
     pub(crate) upload_command_buffer: vk::CommandBuffer,
+
     pub(crate) vertex_buffer_copies: Vec<StagingBufferCopy>,
+
+    pub(crate) image_barrier_prepare: Vec<vk::ImageMemoryBarrier2>,
+    pub(crate) image_copies: Vec<StagingImageCopy>,
+    pub(crate) image_barrier_final: Vec<vk::ImageMemoryBarrier2>,
 }
 
 impl VulkanStaging {
@@ -70,6 +78,9 @@ impl Default for VulkanStaging {
             buffer_capacity: 0,
             upload_command_buffer: vk::CommandBuffer::null(),
             vertex_buffer_copies: Vec::with_capacity(16),
+            image_barrier_prepare: Vec::with_capacity(8),
+            image_copies: Vec::with_capacity(8),
+            image_barrier_final: Vec::with_capacity(8),
         }
     }
 

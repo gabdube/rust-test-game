@@ -15,7 +15,7 @@ pub struct LoomzApplication {
 impl LoomzApplication {
 
     pub fn init() -> Result<Self, CommonError> {
-        let mut api = LoomzApi::init();
+        let mut api = LoomzApi::init()?;
         let client = LoomzClient::init(&mut api);
         let engine = LoomzEngine::init(&mut api)?;
 
@@ -50,9 +50,10 @@ impl LoomzApplication {
         Ok(())
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self) -> Result<(), CommonError> {
         self.client.update();
-        self.engine.update();
+        self.engine.update()?;
+        Ok(())
     }
 
     pub fn redraw(&mut self) -> Result<(), CommonError> {

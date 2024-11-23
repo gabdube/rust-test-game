@@ -1,6 +1,9 @@
 use std::slice;
-use loomz_engine_core::{pipelines::GraphicsPipeline, alloc::VertexAlloc, descriptors::DescriptorsAlloc, LoomzEngineCore, VulkanContext};
-use loomz_shared::{backend_init_err, chain_err, CommonError, CommonErrorType, api::{WorldEngineApi, WorldComponent}};
+use std::sync::Arc;
+use fnv::FnvHashMap;
+use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, pipelines::GraphicsPipeline, alloc::VertexAlloc, descriptors::DescriptorsAlloc};
+use loomz_shared::{CommonError, CommonErrorType, assets::{LoomzAssetsBundle, TextureId}, api::{WorldEngineApi, WorldComponent}};
+use loomz_shared::{backend_init_err, assets_err, chain_err};
 
 const WORLD_VERT_SRC: &[u8] = include_bytes!("../../assets/shaders/world.vert.spv");
 const WORLD_FRAG_SRC: &[u8] = include_bytes!("../../assets/shaders/world.frag.spv");
@@ -25,6 +28,7 @@ pub struct WorldVertex {
 #[repr(C)]
 #[derive(Default, Copy, Clone, Debug)]
 pub struct WorldBatch {
+    pub set: vk::DescriptorSet,
     pub index_count: u32,
     pub first_index: u32,
     pub vertex_offset: i32,
@@ -32,6 +36,7 @@ pub struct WorldBatch {
 
 struct WorldObject {
     component: WorldComponent,
+    image: vk::Image,
     vertex_offset: u32,
 }
 
@@ -41,33 +46,47 @@ struct WorldModuleObjects {
     pub vertex: Vec<WorldVertex>,
 }
 
+struct WorldData {
+    assets: Arc<LoomzAssetsBundle>,
+    descriptors: DescriptorsAlloc,
+    textures: FnvHashMap<TextureId, Texture>,
+    objects: WorldModuleObjects,
+}
+
 pub(crate) struct WorldModule {
     api: WorldEngineApi,
+
     pipeline: GraphicsPipeline,
     vertex: VertexAlloc<WorldVertex>,
-    descriptors: DescriptorsAlloc,
+    data: Box<WorldData>,
+
     push_constants: [WorldPushConstant; 1],
-    objects: Box<WorldModuleObjects>,
     batches: Vec<WorldBatch>,
 }
 
 impl WorldModule {
 
-    pub fn init(core: &mut LoomzEngineCore, api: WorldEngineApi) -> Result<Box<Self>, CommonError> {
+    pub fn init(core: &mut LoomzEngineCore, assets: &Arc<LoomzAssetsBundle>, api: WorldEngineApi) -> Result<Box<Self>, CommonError> {
         let objects = WorldModuleObjects {
             instances: Vec::with_capacity(16),
             index: Vec::with_capacity(3000),
             vertex: Vec::with_capacity(2000)
         };
 
+        let data = WorldData {
+            assets: Arc::clone(assets),
+            descriptors: DescriptorsAlloc::default(),
+            textures: FnvHashMap::default(),
+            objects,
+        };
+
         let mut world = WorldModule {
             api,
             pipeline: GraphicsPipeline::new(),
             vertex: VertexAlloc::default(),
-            descriptors: DescriptorsAlloc::default(),
+            data: Box::new(data),
             push_constants: [WorldPushConstant::default(); 1],
-            objects: Box::new(objects),
-            batches: Vec::with_capacity(16)
+            batches: Vec::with_capacity(16),
         };
 
         world.setup_pipeline(core)?;
@@ -77,6 +96,10 @@ impl WorldModule {
     }
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
+        for texture in self.data.textures.values() {
+            core.destroy_texture(*texture);
+        }
+
         self.pipeline.destroy(&core.ctx);
         self.vertex.free(core);
     }
@@ -100,18 +123,20 @@ impl WorldModule {
         push.screen_height = swapchain_extent.height as f32;
     }
 
-    pub fn update(&mut self, core: &mut LoomzEngineCore) {
+    pub fn update(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let mut update_batches = false;
 
         while let Some(component) = self.api.recv_component() {
-            self.update_component(component);
+            self.update_component(core, component)?;
             update_batches = true;
         }
 
         if update_batches {
             self.update_batches();
-            self.upload_data(core);
+            self.upload_batch_data(core);
         }
+
+        Ok(())
     }
 
     pub fn render(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
@@ -125,7 +150,6 @@ impl WorldModule {
         device.cmd_push_constants(cmd, layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, self.push_values());
 
         for batch in self.batches.iter() {
-            //println!("{:?}", batch);
             device.cmd_draw_indexed(cmd, batch.index_count, 1, batch.first_index, batch.vertex_offset, 0);
         }
     }
@@ -138,17 +162,23 @@ impl WorldModule {
     // Updates
     //
 
-    fn update_component(&mut self, component: WorldComponent) {
+    fn update_component(&mut self, core: &mut LoomzEngineCore, component: WorldComponent) -> Result<(), CommonError> {
+        let texture = self.fetch_texture(core, component.texture)?;
+        let image = texture.image;
+        
         let obj = WorldObject {
             component,
+            image,
             vertex_offset: 0,
         };
         
-        self.objects.instances.push(obj);
+        self.data.objects.instances.push(obj);
+        
+        Ok(())
     }
 
     fn update_batches(&mut self) {
-        let objects = &mut self.objects;
+        let objects = &mut self.data.objects;
         objects.index.clear();
         objects.vertex.clear();
 
@@ -159,11 +189,17 @@ impl WorldModule {
 
         let mut index_offset = 0;
         let mut vertex_offset = 0;
-        let mut next_batch = WorldBatch { first_index: 0, index_count: 0, vertex_offset: 0 };
+        let mut next_batch = WorldBatch {
+            set: vk::DescriptorSet::null(),
+            first_index: 0,
+            index_count: 0,
+            vertex_offset: 0
+        };
 
         for instance in objects.instances.iter_mut() {
             Self::generate_indices(index_offset, vertex_offset, &mut objects.index);
             Self::generate_vertex(vertex_offset, &mut objects.vertex, instance.component);
+
             instance.vertex_offset = vertex_offset;
             index_offset += 6;
             vertex_offset += 4;
@@ -201,8 +237,24 @@ impl WorldModule {
     // Upload
     //
 
-    pub fn upload_data(&self, core: &mut LoomzEngineCore) {
-        self.vertex.set_data(core, &self.objects.index, &self.objects.vertex);
+    fn upload_batch_data(&self, core: &mut LoomzEngineCore) {
+        self.vertex.set_data(core, &self.data.objects.index, &self.data.objects.vertex);
+    }
+
+    fn fetch_texture(&mut self, core: &mut LoomzEngineCore, id: TextureId) -> Result<Texture, CommonError> {
+        if let Some(texture) = self.data.textures.get(&id) {
+            return Ok(*texture);
+        }
+
+        let texture_asset = self.data.assets.texture(id)
+            .ok_or_else(|| assets_err!("Unkown asset with ID {id:?}") )?;
+
+        let texture = core.create_texture_from_asset(&texture_asset)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
+
+        self.data.textures.insert(id, texture);
+
+        Ok(texture)
     }
 
     //
@@ -238,7 +290,7 @@ impl WorldModule {
 
         // Shader source
         let modules = GraphicsShaderModules::new(ctx, WORLD_VERT_SRC, WORLD_FRAG_SRC)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute debug pipeline shader modules: {}", err) )?;
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute debug pipeline shader modules") )?;
 
         // Pipeline
         let vertex_fields = [

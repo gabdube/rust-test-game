@@ -2,9 +2,10 @@ mod world;
 mod record;
 
 use std::path::PathBuf;
+use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 use loomz_engine_core::LoomzEngineCore;
 use loomz_shared::{backend_init_err, CommonError, api::LoomzApi};
-use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
+
 
 pub struct LoomzEngine {
     core: LoomzEngineCore,
@@ -16,8 +17,9 @@ impl LoomzEngine {
 
     pub fn init(api: &mut LoomzApi) -> Result<Self, CommonError> {
         let mut core = LoomzEngineCore::init()?;
-        let api = api.engine_api();
-        let world = world::WorldModule::init(&mut core, api.world)?;
+        let assets = api.assets();
+        let engine_api = api.engine_api();
+        let world = world::WorldModule::init(&mut core, &assets, engine_api.world)?;
         let pipeline_cache = Self::load_pipeline_cache(&core)?;
         let mut engine = LoomzEngine {
             core,
@@ -52,8 +54,8 @@ impl LoomzEngine {
         Ok(())
     }
 
-    pub fn update(&mut self) {
-        self.world.update(&mut self.core);
+    pub fn update(&mut self) -> Result<(), CommonError> {
+        self.world.update(&mut self.core)
     }
 
     pub fn render(&mut self) -> Result<(), CommonError> {

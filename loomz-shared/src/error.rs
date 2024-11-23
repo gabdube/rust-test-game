@@ -5,6 +5,7 @@ pub enum CommonErrorType {
     Undefined,
     Unimplemented,
     System,
+    Assets,
     BackendInit,
     BackendGeneric,
     Synchronize,
@@ -18,6 +19,7 @@ impl ::std::fmt::Display for CommonErrorType {
             CommonErrorType::Undefined => "Undefined",
             CommonErrorType::Unimplemented => "Unimplemented",
             CommonErrorType::System => "System",
+            CommonErrorType::Assets => "Assets",
             CommonErrorType::BackendInit => "Backend initialization",
             CommonErrorType::BackendGeneric => "Backend generic error",
             CommonErrorType::Synchronize => "Gpu synchronisation",
@@ -39,7 +41,7 @@ pub struct InnerCommonError {
 impl ::std::fmt::Display for InnerCommonError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(original) = self.original.as_ref() {
-            writeln!(f, "[ERROR][{}:{}] {} - {}", self.file, self.line, self.ty, original)?
+            writeln!(f, "{}", original)?
         }
 
         write!(f, "[ERROR][{}:{}] {} - {}", self.file, self.line, self.ty, self.message)
@@ -84,6 +86,11 @@ impl CommonError {
 
         CommonError { inner: Box::new(inner) }
     }
+
+    pub fn merge(&mut self, mut other: Self) {
+        ::std::mem::swap(self, &mut other);
+        self.inner.original = Some(other.inner);
+    }
 }
 
 impl ::std::fmt::Display for CommonError {
@@ -115,6 +122,9 @@ macro_rules! unimplemented_err { ($($arg:tt)*) => { $crate::err!($crate::CommonE
 
 #[macro_export]
 macro_rules! system_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::System, $($arg)*) }; }
+
+#[macro_export]
+macro_rules! assets_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::Assets, $($arg)*) }; }
 
 #[macro_export]
 macro_rules! backend_init_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::BackendInit, $($arg)*) } }

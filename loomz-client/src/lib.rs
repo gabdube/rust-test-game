@@ -1,6 +1,5 @@
-use loomz_shared::{LoomzApi, LoomzClientApi, LoomzAssetsBundle, TextureId};
+use loomz_shared::{LoomzApi, LoomzClientApi, TextureId};
 use loomz_shared::{RgbaU8, _2d::{Position, pos}};
-use std::sync::Arc;
 
 pub struct Player {
     pub pos: Position,

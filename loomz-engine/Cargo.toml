@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 raw-window-handle = { version = "0.6" }
+fnv = "1.0.3"
 
 loomz-shared = { path = "../loomz-shared" }
 loomz-engine-core = { path = "../loomz-engine-core" }

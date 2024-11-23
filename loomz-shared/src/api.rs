@@ -1,7 +1,7 @@
 //! Common data transfer api between loomz-client and loomz-engine
 use kanal::{Sender, Receiver};
 use std::sync::Arc;
-use crate::{RgbaU8, base_types::PosF32, assets::{LoomzAssetsBundle, TextureId}};
+use crate::{CommonError, RgbaU8, base_types::PosF32, assets::{LoomzAssetsBundle, TextureId}};
 
 #[derive(Copy, Clone, Debug)]
 pub struct WorldComponent {
@@ -58,11 +58,11 @@ pub struct LoomzApi {
 
 impl LoomzApi {
 
-    pub fn init() -> Self {
-        let assets = LoomzAssetsBundle::init();
+    pub fn init() -> Result<Self, CommonError> {
+        let assets = LoomzAssetsBundle::init()?;
         let (world_component_senders, world_component_receiver) = kanal::unbounded::<WorldComponent>();
 
-        LoomzApi {
+        let api = LoomzApi {
             assets,
             client: Some(LoomzClientApi {
                 world: WorldClientApi {
@@ -74,7 +74,9 @@ impl LoomzApi {
                     components: world_component_receiver,
                 }
             }),
-        }
+        };
+
+        Ok(api)
     }
 
     pub fn assets(&self) -> Arc<LoomzAssetsBundle> {

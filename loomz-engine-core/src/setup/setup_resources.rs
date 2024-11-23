@@ -106,11 +106,13 @@ fn init_resources(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanGlobalResou
         drawing_command_buffers: [vk::CommandBuffer::null(); 1],
         surface: vk::SurfaceKHR::null(),
         vertex_alloc: crate::alloc::DeviceMemoryAlloc::default(),
+        images_alloc: crate::alloc::DeviceMemoryAlloc::default(),
         attachments: helpers::RenderAttachments::default(),
     };
 
     setup_commands(setup, &mut resources)?;
-    setup_memory(setup, &mut resources)?;
+    setup_vertex_memory(setup, &mut resources)?;
+    setup_images_memory(setup, &mut resources)?;
 
     Ok(Box::new(resources))
 }
@@ -145,7 +147,7 @@ fn setup_commands(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalRes
     Ok(())
 }
 
-fn setup_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResources) -> Result<(), CommonError> {
+fn setup_vertex_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResources) -> Result<(), CommonError> {
     use crate::alloc::{DeviceMemoryAlloc, KB};
 
     let ctx = setup.ctx.as_ref().unwrap();
@@ -159,6 +161,24 @@ fn setup_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResou
     
     resources.vertex_alloc = DeviceMemoryAlloc::new(&ctx.device, vertex_size, default_alloc_capacity, device_type_index)
         .map_err(|err| backend_init_err!("Failed to create vertex memory: {err}") )?;
+
+    Ok(())
+}
+
+fn setup_images_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResources) -> Result<(), CommonError> {
+    use crate::alloc::{DeviceMemoryAlloc, MB};
+
+    let ctx = setup.ctx.as_ref().unwrap();
+    let instance = &ctx.instance.instance;
+    let flags = vk::MemoryPropertyFlags::DEVICE_LOCAL;
+    let device_type_index = crate::helpers::fetch_memory_index(instance, ctx.device.physical_device, flags, flags)
+        .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for images") )?;
+
+    let images_size = 5*MB;
+    let default_alloc_capacity = 16;
+
+    resources.images_alloc = DeviceMemoryAlloc::new(&ctx.device, images_size, default_alloc_capacity, device_type_index)
+        .map_err(|err| backend_init_err!("Failed to create images memory: {err}") )?;
 
     Ok(())
 }
@@ -267,7 +287,7 @@ fn init_submit(setup: &mut VulkanEngineSetup) -> Box<VulkanSubmitInfo> {
 //
 
 fn init_staging(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanStaging>, CommonError> {
-    use crate::alloc::KB;
+    use crate::alloc::MB;
 
     let ctx = setup.ctx.as_ref().unwrap();
     let instance = &ctx.instance.instance;
@@ -276,7 +296,7 @@ fn init_staging(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanStaging>, Com
     // Buffer
     let flags = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
  
-    let staging_size = KB*100;
+    let staging_size = 5*MB;
     let buffer_info = vk::BufferCreateInfo {
         size: staging_size as _,
         usage: vk::BufferUsageFlags::TRANSFER_SRC,
