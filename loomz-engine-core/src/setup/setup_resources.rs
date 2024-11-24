@@ -102,6 +102,7 @@ fn depth_format(ctx: &VulkanContext) -> Result<vk::Format, CommonError>  {
 fn init_resources(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanGlobalResources>, CommonError> {
     let mut resources = VulkanGlobalResources {
         command_pool: vk::CommandPool::null(),
+        linear_sampler: vk::Sampler::null(),
         upload_command_buffers: [vk::CommandBuffer::null(); 1],
         drawing_command_buffers: [vk::CommandBuffer::null(); 1],
         surface: vk::SurfaceKHR::null(),
@@ -113,6 +114,7 @@ fn init_resources(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanGlobalResou
     setup_commands(setup, &mut resources)?;
     setup_vertex_memory(setup, &mut resources)?;
     setup_images_memory(setup, &mut resources)?;
+    setup_samplers(setup, &mut resources)?;
 
     Ok(Box::new(resources))
 }
@@ -179,6 +181,21 @@ fn setup_images_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlob
 
     resources.images_alloc = DeviceMemoryAlloc::new(&ctx.device, images_size, default_alloc_capacity, device_type_index)
         .map_err(|err| backend_init_err!("Failed to create images memory: {err}") )?;
+
+    Ok(())
+}
+
+fn setup_samplers(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResources) -> Result<(), CommonError> {
+    let ctx = setup.ctx.as_ref().unwrap();
+
+    let create_info = vk::SamplerCreateInfo {
+        mag_filter: vk::Filter::LINEAR,
+        min_filter: vk::Filter::LINEAR,
+        ..Default::default()
+    };
+
+    resources.linear_sampler = ctx.device.create_sampler(&create_info)
+        .map_err(|err| backend_init_err!("Failed to create sampler: {err}") )?;
 
     Ok(())
 }

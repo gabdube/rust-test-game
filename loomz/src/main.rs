@@ -16,7 +16,7 @@ impl LoomzApplication {
 
     pub fn init() -> Result<Self, CommonError> {
         let mut api = LoomzApi::init()?;
-        let client = LoomzClient::init(&mut api);
+        let client = LoomzClient::init(&mut api)?;
         let engine = LoomzEngine::init(&mut api)?;
 
         let app = LoomzApplication {

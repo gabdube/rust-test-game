@@ -33,7 +33,7 @@ impl LoomzAssetsBundle {
         Ok(Arc::new(bundle))
     }
 
-    pub fn texture_by_name(&self, name: &str) -> Option<TextureId> {
+    pub fn texture_id_by_name(&self, name: &str) -> Option<TextureId> {
         match self.assets_by_name.get(name) {
             Some(AssetId::Texture(id)) => Some(*id),
             _ => None,

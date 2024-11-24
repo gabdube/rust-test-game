@@ -36,6 +36,7 @@ pub struct VulkanEngineInfo {
 
 /// Holder for the shared gpu resources used in the engine
 pub struct VulkanGlobalResources {
+    pub linear_sampler: vk::Sampler,
     pub command_pool: vk::CommandPool,
     pub drawing_command_buffers: [vk::CommandBuffer; 1],
     pub upload_command_buffers: [vk::CommandBuffer; 1],
@@ -112,6 +113,7 @@ impl LoomzEngineCore {
 
         ctx.device.destroy_command_pool(self.resources.command_pool);
         ctx.extensions.surface.destroy_surface(self.resources.surface);
+        ctx.device.destroy_sampler(self.resources.linear_sampler);
         self.resources.attachments.free(&ctx.device);
         self.resources.vertex_alloc.free(&ctx.device);
         self.resources.images_alloc.free(&ctx.device);

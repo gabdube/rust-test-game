@@ -11,6 +11,8 @@ static DEFAULT_BLEND_ATTACHMENTS: [vk::PipelineColorBlendAttachmentState; 1] = [
 ];
 static DEFAULT_DYNAMIC_STATES: [vk::DynamicState; 2] = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
 
+const MAX_PIPELINE_SET_LAYOUT: usize = 3;
+
 /// Vertex format to use when setting up a pipeline
 pub struct PipelineVertexFormat {
     pub location: u32,
@@ -50,7 +52,7 @@ struct GraphicsPipelineBuildInfo {
 
     render_info: vk::PipelineRenderingCreateInfo,
 
-    descriptor_set_layouts: [vk::DescriptorSetLayout; 3],
+    descriptor_set_layouts: [vk::DescriptorSetLayout; MAX_PIPELINE_SET_LAYOUT],
 }
 
 pub struct GraphicsPipeline {
@@ -87,8 +89,9 @@ impl GraphicsPipeline {
         self.pipeline_layout
     }
 
-    pub fn global_descriptor_set_layout(&self) -> vk::DescriptorSetLayout {
-        self.build.descriptor_set_layouts[0]
+    pub fn descriptor_set_layout(&self, index: usize) -> vk::DescriptorSetLayout {
+        assert!(index < MAX_PIPELINE_SET_LAYOUT, "Max index of descriptor set layout allowed is {} (got {})", MAX_PIPELINE_SET_LAYOUT, index);
+        self.build.descriptor_set_layouts[index]
     }
 
     pub fn set_handle(&mut self, pipeline: vk::Pipeline) {
@@ -99,8 +102,9 @@ impl GraphicsPipeline {
         self.pipeline_layout = pipeline_layout;
     }
 
-    pub fn set_layout_bindings_global(&mut self, layout: vk::DescriptorSetLayout) {
-        self.build.descriptor_set_layouts[0] = layout;
+    pub fn set_descriptor_set_layout(&mut self, index: usize, layout: vk::DescriptorSetLayout) {
+        assert!(index < MAX_PIPELINE_SET_LAYOUT, "Max index of descriptor set layout allowed is {} (got {})", MAX_PIPELINE_SET_LAYOUT, index);
+        self.build.descriptor_set_layouts[index] = layout;
     }
 
     pub fn modules(&self) -> GraphicsShaderModules {

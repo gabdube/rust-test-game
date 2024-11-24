@@ -1,13 +1,13 @@
 //! Common data transfer api between loomz-client and loomz-engine
 use kanal::{Sender, Receiver};
 use std::sync::Arc;
-use crate::{CommonError, RgbaU8, base_types::PosF32, assets::{LoomzAssetsBundle, TextureId}};
+use crate::{CommonError, base_types::{PosF32, SizeF32}, assets::{LoomzAssetsBundle, TextureId}};
 
 #[derive(Copy, Clone, Debug)]
 pub struct WorldComponent {
     pub position: PosF32,
-    pub color: RgbaU8,
-    pub texture: TextureId,
+    pub size: SizeF32,
+    pub texture_id: TextureId,
 }
 
 pub struct WorldClientApi {

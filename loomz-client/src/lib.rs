@@ -1,10 +1,9 @@
-use loomz_shared::{LoomzApi, LoomzClientApi, TextureId};
-use loomz_shared::{RgbaU8, _2d::{Position, pos}};
+use loomz_shared::_2d::{pos, size};
+use loomz_shared::api::WorldComponent;
+use loomz_shared::{assets_err, LoomzApi, LoomzClientApi, CommonError};
 
 pub struct Player {
-    pub pos: Position,
-    pub color: RgbaU8,
-    pub texture: TextureId,
+    pub component: WorldComponent,
 }
 
 pub enum GameState {
@@ -20,22 +19,31 @@ pub struct LoomzClient {
 
 impl LoomzClient {
 
-    pub fn init(api: &mut LoomzApi) -> Self {
+    pub fn init(api: &mut LoomzApi) -> Result<Self, CommonError> {
         let assets = api.assets();
         let api = api.client_api();
 
-        let texture = assets.texture_by_name("creatura").unwrap();
+        let texture_id = assets.texture_id_by_name("creatura")
+            .ok_or_else(|| assets_err!("Failed to find texture \"creatura\"") )?;
+
+        let texture = assets.texture(texture_id).unwrap();
+        let texture_extent = texture.data.extent();
+
         let player = Player {
-            pos: pos(0.0, 0.0),
-            color: RgbaU8::rgb(255, 0, 0),
-            texture,
+            component: WorldComponent {
+                position: pos(0.0, 0.0),
+                size: size(texture_extent.width as f32, texture_extent.height as f32),
+                texture_id,
+            }
         };
 
-        LoomzClient {
+        let client = LoomzClient {
             api,
             state: GameState::Uninitialized,
             player,
-        }
+        };
+
+        Ok(client)
     }
 
     pub fn update(&mut self) {
@@ -46,8 +54,7 @@ impl LoomzClient {
     }
 
     fn uninitialized(&mut self) {
-        use loomz_shared::api::WorldComponent;
-        self.api.world.update_component(WorldComponent { position: self.player.pos, color: self.player.color, texture: self.player.texture });
+        self.api.world.update_component(self.player.component);
         self.state = GameState::Gameplay;
     }
 

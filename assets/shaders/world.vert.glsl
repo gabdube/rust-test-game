@@ -4,9 +4,9 @@
 #extension GL_ARB_shading_language_420pack : enable
 
 layout (location = 0) in vec2 inPos;
-layout (location = 1) in vec4 inColor;
+layout (location = 1) in vec2 inUv;
 
-layout (location = 0) out vec4 outColor;
+layout (location = 0) out vec2 outUv;
 
 layout (push_constant) uniform ScreenInfo {
     layout(offset=0) float screen_width;
@@ -14,7 +14,7 @@ layout (push_constant) uniform ScreenInfo {
 };
 
 void main() {
-    outColor = inColor;
+    outUv = inUv;
 
     float x = 2.0 * inPos.x / screen_width - 1.0;
     float y = (1.0 - 2.0 * inPos.y / screen_height) * -1.0;

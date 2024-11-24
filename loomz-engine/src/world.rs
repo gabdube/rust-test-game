@@ -1,7 +1,7 @@
 use std::slice;
 use std::sync::Arc;
 use fnv::FnvHashMap;
-use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, pipelines::GraphicsPipeline, alloc::VertexAlloc, descriptors::DescriptorsAlloc};
+use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
 use loomz_shared::{CommonError, CommonErrorType, assets::{LoomzAssetsBundle, TextureId}, api::{WorldEngineApi, WorldComponent}};
 use loomz_shared::{backend_init_err, assets_err, chain_err};
 
@@ -22,11 +22,11 @@ pub struct WorldPushConstant {
 #[derive(Default, Copy, Clone)]
 pub struct WorldVertex {
     pub pos: [f32; 2],
-    pub color: [u8; 4],
+    pub uv: [f32; 2],
 }
 
 #[repr(C)]
-#[derive(Default, Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct WorldBatch {
     pub set: vk::DescriptorSet,
     pub index_count: u32,
@@ -36,20 +36,26 @@ pub struct WorldBatch {
 
 struct WorldObject {
     component: WorldComponent,
-    image: vk::Image,
+    image_view: vk::ImageView,
     vertex_offset: u32,
 }
 
 struct WorldModuleObjects {
-    pub instances: Vec<WorldObject>,
-    pub index: Vec<u32>,
-    pub vertex: Vec<WorldVertex>,
+    instances: Vec<WorldObject>,
+    index: Vec<u32>,
+    vertex: Vec<WorldVertex>,
+}
+
+struct WorldModuleDescriptors {
+    alloc: DescriptorsAllocator,
+    write: DescriptorWriteData,
+    texture_params: DescriptorWriteImageParams,
 }
 
 struct WorldData {
     assets: Arc<LoomzAssetsBundle>,
-    descriptors: DescriptorsAlloc,
     textures: FnvHashMap<TextureId, Texture>,
+    descriptors: WorldModuleDescriptors,
     objects: WorldModuleObjects,
 }
 
@@ -73,11 +79,17 @@ impl WorldModule {
             vertex: Vec::with_capacity(2000)
         };
 
+        let descriptors = WorldModuleDescriptors {
+            alloc: DescriptorsAllocator::default(),
+            write: DescriptorWriteData::default(),
+            texture_params: DescriptorWriteImageParams::default(),
+        };
+
         let data = WorldData {
             assets: Arc::clone(assets),
-            descriptors: DescriptorsAlloc::default(),
             textures: FnvHashMap::default(),
             objects,
+            descriptors,
         };
 
         let mut world = WorldModule {
@@ -91,11 +103,14 @@ impl WorldModule {
 
         world.setup_pipeline(core)?;
         world.setup_buffers(core)?;
+        world.setup_descriptors(core)?;
 
         Ok(Box::new(world))
     }
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
+        self.data.descriptors.alloc.destroy(core);
+
         for texture in self.data.textures.values() {
             core.destroy_texture(*texture);
         }
@@ -134,6 +149,7 @@ impl WorldModule {
         if update_batches {
             self.update_batches();
             self.upload_batch_data(core);
+            self.write_descriptor_sets(core);
         }
 
         Ok(())
@@ -150,6 +166,7 @@ impl WorldModule {
         device.cmd_push_constants(cmd, layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, self.push_values());
 
         for batch in self.batches.iter() {
+            device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, layout, 0, slice::from_ref(&batch.set), &[]);
             device.cmd_draw_indexed(cmd, batch.index_count, 1, batch.first_index, batch.vertex_offset, 0);
         }
     }
@@ -163,12 +180,11 @@ impl WorldModule {
     //
 
     fn update_component(&mut self, core: &mut LoomzEngineCore, component: WorldComponent) -> Result<(), CommonError> {
-        let texture = self.fetch_texture(core, component.texture)?;
-        let image = texture.image;
-        
+        let texture = self.fetch_texture(core, component.texture_id)?;
+        let image_view = texture.view;
         let obj = WorldObject {
             component,
-            image,
+            image_view,
             vertex_offset: 0,
         };
         
@@ -178,10 +194,11 @@ impl WorldModule {
     }
 
     fn update_batches(&mut self) {
-        let objects = &mut self.data.objects;
-        objects.index.clear();
-        objects.vertex.clear();
+        if self.clear_batches() {
+            return;
+        }
 
+        let objects = &mut self.data.objects;
         unsafe {
             objects.index.set_len(objects.instances.len() * 6);
             objects.vertex.set_len(objects.instances.len() * 4);
@@ -189,26 +206,53 @@ impl WorldModule {
 
         let mut index_offset = 0;
         let mut vertex_offset = 0;
-        let mut next_batch = WorldBatch {
-            set: vk::DescriptorSet::null(),
-            first_index: 0,
-            index_count: 0,
-            vertex_offset: 0
-        };
+        let mut last_view = objects.instances[0].image_view;
+        let mut next_batch = WorldBatch::default();
 
         for instance in objects.instances.iter_mut() {
+            if instance.image_view != last_view {
+                Self::generate_batch(&mut self.batches, &mut self.data.descriptors, &mut next_batch, instance.image_view);
+                last_view = instance.image_view;
+            }
+
             Self::generate_indices(index_offset, vertex_offset, &mut objects.index);
             Self::generate_vertex(vertex_offset, &mut objects.vertex, instance.component);
-
             instance.vertex_offset = vertex_offset;
+
             index_offset += 6;
             vertex_offset += 4;
             next_batch.index_count += 6;
         }
 
         if next_batch.index_count > 0 {
-            self.batches.push(next_batch);
+            Self::generate_batch(&mut self.batches, &mut self.data.descriptors, &mut next_batch, last_view);
         }
+    }
+
+    fn generate_batch(
+        batches: &mut Vec<WorldBatch>,
+        descriptors: &mut WorldModuleDescriptors,
+        batch: &mut WorldBatch,
+        image_view: vk::ImageView
+    ) {
+        let next_set = descriptors.alloc.next_set(0);
+
+        let mut new_batch = *batch;
+        new_batch.set = next_set;
+        batches.push(new_batch);
+
+        descriptors.write.write_simple_image(next_set, image_view, &descriptors.texture_params);
+
+        *batch = WorldBatch::default();
+    }
+
+    fn clear_batches(&mut self) -> bool {
+        self.data.objects.index.clear();
+        self.data.objects.vertex.clear();
+        self.data.descriptors.alloc.clear_sets(0);
+        self.data.descriptors.write.clear();
+        self.batches.clear();
+        self.data.objects.instances.len() == 0
     }
 
     fn generate_indices(index_offset: u32, vertex_offset: u32, indices: &mut [u32]) {
@@ -224,13 +268,12 @@ impl WorldModule {
     
     fn generate_vertex(vertex_offset: u32, vertex: &mut [WorldVertex], component: WorldComponent) {
         let v = vertex_offset as usize;
-        let color = component.color.splat();
         let [x, y] = component.position.splat();
-        let size_px = 128.0;
-        vertex[v+0] = WorldVertex { pos: [x,         y],         color };
-        vertex[v+1] = WorldVertex { pos: [x+size_px, y],         color };
-        vertex[v+2] = WorldVertex { pos: [x,         y+size_px], color };
-        vertex[v+3] = WorldVertex { pos: [x+size_px, y+size_px], color };
+        let [w, h] = component.size.splat();
+        vertex[v+0] = WorldVertex { pos: [x,   y],   uv: [0.0, 0.0] };
+        vertex[v+1] = WorldVertex { pos: [x+w, y],   uv: [1.0, 0.0] };
+        vertex[v+2] = WorldVertex { pos: [x,   y+h], uv: [0.0, 1.0] };
+        vertex[v+3] = WorldVertex { pos: [x+w, y+h], uv: [1.0, 1.0] };
     }
 
     //
@@ -257,18 +300,31 @@ impl WorldModule {
         Ok(texture)
     }
 
+    fn write_descriptor_sets(&mut self, core: &mut LoomzEngineCore) {
+        let write_data = self.data.descriptors.write.write_pointers();
+        core.ctx.device.update_descriptor_sets(write_data, &[]);
+    }
+
     //
     // Setup
     //
 
-    fn setup_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        use loomz_engine_core::pipelines::*;
+    fn pipeline_descriptor_bindings() -> &'static [PipelineLayoutSetBinding; 1] {
+        &[
+            PipelineLayoutSetBinding {
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                stage_flags: vk::ShaderStageFlags::FRAGMENT,
+                descriptor_count: 1,
+            },
+        ]
+    }
 
+    fn setup_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let ctx = &core.ctx;
 
         // Descriptor set layouts
-        let bindings_global = &[];
-        let layout_global = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
+        let bindings_batch = Self::pipeline_descriptor_bindings();
+        let layout_batch = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, bindings_batch)
             .map_err(|err| backend_init_err!("Failed to create global descriptor set layout: {}", err) )?;
 
         // Pipeline layout
@@ -279,7 +335,7 @@ impl WorldModule {
         };
         let pipeline_create_info = vk::PipelineLayoutCreateInfo {
             set_layout_count: 1,
-            p_set_layouts: &layout_global,
+            p_set_layouts: &layout_batch,
             push_constant_range_count: 1,
             p_push_constant_ranges: &constant_range,
             ..Default::default()
@@ -302,12 +358,7 @@ impl WorldModule {
             PipelineVertexFormat {
                 location: 1,
                 offset: 8,
-                format: vk::Format::R8G8B8A8_USCALED,
-            },
-            PipelineVertexFormat {
-                location: 2,
-                offset: 16,
-                format: vk::Format::R8G8B8A8_UNORM,
+                format: vk::Format::R32G32_SFLOAT,
             },
         ];
 
@@ -315,7 +366,7 @@ impl WorldModule {
         pipeline.set_shader_modules(modules);
         pipeline.set_vertex_format::<WorldVertex>(&vertex_fields);
         pipeline.set_pipeline_layout(pipeline_layout);
-        pipeline.set_layout_bindings_global(layout_global);
+        pipeline.set_descriptor_set_layout(0, layout_batch);
         pipeline.set_depth_testing(false);
         pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
             polygon_mode: vk::PolygonMode::FILL,
@@ -355,4 +406,39 @@ impl WorldModule {
         Ok(())
     }
 
+    fn setup_descriptors(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        use loomz_engine_core::descriptors::DescriptorsAllocation;
+        
+        let allocations = [
+            DescriptorsAllocation {
+                layout: self.pipeline.descriptor_set_layout(0),
+                bindings: Self::pipeline_descriptor_bindings(),
+                count: 10,
+            },
+        ];
+
+        self.data.descriptors.alloc = DescriptorsAllocator::new(core, &allocations)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to prellocate descriptor sets: {err}") )?;
+
+        self.data.descriptors.texture_params = DescriptorWriteImageParams {
+            sampler: core.resources.linear_sampler,
+            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            dst_binding: 0,
+            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        };
+
+        Ok(())
+    }
+
+}
+
+impl Default for WorldBatch {
+    fn default() -> Self {
+        WorldBatch {
+            set: vk::DescriptorSet::null(),
+            first_index: 0,
+            index_count: 0,
+            vertex_offset: 0
+        }
+    }
 }

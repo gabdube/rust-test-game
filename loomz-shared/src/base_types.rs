@@ -14,6 +14,21 @@ impl PosF32 {
 }
 
 #[derive(Copy, Clone, Default, Debug)]
+pub struct SizeF32 {
+    pub width: f32,
+    pub height: f32,
+}
+
+impl SizeF32 {
+
+    #[inline]
+    pub const fn splat(&self) -> [f32; 2] {
+        [self.width, self.height]
+    }
+
+}
+
+#[derive(Copy, Clone, Default, Debug)]
 pub struct RectF32 {
     pub left: f32,
     pub top: f32,
