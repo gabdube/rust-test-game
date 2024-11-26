@@ -3,5 +3,12 @@ name = "loomz-client"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["lib", "dylib"]
+
+[features]
+default = ["hot-reload"]
+hot-reload = []
+
 [dependencies]
 loomz-shared = { path = "../loomz-shared" }

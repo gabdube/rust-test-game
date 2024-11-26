@@ -11,6 +11,7 @@ pub enum CommonErrorType {
     Synchronize,
     RenderRecord,
     RenderPresent,
+    SaveLoad,
 }
 
 impl ::std::fmt::Display for CommonErrorType {
@@ -25,6 +26,7 @@ impl ::std::fmt::Display for CommonErrorType {
             CommonErrorType::Synchronize => "Gpu synchronisation",
             CommonErrorType::RenderRecord => "Rendering command recording",
             CommonErrorType::RenderPresent => "Rendering presentation",
+            CommonErrorType::SaveLoad => "Save & Load",
         })
     }
 }
@@ -118,6 +120,9 @@ macro_rules! chain_err {
 }
 
 #[macro_export]
+macro_rules! undefined_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::Undefined, $($arg)*) }; }
+
+#[macro_export]
 macro_rules! unimplemented_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::Unimplemented, $($arg)*) }; }
 
 #[macro_export]
@@ -140,3 +145,6 @@ macro_rules! synchronize_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErr
 
 #[macro_export]
 macro_rules! present_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::RenderPresent, $($arg)*) }; }
+
+#[macro_export]
+macro_rules! save_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::SaveLoad, $($arg)*) }; }

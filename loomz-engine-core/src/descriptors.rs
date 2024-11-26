@@ -2,6 +2,20 @@ use loomz_shared::{backend_err, CommonError};
 use crate::pipelines::PipelineLayoutSetBinding;
 use crate::LoomzEngineCore;
 
+#[derive(Copy, Clone)]
+pub enum DescriptorWriteParam {
+    Image(vk::DescriptorImageInfo),
+    Buffer(vk::DescriptorBufferInfo)
+}
+
+#[derive(Copy, Clone)]
+pub struct DescriptorWrite {
+    pub dst_set: vk::DescriptorSet,
+    pub dst_binding: u32,
+    pub descriptor_type: vk::DescriptorType,
+    pub param: DescriptorWriteParam,
+}
+
 #[derive(Copy, Clone, Default)]
 pub struct DescriptorWriteImageParams {
     pub sampler: vk::Sampler,
@@ -11,64 +25,32 @@ pub struct DescriptorWriteImageParams {
 }
 
 /// Helpers structure to handle descriptors update
-pub struct DescriptorWriteData {
-    pub images: Vec<vk::DescriptorImageInfo>,
-    pub buffers: Vec<vk::DescriptorBufferInfo>,
-    pub writes: Vec<vk::WriteDescriptorSet>,
-    pub building: bool,
+pub struct DescriptorWriteBuffer {
+    writes: Vec<DescriptorWrite>,
 }
 
-impl DescriptorWriteData {
+impl DescriptorWriteBuffer {
     pub fn clear(&mut self) {
-        self.images.clear();
-        self.buffers.clear();
         self.writes.clear();
-        self.building = true;
     }
 
     pub fn write_simple_image(&mut self, dst_set: vk::DescriptorSet, image_view: vk::ImageView, params: &DescriptorWriteImageParams) {
-        assert!(self.building, "Pointers for write data were already generated once");
-
-        self.writes.push(vk::WriteDescriptorSet {
+        self.writes.push(DescriptorWrite {
             dst_set,
             dst_binding: params.dst_binding,
-            descriptor_count: 1,
             descriptor_type: params.descriptor_type,
-            p_image_info: self.images.len() as _,
-            ..Default::default()
-        });
-
-        self.images.push(vk::DescriptorImageInfo {
-            sampler: params.sampler,
-            image_view: image_view,
-            image_layout: params.image_layout,
+            param: DescriptorWriteParam::Image(vk::DescriptorImageInfo {
+                sampler: params.sampler,
+                image_view,
+                image_layout: params.image_layout,
+            })
         });
     }
 
-    pub fn write_pointers(&mut self) -> &[vk::WriteDescriptorSet] {
-        assert!(self.building, "Pointers for write data were already generated once");
-       
-        self.building = false;
-
-        let images_ptr = self.images.as_ptr();
-
-        /*
-            During the "build" phase, the offset of the info is stored in the info pointer field.
-            ex: The info data is at self.images[write.p_image_info]. This is to allow "safe" reallocation
-            After the building phase, the pointers will have the right values, but the structure wont be editable until `clear` is called
-        */
-        for write in self.writes.iter_mut() {
-            match write.descriptor_type {
-                vk::DescriptorType::COMBINED_IMAGE_SAMPLER => {
-                    let local_offset = write.p_image_info as isize;
-                    write.p_image_info = unsafe { images_ptr.offset(local_offset) };
-                },
-                _ => { unimplemented!("Unimplemented/Invalid descriptor type {}", write.descriptor_type); }
-            }
-        }
-
-        &self.writes
+    pub fn submit(&mut self, engine: &mut LoomzEngineCore) {
+        engine.descriptors.updates.append(&mut self.writes);
     }
+
 }
 
 /// Allocation info when creating a new [DescriptorsAllocator]
@@ -216,13 +198,10 @@ impl Default for DescriptorsAllocator {
 
 }
 
-impl Default for DescriptorWriteData {
+impl Default for DescriptorWriteBuffer {
     fn default() -> Self {
-        DescriptorWriteData {
-            buffers: Vec::with_capacity(8),
-            images: Vec::with_capacity(8),
-            writes: Vec::with_capacity(8),
-            building: true,
+        DescriptorWriteBuffer {
+            writes: Vec::with_capacity(16),
         }
     }
 }

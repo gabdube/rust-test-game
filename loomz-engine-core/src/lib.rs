@@ -75,6 +75,15 @@ pub struct VulkanOutputInfo {
     pub rebuild: bool,
 }
 
+pub struct VulkanDescriptorSubmit {
+    pub images: Vec<vk::DescriptorImageInfo>,
+    pub buffers: Vec<vk::DescriptorBufferInfo>,
+    pub writes: Vec<vk::WriteDescriptorSet>,
+    pub updates: Vec<descriptors::DescriptorWrite>,
+    pub images_count: u32,
+    pub buffers_count: u32,
+}
+
 pub struct LoomzEngineCore {
     pub ctx: Box<VulkanContext>,
     pub info: Box<VulkanEngineInfo>,
@@ -83,6 +92,7 @@ pub struct LoomzEngineCore {
     pub submit: Box<VulkanSubmitInfo>,
     pub output: Box<VulkanOutputInfo>,
     pub staging: Box<VulkanStaging>,
+    pub descriptors: Box<VulkanDescriptorSubmit>,
 }
 
 impl LoomzEngineCore {
@@ -97,6 +107,7 @@ impl LoomzEngineCore {
             submit: setup.submit(),
             output: setup.output(),
             staging: setup.staging(),
+            descriptors: setup.descriptors(),
         };
 
         Ok(engine)
@@ -133,10 +144,11 @@ impl LoomzEngineCore {
         }
 
         if let AcquireReturn::Rebuild = acquire {
-            println!("Rebuilding");
             self.ctx.device.device_wait_idle().unwrap();
             setup::setup_target::rebuild_target(self)?;
         }
+
+        self.update_descriptor_sets();
 
         Ok(acquire)
     }
@@ -169,6 +181,52 @@ impl LoomzEngineCore {
         setup::setup_target::rebuild_target(self)?;
 
         Ok(())
+    }
+
+    fn update_descriptor_sets(&mut self) {
+        let descriptors = &mut self.descriptors;
+
+        let images_count = descriptors.images_count as usize;
+        if  images_count >= descriptors.images.capacity() {
+            descriptors.images.reserve(images_count);
+        }
+
+        let buffer_count = descriptors.buffers_count as usize;
+        if buffer_count >= descriptors.buffers.capacity() {
+            descriptors.buffers.reserve(buffer_count);
+        }
+
+        let mut write = vk::WriteDescriptorSet::default();
+        for update in descriptors.updates.iter() {
+            write.dst_set = update.dst_set;
+            write.dst_binding = update.dst_binding;
+            write.descriptor_type = update.descriptor_type;
+            write.descriptor_count = 1;
+            
+            // SAFETY: capacity check above makes sure we don't realloc the vecs during the generation
+            match update.param {
+                descriptors::DescriptorWriteParam::Buffer(buffer) => {
+                    write.p_buffer_info = unsafe { descriptors.buffers.as_ptr().add(descriptors.buffers.len()) };
+                    descriptors.buffers.push(buffer);
+                },
+                descriptors::DescriptorWriteParam::Image(image) => {
+                    write.p_image_info = unsafe { descriptors.images.as_ptr().add(descriptors.images.len()) };
+                    descriptors.images.push(image);
+                }
+            }
+
+            descriptors.writes.push(write);
+        }
+
+        if descriptors.writes.len() > 0 {
+            self.ctx.device.update_descriptor_sets(&mut descriptors.writes, &[]);
+        }
+
+       
+        descriptors.updates.clear();
+        descriptors.writes.clear();
+        descriptors.images.clear();
+        descriptors.buffers.clear();
     }
 
 }

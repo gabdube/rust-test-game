@@ -28,23 +28,7 @@ pub struct LoomzAssetsBundle {
 
 impl LoomzAssetsBundle {
 
-    pub fn init() -> Result<Arc<Self>, CommonError> {
-        let bundle = Self::load()?;
-        Ok(Arc::new(bundle))
-    }
-
-    pub fn texture_id_by_name(&self, name: &str) -> Option<TextureId> {
-        match self.assets_by_name.get(name) {
-            Some(AssetId::Texture(id)) => Some(*id),
-            _ => None,
-        }
-    }
-
-    pub fn texture<'a>(&'a self, id: TextureId) -> Option<&'a AssetsTextureData> {
-        self.textures.get(&id)
-    }
-
-    fn load() -> Result<Self, CommonError> {
+    pub fn load() -> Result<Arc<Self>, CommonError> {
         let mut bundle = LoomzAssetsBundle::default();
         let meta_csv = match ::std::fs::read_to_string(ASSET_METADATA_PATH) {
             Ok(v) => v,
@@ -70,10 +54,21 @@ impl LoomzAssetsBundle {
         if let Some(err) = error {
             Err(err)
         } else {
-            Ok(bundle)
+            Ok(Arc::new(bundle))
         }
     }
-    
+
+    pub fn texture_id_by_name(&self, name: &str) -> Option<TextureId> {
+        match self.assets_by_name.get(name) {
+            Some(AssetId::Texture(id)) => Some(*id),
+            _ => None,
+        }
+    }
+
+    pub fn texture<'a>(&'a self, id: TextureId) -> Option<&'a AssetsTextureData> {
+        self.textures.get(&id)
+    }
+
     fn split_csv<CB: FnMut(&[&str])>(csv: &str, mut cb: CB) {
         let mut start = 0;
         let mut end = 0;

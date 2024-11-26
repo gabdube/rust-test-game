@@ -1,29 +1,39 @@
 mod windowing;
 
+#[cfg(feature="hot-reload")]
+mod hot_reload;
+
 use loomz_shared::{LoomzApi, CommonError};
-use loomz_client::LoomzClient;
 use loomz_engine::LoomzEngine;
 use winit::window::Window;
+
+#[cfg(not(feature="hot-reload"))]
+use loomz_client::LoomzClient;
+
+#[cfg(feature="hot-reload")]
+use hot_reload::LoomzClient;
 
 pub struct LoomzApplication {
     window: Option<Box<Window>>,
     client: LoomzClient,
     engine: LoomzEngine,
     last_error: Option<CommonError>,
+    frame_count: u64,
 }
 
 impl LoomzApplication {
 
     pub fn init() -> Result<Self, CommonError> {
-        let mut api = LoomzApi::init()?;
-        let client = LoomzClient::init(&mut api)?;
-        let engine = LoomzEngine::init(&mut api)?;
+        let api = LoomzApi::init()?;
+        let client = LoomzClient::init(&api)?;
+        let engine = LoomzEngine::init(&api)?;
 
         let app = LoomzApplication {
             window: None,
             client,
             engine,
             last_error: None,
+            frame_count: 0,
         };
 
         Ok(app)
@@ -51,7 +61,7 @@ impl LoomzApplication {
     }
 
     pub fn update(&mut self) -> Result<(), CommonError> {
-        self.client.update();
+        self.client.update()?;
         self.engine.update()?;
         Ok(())
     }
@@ -59,6 +69,7 @@ impl LoomzApplication {
     pub fn redraw(&mut self) -> Result<(), CommonError> {
         self.engine.render()?;
         self.window().request_redraw();
+        self.frame_count += 1;
         Ok(())
     }
 

@@ -4,7 +4,7 @@ pub mod setup_target;
 
 use loomz_shared::CommonError;
 use crate::context::VulkanContext;
-use super::{VulkanEngineInfo, VulkanGlobalResources, VulkanRecordingInfo, VulkanSubmitInfo, VulkanOutputInfo, VulkanStaging};
+use super::{VulkanEngineInfo, VulkanGlobalResources, VulkanRecordingInfo, VulkanSubmitInfo, VulkanOutputInfo, VulkanStaging, VulkanDescriptorSubmit};
 
 
 pub(crate) struct VulkanEngineSetup {
@@ -15,6 +15,7 @@ pub(crate) struct VulkanEngineSetup {
     submit: Option<Box<VulkanSubmitInfo>>,
     output: Option<Box<VulkanOutputInfo>>,
     staging: Option<Box<VulkanStaging>>,
+    descriptors: Option<Box<VulkanDescriptorSubmit>>,
 }
 
 impl VulkanEngineSetup {
@@ -28,6 +29,7 @@ impl VulkanEngineSetup {
             submit: None,
             output: None,
             staging: None,
+            descriptors: None,
         };
 
         setup_ctx::setup(&mut setup)?;
@@ -82,6 +84,13 @@ impl VulkanEngineSetup {
         match self.staging.take() {
             Some(staging) => staging,
             None => unreachable!("Staging info will always be initialized during build function")
+        }
+    }
+
+    pub fn descriptors(&mut self) -> Box<VulkanDescriptorSubmit> {
+        match self.descriptors.take() {
+            Some(descriptors) => descriptors,
+            None => unreachable!("Vulkan descriptor submit will always be initialized during build function")
         }
     }
 

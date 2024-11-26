@@ -8,6 +8,7 @@ use loomz_shared::{backend_init_err, CommonError, api::LoomzApi};
 
 
 pub struct LoomzEngine {
+    api: LoomzApi,
     core: LoomzEngineCore,
     world: Box<world::WorldModule>,
     pipeline_cache: vk::PipelineCache,
@@ -15,13 +16,12 @@ pub struct LoomzEngine {
 
 impl LoomzEngine {
 
-    pub fn init(api: &mut LoomzApi) -> Result<Self, CommonError> {
+    pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
         let mut core = LoomzEngineCore::init()?;
-        let assets = api.assets();
-        let engine_api = api.engine_api();
-        let world = world::WorldModule::init(&mut core, &assets, engine_api.world)?;
+        let world = world::WorldModule::init(&mut core, api)?;
         let pipeline_cache = Self::load_pipeline_cache(&core)?;
         let mut engine = LoomzEngine {
+            api: api.clone(),
             core,
             world,
             pipeline_cache
@@ -55,7 +55,7 @@ impl LoomzEngine {
     }
 
     pub fn update(&mut self) -> Result<(), CommonError> {
-        self.world.update(&mut self.core)
+        self.world.update(&self.api, &mut self.core)
     }
 
     pub fn render(&mut self) -> Result<(), CommonError> {

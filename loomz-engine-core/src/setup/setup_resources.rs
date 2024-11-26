@@ -2,7 +2,7 @@ use std::u32;
 
 use loomz_shared::{backend_init_err, CommonError};
 use vk::CommandBufferSubmitInfo;
-use crate::{helpers, context::VulkanContext, VulkanEngineInfo, VulkanGlobalResources, VulkanRecordingInfo, VulkanSubmitInfo, VulkanOutputInfo, VulkanStaging};
+use crate::{context::VulkanContext, helpers, VulkanDescriptorSubmit, VulkanEngineInfo, VulkanGlobalResources, VulkanOutputInfo, VulkanRecordingInfo, VulkanStaging, VulkanSubmitInfo};
 use super::VulkanEngineSetup;
 
 pub(crate) fn setup(setup: &mut VulkanEngineSetup) -> Result<(), CommonError> {
@@ -12,6 +12,7 @@ pub(crate) fn setup(setup: &mut VulkanEngineSetup) -> Result<(), CommonError> {
     setup.output = Some(init_output(setup)?);
     setup.submit = Some(init_submit(setup));
     setup.staging = Some(init_staging(setup)?);
+    setup.descriptors = Some(init_descriptors());
 
     Ok(())
 }
@@ -350,4 +351,19 @@ fn init_staging(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanStaging>, Com
     staging.buffer_capacity = staging_size;
     
     Ok(staging)
+}
+
+//
+// Descriptors
+//
+
+fn init_descriptors() -> Box<VulkanDescriptorSubmit> {
+    Box::new(VulkanDescriptorSubmit {
+        images: Vec::with_capacity(16),
+        buffers: Vec::with_capacity(16),
+        writes: Vec::with_capacity(16),
+        updates: Vec::with_capacity(16),
+        images_count: 0,
+        buffers_count: 0,
+    })
 }

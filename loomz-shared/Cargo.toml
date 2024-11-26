@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-kanal = "0.1.0-pre8"
 fnv = "1.0.3"
+parking_lot = "0.12.3"
 vk = { path = "../vk" }
