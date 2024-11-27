@@ -1,50 +1,17 @@
-use std::{slice, mem};
-use super::{SaveFileHeader, ALIGN};
+use super::StoreAndLoad;
 
-pub(crate) struct SaveFileWriter {
-    data_offset: u32,
-    data: Vec<u32>
+pub struct SaveFileWriterBase {
+    pub data_offset: u32,
+    pub data: Vec<u32>
 }
 
-impl SaveFileWriter {
-    pub fn new() -> Self {
-        let mut encoder = SaveFileWriter {
+impl SaveFileWriterBase {
+    pub fn new(capacity: usize) -> Self {
+        SaveFileWriterBase {
             data_offset: 0,
-            data: vec![0; 8000]
-        };
-
-        encoder.write_header();
-
-        encoder
+            data: vec![0; capacity]
+        }
     }
-
-    fn write_header(&mut self) {
-        let header = SaveFileHeader::default();
-        self.write(&header);        
-    }
-
-    pub fn finalize(mut self) -> Vec<u8> {
-        let offset: usize = mem::offset_of!(SaveFileHeader, size) / ALIGN;
-        self.data[offset] = self.data_offset;
-
-        let data_offset = self.data_offset as usize;
-        let mut out = vec![0; data_offset * ALIGN];
-        unsafe { ::std::ptr::copy_nonoverlapping::<u32>(self.data.as_ptr(), out.as_mut_ptr() as *mut u32, data_offset); }
-        out
-    }
-
-    //
-    // Headers
-    //
-
-    // pub fn begin_root(&mut self) {
-    //     let offset: usize = mem::offset_of!(SaveFileHeader, root) / ALIGN;
-    //     self.data[offset] = self.data_offset;
-    // }
-
-    //
-    // Writing
-    //
 
     pub fn write_str(&mut self, value: &str) {
         let padding = 4 - (value.len() % 4);
@@ -104,7 +71,7 @@ impl SaveFileWriter {
     }
 
     pub fn write<T: Copy>(&mut self, data: &T) {
-        let data_array = slice::from_ref(data);
+        let data_array = ::std::slice::from_ref(data);
         let (x, aligned, y) = unsafe { data_array.align_to::<u32>() };
         if !x.is_empty() || !y.is_empty() {
             panic!("Data must be aligned to 4 bytes");
@@ -116,6 +83,14 @@ impl SaveFileWriter {
         for &value in aligned {
             self.write_u32_inner(value);
         }
+    }
+
+    pub fn write_into_u32<T: Into<u32>>(&mut self, data: T) {
+        self.write_u32(data.into());
+    }
+
+    pub fn store<T: StoreAndLoad>(&mut self, data: &T) {
+        data.store(self);
     }
 
     #[inline(always)]

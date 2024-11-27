@@ -1,8 +1,9 @@
+use loomz_shared::inputs::InputBuffer;
 use loomz_shared::{system_err, CommonError};
 
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ActiveEventLoop, EventLoop, ControlFlow};
-use winit::event::WindowEvent;
+use winit::event::{WindowEvent, ElementState, MouseButton, KeyEvent};
 use winit::window::{Window, WindowId};
 use super::LoomzApplication;
 
@@ -43,6 +44,13 @@ impl<'a> ApplicationHandler for LoomzApplication {
                     event_loop.exit();
                 }
             },
+            WindowEvent::CursorMoved { device_id: _, position } => {
+                self.api.inputs().update_cursor_position(position.x, position.y);
+            },
+            WindowEvent::MouseInput { device_id: _, state, button } => {
+                let mut inputs = self.api.inputs();
+                parse_mouse_input(&mut inputs, state, button);
+            },
             WindowEvent::CloseRequested => {
                 event_loop.exit();
             },
@@ -60,6 +68,27 @@ fn create_window(event_loop: &ActiveEventLoop) -> Result<Window, CommonError> {
 
     event_loop.create_window(window_attr)
         .map_err(|err| system_err!("Failed to create system window: {}", err) )
+}
+
+fn parse_mouse_input(inputs: &mut InputBuffer, state: ElementState, btn: MouseButton) {
+    use loomz_shared::inputs::MouseButtonState;
+
+    let mut button_state = inputs.mouse_buttons;
+    let flag = match btn {
+        MouseButton::Left => MouseButtonState::LEFT,
+        MouseButton::Right => MouseButtonState::RIGHT,
+        _ => MouseButtonState::empty(),
+    };
+
+    if !flag.is_empty() {
+        if state.is_pressed() {
+            button_state |= flag;
+        } else {
+            button_state.remove(flag);
+        }
+
+        inputs.set_mouse_button(button_state);
+    }
 }
 
 pub fn run(app: &mut LoomzApplication) {

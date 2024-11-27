@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["lib", "dylib"]
 
 [features]
-default = ["hot-reload"]
+default = []
 hot-reload = []
 
 [dependencies]

@@ -14,6 +14,7 @@ use loomz_client::LoomzClient;
 use hot_reload::LoomzClient;
 
 pub struct LoomzApplication {
+    api: LoomzApi,
     window: Option<Box<Window>>,
     client: LoomzClient,
     engine: LoomzEngine,
@@ -29,6 +30,7 @@ impl LoomzApplication {
         let engine = LoomzEngine::init(&api)?;
 
         let app = LoomzApplication {
+            api,
             window: None,
             client,
             engine,

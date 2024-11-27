@@ -15,7 +15,6 @@ pub const GB: vk::DeviceSize = MB*1000;
 pub struct MemoryRange {
     base: vk::DeviceSize,
     offset: vk::DeviceSize,
-    size: vk::DeviceSize,
 }
 
 /// Memory allocator for gpu resources that are not recreated often
@@ -60,7 +59,6 @@ impl DeviceMemoryAlloc {
         self.allocations.push(MemoryRange {
             base: self.next_offset,
             offset: aligned_offset,
-            size: info.size,
         });
 
         self.next_offset = next_offset;

@@ -8,7 +8,7 @@ pub(crate) fn record_commands(engine: &mut LoomzEngine) -> Result<(), CommonErro
     let recording = &engine.core.recording;
     let cmd = recording.drawing_command_buffer;
 
-    debug_assert!(!cmd.is_null(), "Drawing command buffer was not set during render preparing phase");
+    debug_assert!(!cmd.is_null(), "Drawing command buffer was not set during render prepare phase");
 
     begin_record(&ctx.device, cmd)?;
     prepare_attachments(ctx, cmd, recording.output_image);

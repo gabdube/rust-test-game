@@ -2,7 +2,7 @@ use std::slice;
 use std::sync::Arc;
 use fnv::FnvHashMap;
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
-use loomz_shared::{CommonError, CommonErrorType, assets::{LoomzAssetsBundle, TextureId}, api::{LoomzApi, WorldComponent}};
+use loomz_shared::{CommonError, CommonErrorType, assets::{LoomzAssetsBundle, TextureId}, api::{LoomzApi, WorldComponentUpdate, WorldComponent}};
 use loomz_shared::{backend_init_err, assets_err, chain_err};
 
 const WORLD_VERT_SRC: &[u8] = include_bytes!("../../assets/shaders/world.vert.spv");
@@ -35,8 +35,8 @@ pub struct WorldBatch {
 }
 
 struct WorldObject {
-    component: WorldComponent,
     image_view: vk::ImageView,
+    component: WorldComponent,
     vertex_offset: u32,
 }
 
@@ -140,16 +140,17 @@ impl WorldModule {
 
         if let Some(components) = api.world().components() {
             let mut iter_components = components.iter();
-            while let Some(Some(component)) = iter_components.next() {
-                self.update_component(core, *component)?;
+            while let Some(Some(update)) = iter_components.next() {
+                match update.uid.bound_value() {
+                    Some(index) => self.update_world_component(core, update, index)?,
+                    None => self.create_world_component(core, update)?
+                }
                 update_batches = true;
             }
         }
 
         if update_batches && self.clear_batches() {
-            self.update_batches();
-            self.upload_batch_data(core);
-            self.queue_descriptor_updates(core);
+            self.update_batches(core);
         }
 
         Ok(())
@@ -179,21 +180,47 @@ impl WorldModule {
     // Updates
     //
 
-    fn update_component(&mut self, core: &mut LoomzEngineCore, component: WorldComponent) -> Result<(), CommonError> {
-        let texture = self.fetch_texture(core, component.texture_id)?;
-        let image_view = texture.view;
-        let obj = WorldObject {
+    fn update_world_component(&mut self, core: &mut LoomzEngineCore, update: &WorldComponentUpdate, index: usize) -> Result<(), CommonError> {
+        let component = update.component;
+        let instance = &self.data.objects.instances[index];
+        let old_texture_id = instance.component.texture_id;
+        let mut image_view = instance.image_view;
+        if old_texture_id != component.texture_id {
+            image_view = self.fetch_texture_view(core, update.component.texture_id)?;
+        }
+
+        self.data.objects.instances[index] = WorldObject {
             component,
             image_view,
             vertex_offset: 0,
         };
         
-        self.data.objects.instances.push(obj);
-        
         Ok(())
     }
 
-    fn update_batches(&mut self) {
+    fn create_world_component(&mut self, core: &mut LoomzEngineCore, update: &WorldComponentUpdate) -> Result<(), CommonError> {
+        let component = update.component;
+        let image_view = self.fetch_texture_view(core, component.texture_id)?;
+        let obj = WorldObject {
+            component,
+            image_view,
+            vertex_offset: 0,
+        };
+
+        let instances = &mut self.data.objects.instances;
+        let new_id = instances.len() as u32;
+        instances.push(obj);
+        update.uid.bind(new_id);
+
+        Ok(())
+    }
+
+
+    //
+    // Batching
+    //
+
+    fn update_batches(&mut self, core: &mut LoomzEngineCore) {
         let objects = &mut self.data.objects;
         unsafe {
             objects.index.set_len(objects.instances.len() * 6);
@@ -229,6 +256,9 @@ impl WorldModule {
         if next_batch.index_count > 0 {
             Self::generate_batch(&mut self.batches, &mut self.data.descriptors, &mut next_batch, last_view);
         }
+
+        self.upload_batch_data(core);
+        self.queue_descriptor_updates(core);
     }
 
     fn generate_batch(
@@ -279,17 +309,21 @@ impl WorldModule {
         vertex.offset(3).write(WorldVertex { pos: [x+w, y+h], uv: [1.0, 1.0] });
     }
 
-    //
-    // Upload
-    //
-
     fn upload_batch_data(&self, core: &mut LoomzEngineCore) {
         self.vertex.set_data(core, &self.data.objects.index, &self.data.objects.vertex);
     }
 
-    fn fetch_texture(&mut self, core: &mut LoomzEngineCore, id: TextureId) -> Result<Texture, CommonError> {
+    fn queue_descriptor_updates(&mut self, core: &mut LoomzEngineCore) {
+        self.data.descriptors.updates.submit(core);
+    }
+
+    //
+    // Data
+    //
+   
+    fn fetch_texture_view(&mut self, core: &mut LoomzEngineCore, id: TextureId) -> Result<vk::ImageView, CommonError> {
         if let Some(texture) = self.data.textures.get(&id) {
-            return Ok(*texture);
+            return Ok(texture.view);
         }
 
         let texture_asset = self.assets.texture(id)
@@ -300,13 +334,9 @@ impl WorldModule {
 
         self.data.textures.insert(id, texture);
 
-        Ok(texture)
+        Ok(texture.view)
     }
-
-    fn queue_descriptor_updates(&mut self, core: &mut LoomzEngineCore) {
-        self.data.descriptors.updates.submit(core);
-    }
-
+    
     //
     // Setup
     //

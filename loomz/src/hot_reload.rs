@@ -89,6 +89,8 @@ impl LoomzClient {
             client_library: Some(client_library),
         };
 
+        println!("Client initialized with hot reload");
+
         Ok(client)
     }
 

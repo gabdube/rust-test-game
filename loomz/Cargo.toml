@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["hot-reload"]
-hot-reload = ["libloading", "notify"]
+default = []
+hot-reload = ["libloading", "notify", "loomz-client/hot-reload"]
 
 [dependencies]
 winit = "0.30.5"
