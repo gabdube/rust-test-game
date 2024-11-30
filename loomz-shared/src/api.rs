@@ -153,6 +153,10 @@ impl LoomzApi {
         Arc::clone(&self.inner.assets)
     }
 
+    pub fn assets_ref(&self) -> &LoomzAssetsBundle {
+        &self.inner.assets
+    }
+
     pub fn inputs<'a>(&'a self) -> MutexGuard<'a, InputBuffer> {
         self.inner.inputs.new_inputs.store(true, Ordering::Relaxed);
         self.inner.inputs.buffer.lock()

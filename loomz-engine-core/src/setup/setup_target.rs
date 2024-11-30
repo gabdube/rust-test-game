@@ -210,8 +210,8 @@ fn select_transform(caps: &vk::SurfaceCapabilitiesKHR) -> vk::SurfaceTransformFl
 
 fn select_swapchain_format(surface_ext: &vk::wrapper::Surface, physical_device: vk::PhysicalDevice, surface: vk::SurfaceKHR) -> Result<vk::SurfaceFormatKHR, CommonError> {
     const SWAPCHAIN_FMT: &[vk::Format] = &[
-        vk::Format::B8G8R8A8_SRGB,
-        vk::Format::R8G8B8A8_SRGB,
+        vk::Format::B8G8R8A8_UNORM,
+        vk::Format::R8G8B8A8_UNORM,
     ];
 
     let mut supported_formats: Vec<vk::SurfaceFormatKHR> = Vec::new();
@@ -233,7 +233,7 @@ fn select_swapchain_format(surface_ext: &vk::wrapper::Surface, physical_device: 
 }
 
 fn setup_swapchain_images(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
-    const MAX_IMAGE_COUNT: usize = 8; // This should be enough to hold the images (ex: min_image is 4 on my machine)
+    const MAX_IMAGE_COUNT: usize = 16; // This should be enough to hold the images (ex: min_image is 4 on my machine)
 
     let swapchain_ext = &engine.ctx.extensions.swapchain;
     let image_count = engine.info.swapchain_image_count;

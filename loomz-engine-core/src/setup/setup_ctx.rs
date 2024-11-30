@@ -296,6 +296,8 @@ fn setup_device(setup: &mut VulkanCtxSetup) -> Result<(), CommonError> {
         .map_err(|err| backend_init_err!("Failed to create vulkan device: {err}") )?
         .into();
 
+    // print_device_name(instance, physical_device);
+
     Ok(())
 }
 
@@ -416,4 +418,18 @@ fn load_extensions(setup: &mut VulkanCtxSetup) {
             wayland_surface: vk::wrapper::WaylandSurface::new(entry, instance)
         }
     });
+}
+
+//
+// Other
+//
+
+#[allow(dead_code)]
+fn print_device_name(instance: &Instance, pdevice: vk::PhysicalDevice) {
+    let prop = instance.get_physical_device_properties(pdevice);
+    let str = ::std::ffi::CStr::from_bytes_until_nul(&prop.device_name)
+        .map(|s| s.to_str().unwrap_or("Unknown") )
+        .unwrap_or("Unknown");
+
+    println!("{:?}", str); 
 }

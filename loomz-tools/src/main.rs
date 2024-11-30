@@ -1,5 +1,6 @@
 mod shaders;
 mod textures;
+mod generate_sprite;
 
 use std::path::Path;
 
@@ -31,9 +32,10 @@ fn execute_command() -> Option<String> {
 }
 
 fn watch() {
-    unimplemented!();
+    unimplemented!("Watching changes is not implemented");
 }
 
+/// Removes all .DS_Store files from the directory when I move stuff from the macbook
 fn remove_ds_store() {  
     for entry in glob::glob("./**/.DS_Store").unwrap().filter_map(Result::ok) {
         println!("Removing {:?}", entry);
@@ -51,6 +53,10 @@ fn main() {
     if let Some(cmd) = execute_command() {
         match cmd.as_str() {
             "remove_ds_store" => remove_ds_store(),
+            "generate_sprites" => {
+                let filters = filters().unwrap_or_default();
+                generate_sprite::generate_sprites(&filters);
+            },
             value => { println!("Unknown command: {:?}", value); }
         }
     } else {

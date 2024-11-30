@@ -18,17 +18,14 @@ pub enum GameState {
 pub struct LoomzClient {
     api: LoomzApi,
     state: GameState,
-    player: Player
 }
 
 impl LoomzClient {
 
     pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
-        let player = Self::init_player(api)?;
         let client = LoomzClient {
             api: api.clone(),
             state: GameState::Uninitialized,
-            player,
         };
 
         Ok(client)
@@ -40,14 +37,12 @@ impl LoomzClient {
 
         let mut client = Self::init(api)?;
         client.state = reader.read_from_u32();
-        client.player = reader.load();
 
         Ok(client)
     }
 
     pub fn export(&self, writer: &mut crate::store::SaveFileWriter) {
         writer.write_into_u32(self.state);
-        writer.store(&self.player);
     }
 
     pub fn update(&mut self) -> Result<(), CommonError> {
@@ -60,40 +55,41 @@ impl LoomzClient {
     }
 
     fn uninitialized(&mut self) {
-        self.api.world().update_component(&self.player.id, self.player.component);
         self.state = GameState::Gameplay;
     }
 
     fn gameplay(&mut self) {
-        if let Some(mut input) = self.api.new_inputs() {
-            let world = self.api.world();
+        // if let Some(mut input) = self.api.new_inputs() {
+        //     let world = self.api.world();
 
-            if let Some(position) = input.cursor_position() {
-                self.player.component.position = position.as_f32();
-                world.update_component(&self.player.id, self.player.component);
-            }
-        }
+        //     if let Some(screen_size) = input.screen_size() {
+        //         let extent = self.api.assets_ref().texture(self.player.component.texture_id).unwrap().data.extent();
+        //         self.player.component.position.x = (screen_size.width - (extent.width as f32)) / 2.0;
+        //         self.player.component.position.y = (screen_size.height - (extent.height as f32)) / 2.0;
+        //         world.update_component(&self.player.id, self.player.component);
+        //     }
+        // }
     }
 
-    fn init_player(api: &LoomzApi) -> Result<Player, CommonError> {
-        let assets = api.assets();
-        let (texture_id, texture) = assets.texture_id_by_name("creatura")
-            .and_then(|id| assets.texture(id).map(|tex| (id, tex) ) )
-            .ok_or_else(|| assets_err!("Failed to find texture \"creatura\"") )?;
+    // fn init_player(api: &LoomzApi) -> Result<Player, CommonError> {
+    //     let assets = api.assets_ref();
+    //     let (texture_id, texture) = assets.texture_id_by_name("creatura")
+    //         .and_then(|id| assets.texture(id).map(|tex| (id, tex) ) )
+    //         .ok_or_else(|| assets_err!("Failed to find texture \"creatura\"") )?;
 
-        let texture_extent = texture.data.extent();
+    //     let texture_extent = texture.data.extent();
 
-        let player = Player {
-            id: Uid::new(),
-            component: WorldComponent {
-                position: pos(0.0, 0.0),
-                size: size(texture_extent.width as f32, texture_extent.height as f32),
-                texture_id,
-            }
-        };
+    //     let player = Player {
+    //         id: Uid::new(),
+    //         component: WorldComponent {
+    //             position: pos(0.0, 0.0),
+    //             size: size(texture_extent.width as f32, texture_extent.height as f32),
+    //             texture_id,
+    //         }
+    //     };
 
-        Ok(player)
-    }
+    //     Ok(player)
+    // }
 
 }
 

@@ -3,7 +3,7 @@ use loomz_shared::{system_err, CommonError};
 
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ActiveEventLoop, EventLoop, ControlFlow};
-use winit::event::{WindowEvent, ElementState, MouseButton, KeyEvent};
+use winit::event::{WindowEvent, ElementState, MouseButton};
 use winit::window::{Window, WindowId};
 use super::LoomzApplication;
 
@@ -43,6 +43,8 @@ impl<'a> ApplicationHandler for LoomzApplication {
                     self.last_error = Some(e);
                     event_loop.exit();
                 }
+
+                self.api.inputs().update_screen_size(size.width as f32, size.height as f32);
             },
             WindowEvent::CursorMoved { device_id: _, position } => {
                 self.api.inputs().update_cursor_position(position.x, position.y);
@@ -87,7 +89,7 @@ fn parse_mouse_input(inputs: &mut InputBuffer, state: ElementState, btn: MouseBu
             button_state.remove(flag);
         }
 
-        inputs.set_mouse_button(button_state);
+        inputs.update_mouse_button(button_state);
     }
 }
 

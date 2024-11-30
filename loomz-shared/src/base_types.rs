@@ -44,7 +44,7 @@ pub mod _2d {
     }
 
     impl<T: Copy> Position<T> {
-        #[inline]
+        #[inline(always)]
         pub const fn splat(&self) -> [T; 2] {
             [self.x, self.y]
         }
@@ -67,16 +67,18 @@ pub mod _2d {
     }
 
     impl<T: Copy> Size<T> {
-        #[inline]
+        #[inline(always)]
         pub const fn splat(&self) -> [T; 2] {
             [self.width, self.height]
         }
     }
 
+    #[inline(always)]
     pub fn pos<T>(x: T, y: T) -> Position<T> {
         Position { x, y }
     }
 
+    #[inline(always)]
     pub fn size<T>(width: T, height: T) -> Size<T> {
         Size { width, height }
     }

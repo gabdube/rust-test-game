@@ -66,7 +66,10 @@ fn max_sample(ctx: &VulkanContext) -> vk::SampleCountFlags {
 }
 
 fn color_format(ctx: &VulkanContext) -> Result<vk::Format, CommonError> {
-    let color_formats = [vk::Format::B8G8R8A8_SRGB, vk::Format::R8G8B8A8_SRGB];
+    let color_formats = [
+        vk::Format::B8G8R8A8_UNORM,
+        vk::Format::R8G8B8A8_UNORM,
+    ];
 
     fn color_optimal(instance: &vk::wrapper::Instance, physical_device: vk::PhysicalDevice, format: vk::Format) -> bool {
         let format_properties = instance.get_physical_device_format_properties(physical_device, format);

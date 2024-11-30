@@ -3,6 +3,8 @@
 *.spv
 *.png
 *.ktx2
+*.aseprite
+*.zip
 .DS_Store
 todo.md
 temp.md
