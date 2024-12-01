@@ -4,6 +4,7 @@ use std::fs::File;
 
 const SRC_ROOT: &str = "assets/dev/tiny_sword/";
 const DST_ROOT: &str = "assets/dev/textures/";
+const OFFSET_PX: u32 = 2;
 
 #[derive(Debug, Default, Copy, Clone)]
 struct Size {
@@ -41,12 +42,17 @@ impl SpriteRect {
 #[derive(Debug, Default)]
 struct Animation {
     pub dst_size: Size,
+    pub dst_sprite_y_offset: usize,
+    pub dst_sprite_x_offsets: Vec<usize>,
     pub src_sprites: Vec<SpriteRect>,
+    pub name: String,
 }
 
+#[derive(Default, Copy, Clone)]
 struct SpriteSheetInfo {
     pub cell_width: u32,
     pub cell_height: u32,
+    pub animation_names: &'static [&'static str],
 }
 
 struct PngAsset {
@@ -61,23 +67,31 @@ struct AssetsState {
     actors: Vec<PngAsset>
 }
 
-fn spritesheet(cell_width: u32, cell_height: u32) -> SpriteSheetInfo {
-    SpriteSheetInfo { cell_width, cell_height }
-}
-
-fn asset(path: &str, spritesheet_info: SpriteSheetInfo) -> PngAsset {
-    PngAsset {
-        path: format!("{SRC_ROOT}{path}"),
-        spritesheet_info,
-        image_info: png::OutputInfo { width: 0, height: 0, color_type: png::ColorType::Rgba, bit_depth: png::BitDepth::Eight, line_size: 0 },
-        image_bytes: Vec::new(),
-    }
+fn spritesheet(cell_width: u32, cell_height: u32, animation_names: &'static [&'static str]) -> SpriteSheetInfo {
+    SpriteSheetInfo { cell_width, cell_height, animation_names }
 }
 
 fn load_state() -> AssetsState {
     let mut state = AssetsState::default();
-    state.actors.push(asset("Factions/Knights/Troops/Pawn/Blue/Pawn_Blue.png", spritesheet(192, 192)));
-    state.actors.push(asset("Factions/Knights/Troops/Warrior/Blue/Warrior_Blue.png", spritesheet(192, 192)));
+    let mut spritesheet_info;
+
+    let mut build_asset = |path: &str, spritesheet_info: SpriteSheetInfo| {
+        let asset = PngAsset {
+            path: format!("{SRC_ROOT}{path}"),
+            spritesheet_info,
+            image_info: png::OutputInfo { width: 0, height: 0, color_type: png::ColorType::Rgba, bit_depth: png::BitDepth::Eight, line_size: 0 },
+            image_bytes: Vec::new(),
+        };
+
+        state.actors.push(asset);
+    };
+
+    spritesheet_info = spritesheet(192, 192, &["idle", "walk", "hammer", "axe", "idle_hold", "idle_walk"]);
+    build_asset("Factions/Knights/Troops/Pawn/Blue/Pawn_Blue.png", spritesheet_info);
+
+    spritesheet_info = spritesheet(192, 192, &["idle", "walk", "strike-horz-1", "strike-horz-2", "strike-bottom-1", "strike-bottom-2", "strike-top-1", "strike-top-2"]);
+    build_asset("Factions/Knights/Troops/Warrior/Blue/Warrior_Blue.png", spritesheet_info);
+
     state
 }
 
@@ -149,8 +163,11 @@ fn parse_src_sprites(asset: &PngAsset, animation: &mut Animation, yrange: [usize
     }
 }
 
-fn dst_path<'a>(asset: &'a PngAsset) -> Result<String, Box<dyn ::std::error::Error>> {
-    let name = ::std::path::Path::new(&asset.path)
+fn dst_path<'a>(asset: &'a PngAsset, ext: &str) -> Result<String, Box<dyn ::std::error::Error>> {
+    let mut path = ::std::path::PathBuf::from(&asset.path);
+    path.set_extension(ext);
+
+    let name = path
         .file_name()
         .and_then(|name| name.to_str() )
         .unwrap();
@@ -173,8 +190,11 @@ fn pixel_size(asset: &PngAsset) -> usize {
 fn exported_image_size(animations: &[Animation]) -> Size {
     let mut dst_total_size = Size::default();
     for animation in animations {
-        dst_total_size.width = u32::max(dst_total_size.width, animation.dst_size.width * (animation.src_sprites.len() as u32) );
-        dst_total_size.height += animation.dst_size.height;
+        let anim_count = animation.src_sprites.len() as u32;
+        let offset_size = OFFSET_PX * anim_count;
+        let sprites_size = animation.dst_size.width * anim_count;
+        dst_total_size.width = u32::max(dst_total_size.width, offset_size + sprites_size);
+        dst_total_size.height += animation.dst_size.height + OFFSET_PX;
     }
 
     // Align dst image to 16 bytes (the block size for the BC7 format)
@@ -185,7 +205,7 @@ fn exported_image_size(animations: &[Animation]) -> Size {
     dst_total_size
 }
 
-fn copy_sprite<P2>(
+fn copy_sprite<P>(
     src_bytes: &[u8],
     dst_bytes: &mut [u8],
     src_line_size: usize,
@@ -193,8 +213,6 @@ fn copy_sprite<P2>(
     src_sprite: &SpriteRect,
     dst_sprite: &SpriteRect,
 ) {
-    type P = [u8; 4];
-
     assert_eq!(src_sprite.width(), dst_sprite.width(), "src and dst must have the same size");
     assert_eq!(src_sprite.height(), dst_sprite.height(), "src and dst must have the same size");
 
@@ -225,7 +243,7 @@ fn copy_sprite<P2>(
     }
 }
 
-fn export_image_data(asset: &PngAsset, animations: &[Animation], dst_bytes: &mut [u8], dst_line_size: usize) {
+fn export_animation_data(asset: &PngAsset, animations: &mut [Animation], dst_bytes: &mut [u8], dst_line_size: usize) {
     let src_line_size = asset.image_info.line_size;
     let dst_line_size = dst_line_size;
 
@@ -234,6 +252,8 @@ fn export_image_data(asset: &PngAsset, animations: &[Animation], dst_bytes: &mut
     for animation in animations {
         let [dst_width, dst_height] = animation.dst_size.splat();
         let mut dst_offset_x = 0;
+
+        animation.dst_sprite_y_offset = dst_offset_y as usize;
 
         for src_sprite in &animation.src_sprites {
             let offset_x = dst_width - src_sprite.width(); // If the sprite is smaller than the sprite size, it is offseted by the size difference
@@ -245,32 +265,35 @@ fn export_image_data(asset: &PngAsset, animations: &[Animation], dst_bytes: &mut
             dst_sprite.top = dst_offset_y + offset_y;
             dst_sprite.bottom = dst_sprite.top + src_sprite.height();
 
+            animation.dst_sprite_x_offsets.push(dst_offset_x as usize);
+
             match (asset.image_info.bit_depth, asset.image_info.color_type) {
                 (png::BitDepth::Eight, png::ColorType::Rgba) => copy_sprite::<[u8; 4]>(&asset.image_bytes, dst_bytes, src_line_size, dst_line_size, &src_sprite, &dst_sprite),
                 combined => unimplemented!("Bit depth for {:?} is not implemented", combined)
             };
-            
-            dst_offset_x += dst_width;
+
+            dst_offset_x += dst_width + OFFSET_PX;
         }
 
-        dst_offset_y += animation.dst_size.height;
+        dst_offset_y += animation.dst_size.height + OFFSET_PX;
     }
 }
 
 fn save_dst_image(asset: &PngAsset, dst_width: u32, dst_height: u32, data: &[u8]) -> Result<(), Box<dyn ::std::error::Error>> {
     use std::io::BufWriter;
-    let dst = dst_path(asset)?;
+    let dst = dst_path(asset, "png")?;
     println!("Writing sprites data to {:?}", dst);
 
     let file = File::create(dst)?;
     let ref mut w = BufWriter::new(file);
 
     let mut encoder = png::Encoder::new(w, dst_width, dst_height);
+    encoder.set_compression(png::Compression::Best);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
-    encoder.set_source_gamma(png::ScaledFloat::from_scaled(45455)); // 1.0 / 2.2, scaled by 100000
-    encoder.set_source_gamma(png::ScaledFloat::new(1.0 / 2.2));     // 1.0 / 2.2, unscaled, but rounded
-    let source_chromaticities = png::SourceChromaticities::new(     // Using unscaled instantiation here
+    encoder.set_source_gamma(png::ScaledFloat::from_scaled(45455));
+    encoder.set_source_gamma(png::ScaledFloat::new(1.0 / 2.2));
+    let source_chromaticities = png::SourceChromaticities::new(
         (0.31270, 0.32900),
         (0.64000, 0.33000),
         (0.30000, 0.60000),
@@ -284,16 +307,43 @@ fn save_dst_image(asset: &PngAsset, dst_width: u32, dst_height: u32, data: &[u8]
     Ok(())
 }
 
-fn export_actor_sprites(asset: &PngAsset, animations: &[Animation]) {
+fn save_dst_csv(asset: &PngAsset, animations: &[Animation]) -> Result<(), Box<dyn ::std::error::Error>> {
+    use std::io::Write;
+
+    let out = dst_path(asset, "csv")?;
+    let mut csv_out = String::with_capacity(animations.len() * 100);
+
+    for animation in animations.iter() {
+        csv_out.push_str(&animation.name);
+        csv_out.push_str(&format!(";{};{};{};", OFFSET_PX, animation.dst_size.width, animation.dst_size.height));
+
+        let y_offset = animation.dst_sprite_y_offset;
+        for x_offset in animation.dst_sprite_x_offsets.iter() {
+            csv_out.push_str(&format!("{};{};", x_offset, y_offset));
+        }
+        csv_out.push_str("\r\n");
+    }
+
+    let mut file = File::create(out)?;
+    file.write(csv_out.as_bytes())?;
+
+    Ok(())
+}
+
+fn export_actor_sprites(asset: &PngAsset, animations: &mut [Animation]) {
     let dst_total_size = exported_image_size(animations);
     let dst_line_line = dst_total_size.width as usize * pixel_size(asset);
     let total_dst_data_size = dst_line_line * (dst_total_size.height as usize);
     let mut dst_data = vec![0u8; total_dst_data_size];
 
-    export_image_data(asset, animations, &mut dst_data, dst_line_line);
+    export_animation_data(asset, animations, &mut dst_data, dst_line_line);
 
     if let Err(e) = save_dst_image(asset, dst_total_size.width, dst_total_size.height, &dst_data) {
         println!("ERROR: Failed to export actors sprites: {:?}", e);
+    }
+
+    if let Err(e) = save_dst_csv(asset, animations) {
+        println!("ERROR: Failed to export actors sprites csv: {:?}", e);
     }
 }
 
@@ -310,11 +360,15 @@ fn generate_actors_sprites(state: &AssetsState) {
         for i in 0..animations_count {
             let yrange = [(i*cell_height) as usize, ((i+1)*cell_height) as usize];
             let mut animation = Animation::default();
+
+            animation.name = actor.spritesheet_info.animation_names[i as usize].to_string();
+
             parse_src_sprites(actor, &mut animation, yrange);
+
             animations.push(animation);
         }
 
-        export_actor_sprites(actor, &animations);
+        export_actor_sprites(actor, &mut animations);
     }
 }
 
