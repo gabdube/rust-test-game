@@ -5,6 +5,7 @@
 *.ktx2
 *.aseprite
 *.zip
+*.kra
 .DS_Store
 todo.md
 temp.md

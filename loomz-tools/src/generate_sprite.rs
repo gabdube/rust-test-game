@@ -1,296 +1,321 @@
 //! Generate optimized sprites from the data in `assets/dev/tiny_sword`
 //! Call this script using `cargo run -p loomz-tools --release -- -c generate_sprites -f [optional_filters]`
-use std::fs::File;
+use std::{fs::File, u32};
+use crate::shared::{Rect, Size, size};
 
 const SRC_ROOT: &str = "assets/dev/tiny_sword/";
 const DST_ROOT: &str = "assets/dev/textures/";
 const OFFSET_PX: u32 = 2;
 
-#[derive(Debug, Default, Copy, Clone)]
-struct Size {
-    pub width: u32,
-    pub height: u32
+struct OutputInfo(png::OutputInfo);
+
+impl OutputInfo {
+    const fn default() -> Self { OutputInfo ( png::OutputInfo { width: 0, height: 0, line_size: 0, bit_depth: png::BitDepth::One, color_type: png::ColorType::Grayscale } ) }
 }
 
-impl Size {
-    #[inline(always)]
-    fn splat(&self) -> [u32; 2] {
-        [self.width, self.height]
+impl std::ops::Deref for OutputInfo {
+    type Target = png::OutputInfo;
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+impl std::ops::DerefMut for OutputInfo {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+}
+
+impl Clone for OutputInfo {
+    fn clone(&self) -> Self {
+        OutputInfo ( png::OutputInfo { width: self.width, height: self.height, color_type: self.color_type, bit_depth: self.bit_depth, line_size: self.line_size } )
     }
 }
 
-#[derive(Debug, Default, Copy, Clone, PartialEq)]
-struct SpriteRect {
-    pub left: u32,
-    pub top: u32,
-    pub right: u32,
-    pub bottom: u32,
+#[derive(Clone)]
+struct ActorAnimation {
+    src_rect: Vec<Rect>,
+    src_offset: Vec<Rect>,  // Left / Bottom offsets for centering the dst sprite
+    dst_rect: Vec<Rect>,
+    dst_sprite_offset: Rect,
+    dst_sprite_size: Size,
 }
 
-impl SpriteRect {
-    #[inline(always)]
-    fn width(&self) -> u32 {
-        self.right - self.left
-    }
-
-    #[inline(always)]
-    fn height(&self) -> u32 {
-        self.bottom - self.top
-    }
-}
-
-#[derive(Debug, Default)]
-struct Animation {
-    pub dst_size: Size,
-    pub dst_sprite_y_offset: usize,
-    pub dst_sprite_x_offsets: Vec<usize>,
-    pub src_sprites: Vec<SpriteRect>,
-    pub name: String,
-}
-
-#[derive(Default, Copy, Clone)]
-struct SpriteSheetInfo {
-    pub cell_width: u32,
-    pub cell_height: u32,
-    pub animation_names: &'static [&'static str],
-}
-
-struct PngAsset {
-    path: String,
-    spritesheet_info: SpriteSheetInfo,
-    image_info: png::OutputInfo,
-    image_bytes: Vec<u8>,
+/// All the info required to read and process a "actor" sprites 
+#[derive(Clone)]
+struct Actor {
+    src_path: &'static str,
+    dst_path: String,
+    dst_path_csv: String,
+    src_sprite_size: Size,
+    src_image_info: OutputInfo,
+    dst_image_info: OutputInfo,
+    src_bytes: Vec<u8>,
+    dst_bytes: Vec<u8>,
+    animations: Vec<ActorAnimation>,
+    animation_names: &'static [&'static str],
+    loaded: bool,
 }
 
 #[derive(Default)]
 struct AssetsState {
-    actors: Vec<PngAsset>
+    actors: Vec<Actor>
 }
 
-fn spritesheet(cell_width: u32, cell_height: u32, animation_names: &'static [&'static str]) -> SpriteSheetInfo {
-    SpriteSheetInfo { cell_width, cell_height, animation_names }
+//
+// Loading files & templates
+//
+
+fn load_actors_source(actor: &mut Actor) {
+    let path = format!("{SRC_ROOT}{}", actor.src_path);
+
+    let decoder = png::Decoder::new(File::open(&path).unwrap());
+    let mut reader = decoder.read_info().unwrap();
+
+    actor.src_bytes = vec![0; reader.output_buffer_size()];
+    actor.src_image_info.0 = reader.next_frame(&mut actor.src_bytes).unwrap();
+    actor.loaded = true;
+
+    // Also save the dst_path while we're at it
+    let name = ::std::path::Path::new(&path).file_stem().and_then(|n| n.to_str() ).unwrap();
+    actor.dst_path = format!("{DST_ROOT}{name}.png");
+    actor.dst_path_csv = format!("{DST_ROOT}{name}.csv");
 }
 
-fn load_state() -> AssetsState {
-    let mut state = AssetsState::default();
-    let mut spritesheet_info;
+fn load_actors(filters: &[String], state: &mut AssetsState) {
+    const fn actor(src_path: &'static str, src_sprite_size: Size, animation_names: &'static [&'static str]) -> Actor {
+        Actor {
+            src_path,
+            dst_path: String::new(),
+            dst_path_csv: String::new(),
+            src_sprite_size,
+            src_image_info: OutputInfo::default(),
+            dst_image_info: OutputInfo::default(),
+            src_bytes: Vec::new(),
+            dst_bytes: Vec::new(),
+            animations: Vec::new(),
+            animation_names,
+            loaded: false,
+        }
+    }
 
-    let mut build_asset = |path: &str, spritesheet_info: SpriteSheetInfo| {
-        let asset = PngAsset {
-            path: format!("{SRC_ROOT}{path}"),
-            spritesheet_info,
-            image_info: png::OutputInfo { width: 0, height: 0, color_type: png::ColorType::Rgba, bit_depth: png::BitDepth::Eight, line_size: 0 },
-            image_bytes: Vec::new(),
-        };
+    const ACTORS: &[Actor] = &[
+        actor("Factions/Knights/Troops/Pawn/Blue/Pawn_Blue.png", size(192, 192), &["idle", "walk", "hammer", "axe", "idle_hold", "idle_walk"]),
+        actor("Factions/Knights/Troops/Warrior/Blue/Warrior_Blue.png", size(192, 192), &["idle", "walk", "strike-horz-1", "strike-horz-2", "strike-bottom-1", "strike-bottom-2", "strike-top-1", "strike-top-2"]),
+    ];
 
-        state.actors.push(asset);
-    };
-
-    spritesheet_info = spritesheet(192, 192, &["idle", "walk", "hammer", "axe", "idle_hold", "idle_walk"]);
-    build_asset("Factions/Knights/Troops/Pawn/Blue/Pawn_Blue.png", spritesheet_info);
-
-    spritesheet_info = spritesheet(192, 192, &["idle", "walk", "strike-horz-1", "strike-horz-2", "strike-bottom-1", "strike-bottom-2", "strike-top-1", "strike-top-2"]);
-    build_asset("Factions/Knights/Troops/Warrior/Blue/Warrior_Blue.png", spritesheet_info);
-
-    state
-}
-
-fn load_state_data(state: &mut AssetsState, filters: &[String]) {
-    for actor in state.actors.iter_mut() {
-        if filters.len() > 0 {
-            if !filters.iter().any(|f| actor.path.matches(f).next().is_some() ) {
+    for actor in ACTORS.iter() {
+        if !filters.is_empty() {
+            if !filters.iter().any(|f| actor.src_path.matches(f).next().is_some() ) {
                 continue;
             }
         }
-
-        println!("Loading {:?}", actor.path);
-        let decoder = png::Decoder::new(File::open(&actor.path).unwrap());
-        let mut reader = decoder.read_info().unwrap();
-        actor.image_bytes = vec![0; reader.output_buffer_size()];
-        actor.image_info = reader.next_frame(&mut actor.image_bytes).unwrap();
+        
+        let mut actor = actor.clone();
+        load_actors_source(&mut actor);
+        state.actors.push(actor);
     }
 }
 
-fn find_sprite_bounds<P: Copy+Default+PartialEq>(image_bytes: &[u8], line_size: usize, x1: usize, x2: usize, y1: usize, y2: usize) -> Option<SpriteRect> {
-    let mut sprite = SpriteRect { left: u32::MAX, right: 0, top: u32::MAX, bottom: 0 };
-    let image_pixels = unsafe { image_bytes.align_to::<P>().1 };
-    let line_size_pixels = line_size / size_of::<P>();
+//
+// Reading actor sprites from source
+//
+
+fn scan_sprite<P: Copy+Default+PartialEq>(actor: &mut Actor, animation: &mut ActorAnimation, scan_x: &[usize; 3], scan_y: &[usize; 3]) {
+    let pixels = actor.src_bytes.as_mut_ptr() as *mut P;
+    let scanline_pixel = actor.src_image_info.line_size  / size_of::<P>();
     let zero = P::default();
 
-    for y in y1..y2 {
-        for x in x1..x2 {
-            let pixel_index = (y*line_size_pixels) + x;
-            let pixel = image_pixels[pixel_index];
+    let mut rect = Rect { left: u32::MAX, top: u32::MAX, right: 0, bottom: 0 };
+
+    for y in scan_y[0]..scan_y[1] {
+        for x in scan_x[0]..scan_x[1] {
+            let index = (y*scanline_pixel) + x;
+            let pixel = unsafe { pixels.add(index).read() };
             if pixel != zero {
-                sprite.left = u32::min(sprite.left, x as u32);
-                sprite.right = u32::max(sprite.right, (x+1) as u32);
-                sprite.top = u32::min(sprite.top, y as u32);
-                sprite.bottom = u32::max(sprite.bottom, (y+1) as u32);
+                rect.left = u32::min(rect.left, x as u32);
+                rect.right = u32::max(rect.right, (x+1) as u32);
+                rect.top = u32::min(rect.top, y as u32);
+                rect.bottom = u32::max(rect.bottom, (y+1) as u32);
             }
         }
     }
 
-    if sprite.left == u32::MAX {
-        None
-    } else {
-        Some(sprite)
+    if rect.left == u32::MAX {
+        return;
+    }
+
+    let [center_x, center_y] = [scan_x[2] as u32, scan_y[2] as u32];
+    let offset = Rect {
+        left: center_x - rect.left,
+        top: center_y - rect.top,
+        right: rect.right - center_x,
+        bottom: rect.bottom - center_y,
+    };
+
+    animation.src_rect.push(rect);
+    animation.src_offset.push(offset);
+}
+
+fn build_actor_animation<P: Copy+Default+PartialEq>(actor: &mut Actor, animation_index: usize) {
+    let cell_width = actor.src_sprite_size.width as usize;
+    let cell_height = actor.src_sprite_size.height as usize;
+
+    let sprite_count = actor.src_image_info.width as usize / cell_width;
+
+    let y1 = animation_index * cell_height;
+    let y2 = y1 + cell_height;
+    let y3 = y1 + ((y2 - y1) / 2);
+
+    let mut animation = ActorAnimation {
+        src_rect: Vec::with_capacity(sprite_count),
+        src_offset: Vec::with_capacity(sprite_count),
+        dst_rect: Vec::with_capacity(sprite_count),
+        dst_sprite_offset: Rect::default(),
+        dst_sprite_size: Size::default(),
+    };
+
+    for i in 0..sprite_count {
+        let x1 = i*cell_width;
+        let x2 = x1 + cell_width;
+        let x3 = x1 + ((x2 - x1) / 2);
+        scan_sprite::<P>(actor, &mut animation, &[x1, x2, x3], &[y1, y2, y3]);
+    }
+
+    actor.animations.push(animation);
+}
+
+fn find_actor_animation_sources<P: Copy+Default+PartialEq>(actor: &mut Actor) {
+    let cell_height = actor.src_sprite_size.height;
+    let animations_count = actor.src_image_info.height / cell_height;
+    actor.animations = Vec::with_capacity(animations_count as usize);
+    for i in 0..animations_count {
+        build_actor_animation::<P>(actor, i as usize);
     }
 }
 
-fn parse_src_sprites(asset: &PngAsset, animation: &mut Animation, yrange: [usize; 2]) {
-    let [y1, y2] = yrange;
+//
+// Generating output
+//
 
-    let line_size = asset.image_info.line_size;
-    let sprites_count = asset.image_info.width / asset.spritesheet_info.cell_width;
-    animation.src_sprites = Vec::with_capacity(sprites_count as usize);
-
-    for i in 0..sprites_count {
-        let x1 = (i*asset.spritesheet_info.cell_width) as usize;
-        let x2 = ((i+1)*asset.spritesheet_info.cell_width) as usize;
-        let sprite = match (asset.image_info.bit_depth, asset.image_info.color_type) {
-            (png::BitDepth::Eight, png::ColorType::Rgba) => find_sprite_bounds::<[u8;4]>(&asset.image_bytes, line_size, x1, x2, y1, y2),
-            combined => unimplemented!("Bit depth for {:?} is not implemented", combined)
-        };
-
-        if let Some(sprite) = sprite {
-            animation.src_sprites.push(sprite);
+fn prepare_actor_dst<P>(actor: &mut Actor) {
+    let pixel_size = size_of::<P>();
+    let mut dst_width = 0;
+    let mut dst_height = 0;
+    
+    for animation in actor.animations.iter_mut() {
+        let mut offsets_max = Rect::default();
+        for offsets in animation.src_offset.iter() {
+            offsets_max.left = u32::max(offsets_max.left, offsets.left);
+            offsets_max.top = u32::max(offsets_max.top, offsets.top);
+            offsets_max.right = u32::max(offsets_max.right, offsets.right);
+            offsets_max.bottom = u32::max(offsets_max.bottom, offsets.bottom);
         }
+
+        animation.dst_sprite_offset = offsets_max;
+        animation.dst_sprite_size = size(offsets_max.left + offsets_max.right, offsets_max.top + offsets_max.bottom);
+
+        let sprite_count = animation.src_offset.len() as u32;
+        let total_width = (animation.dst_sprite_size.width * sprite_count) + (OFFSET_PX * sprite_count);
+
+        dst_width = u32::max(dst_width, total_width);
+        dst_height += animation.dst_sprite_size.height + OFFSET_PX;
     }
 
-    for sprite in animation.src_sprites.iter() {
-        animation.dst_size.width = u32::max(animation.dst_size.width, sprite.width());
-        animation.dst_size.height = u32::max(animation.dst_size.height, sprite.height());
+    actor.dst_image_info = actor.src_image_info.clone();
+    actor.dst_image_info.width = dst_width;
+    actor.dst_image_info.height = dst_height;
+    actor.dst_image_info.line_size = pixel_size * (dst_width as usize);
+
+    let dst_buffer_size = (dst_width as usize) * (dst_height as usize) * pixel_size;
+    actor.dst_bytes = vec![0; dst_buffer_size];
+}
+
+fn compute_sprites_dst(actor: &mut Actor) {
+    let mut x = 0;
+    let mut y = 0;
+
+    for animation in actor.animations.iter_mut() {
+        let sprite_count = animation.src_rect.len();
+        let dst_size = animation.dst_sprite_size;
+        let dst_offset = animation.dst_sprite_offset;
+
+        for sprite_index in 0..sprite_count {
+            let src = animation.src_rect[sprite_index];
+            let off = animation.src_offset[sprite_index];
+            let width = src.width();
+            let height = src.height();
+
+            let x_loc = x + (dst_offset.left - off.left);
+            let y_loc = y + (dst_offset.top - off.top);
+
+            animation.dst_rect.push(Rect {
+                left: x_loc,
+                top: y_loc,
+                right: x_loc + width,
+                bottom: y_loc + height,
+            });
+
+            x += dst_size.width + OFFSET_PX;
+        }
+
+        x = 0;
+        y += dst_size.height + OFFSET_PX;
     }
 }
 
-fn dst_path<'a>(asset: &'a PngAsset, ext: &str) -> Result<String, Box<dyn ::std::error::Error>> {
-    let mut path = ::std::path::PathBuf::from(&asset.path);
-    path.set_extension(ext);
+fn copy_sprite<P: Copy+Default+PartialEq>(actor: &mut Actor, animation_index: usize, sprite_index: usize) {
+    let animation = &actor.animations[animation_index];
+    let src = animation.src_rect[sprite_index];
+    let dst = animation.dst_rect[sprite_index];
+    assert!(src.height() == dst.height() && src.width() == dst.width(), "src and dst size must match");
 
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str() )
-        .unwrap();
+    let src_pixel = actor.src_bytes.as_ptr() as *const P;
+    let dst_pixel = actor.dst_bytes.as_mut_ptr() as *mut P;
 
-    let dst_path = format!("{DST_ROOT}{name}");
-    if ::std::fs::exists(&dst_path)? {
-        ::std::fs::remove_file(&dst_path)?;
-    }
+    let scanline_src = actor.src_image_info.line_size / size_of::<P>();
+    let scanline_dst = actor.dst_image_info.line_size / size_of::<P>();
 
-    Ok(dst_path)
-}
-
-fn pixel_size(asset: &PngAsset) -> usize {
-    match (asset.image_info.bit_depth, asset.image_info.color_type) {
-        (png::BitDepth::Eight, png::ColorType::Rgba) => size_of::<[u8;4]>(),
-        combined => unimplemented!("Pixel size for {:?} is not implemented", combined)
-    }
-}
-
-fn exported_image_size(animations: &[Animation]) -> Size {
-    let mut dst_total_size = Size::default();
-    for animation in animations {
-        let anim_count = animation.src_sprites.len() as u32;
-        let offset_size = OFFSET_PX * anim_count;
-        let sprites_size = animation.dst_size.width * anim_count;
-        dst_total_size.width = u32::max(dst_total_size.width, offset_size + sprites_size);
-        dst_total_size.height += animation.dst_size.height + OFFSET_PX;
-    }
-
-    // Align dst image to 16 bytes (the block size for the BC7 format)
-    // BLOCK_SIZE / PIXEL_SIZE == 16 / 4 == 4
-    dst_total_size.width = dst_total_size.width + (4 - (dst_total_size.width % 4));
-    dst_total_size.height = dst_total_size.height + (4 - (dst_total_size.height % 4));
-
-    dst_total_size
-}
-
-fn copy_sprite<P>(
-    src_bytes: &[u8],
-    dst_bytes: &mut [u8],
-    src_line_size: usize,
-    dst_line_size: usize,
-    src_sprite: &SpriteRect,
-    dst_sprite: &SpriteRect,
-) {
-    assert_eq!(src_sprite.width(), dst_sprite.width(), "src and dst must have the same size");
-    assert_eq!(src_sprite.height(), dst_sprite.height(), "src and dst must have the same size");
-
-    let src_pixel = unsafe { src_bytes.align_to::<P>().1 };
-    let dst_pixel = unsafe { dst_bytes.align_to_mut::<P>().1 };
-
-    let p_size = size_of::<P>();
-    let src_line_pixel = src_line_size / p_size;
-    let dst_line_pixel = dst_line_size / p_size;
-
-    let width = src_sprite.width() as usize;
-    let height = src_sprite.height() as usize;
+    let height = src.height() as usize;
+    let count = src.width() as usize;
 
     for y in 0..height {
-        let src_y = (src_sprite.top as usize) + y;
-        let src_offset = (src_y * src_line_pixel) + src_sprite.left as usize;
+        let y_src = (src.top as usize) + y;
+        let y_dst = (dst.top as usize) + y;
 
-        let dst_y = (dst_sprite.top as usize) + y;
-        let dst_offset = (dst_y * dst_line_pixel) + dst_sprite.left as usize;
-        
+        let src_offset = (y_src*scanline_src) + (src.left as usize);
+        let dst_offset = (y_dst*scanline_dst) + (dst.left as usize);
+
         unsafe {
-            ::std::ptr::copy_nonoverlapping::<P>(
-                src_pixel.as_ptr().add(src_offset),
-                dst_pixel.as_mut_ptr().add(dst_offset),
-                width
-            );
+            let src = src_pixel.add(src_offset);
+            let dst = dst_pixel.add(dst_offset);
+            ::std::ptr::copy_nonoverlapping::<P>(src, dst, count);
         }
     }
 }
 
-fn export_animation_data(asset: &PngAsset, animations: &mut [Animation], dst_bytes: &mut [u8], dst_line_size: usize) {
-    let src_line_size = asset.image_info.line_size;
-    let dst_line_size = dst_line_size;
-
-    let mut dst_sprite = SpriteRect::default();
-    let mut dst_offset_y = 0;
-    for animation in animations {
-        let [dst_width, dst_height] = animation.dst_size.splat();
-        let mut dst_offset_x = 0;
-
-        animation.dst_sprite_y_offset = dst_offset_y as usize;
-
-        for src_sprite in &animation.src_sprites {
-            let offset_x = dst_width - src_sprite.width(); // If the sprite is smaller than the sprite size, it is offseted by the size difference
-            let offset_y = dst_height - src_sprite.height();
-
-            dst_sprite.left = dst_offset_x + offset_x;   
-            dst_sprite.right = dst_sprite.left + src_sprite.width();
-
-            dst_sprite.top = dst_offset_y + offset_y;
-            dst_sprite.bottom = dst_sprite.top + src_sprite.height();
-
-            animation.dst_sprite_x_offsets.push(dst_offset_x as usize);
-
-            match (asset.image_info.bit_depth, asset.image_info.color_type) {
-                (png::BitDepth::Eight, png::ColorType::Rgba) => copy_sprite::<[u8; 4]>(&asset.image_bytes, dst_bytes, src_line_size, dst_line_size, &src_sprite, &dst_sprite),
-                combined => unimplemented!("Bit depth for {:?} is not implemented", combined)
-            };
-
-            dst_offset_x += dst_width + OFFSET_PX;
+fn copy_sprites_dst<P: Copy+Default+PartialEq>(actor: &mut Actor) {
+    let animation_count = actor.animations.len();
+    for animation_index in 0..animation_count {
+        let sprite_count = actor.animations[animation_index].src_rect.len();
+        for sprite_index in 0..sprite_count {
+            copy_sprite::<P>(actor, animation_index, sprite_index);
         }
-
-        dst_offset_y += animation.dst_size.height + OFFSET_PX;
     }
 }
 
-fn save_dst_image(asset: &PngAsset, dst_width: u32, dst_height: u32, data: &[u8]) -> Result<(), Box<dyn ::std::error::Error>> {
+//
+// Export actor dst
+//
+
+fn export_image(actor: &mut Actor) -> Result<(), Box<dyn ::std::error::Error>> {
     use std::io::BufWriter;
-    let dst = dst_path(asset, "png")?;
-    println!("Writing sprites data to {:?}", dst);
 
-    let file = File::create(dst)?;
+    println!("Writing sprites data to {:?}", &actor.dst_path);
+
+    let file = File::create(&actor.dst_path)?;
     let ref mut w = BufWriter::new(file);
 
-    let mut encoder = png::Encoder::new(w, dst_width, dst_height);
+    let mut encoder = png::Encoder::new(w, actor.dst_image_info.width, actor.dst_image_info.height);
     encoder.set_compression(png::Compression::Best);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_color(actor.dst_image_info.color_type);
+    encoder.set_depth(actor.dst_image_info.bit_depth);
     encoder.set_source_gamma(png::ScaledFloat::from_scaled(45455));
     encoder.set_source_gamma(png::ScaledFloat::new(1.0 / 2.2));
     let source_chromaticities = png::SourceChromaticities::new(
@@ -302,78 +327,73 @@ fn save_dst_image(asset: &PngAsset, dst_width: u32, dst_height: u32, data: &[u8]
     encoder.set_source_chromaticities(source_chromaticities);
     let mut writer = encoder.write_header()?;
 
-    writer.write_image_data(data)?;
+    writer.write_image_data(&actor.dst_bytes)?;
 
     Ok(())
 }
 
-fn save_dst_csv(asset: &PngAsset, animations: &[Animation]) -> Result<(), Box<dyn ::std::error::Error>> {
+fn export_csv(actor: &Actor) -> Result<(), Box<dyn ::std::error::Error>> {
     use std::io::Write;
 
-    let out = dst_path(asset, "csv")?;
-    let mut csv_out = String::with_capacity(animations.len() * 100);
+    let mut csv_out = String::with_capacity(actor.animations.len() * 100);
 
-    for animation in animations.iter() {
-        csv_out.push_str(&animation.name);
-        csv_out.push_str(&format!(";{};{};{};", OFFSET_PX, animation.dst_size.width, animation.dst_size.height));
+    let animation_count = actor.animations.len();
+    for animation_index in 0..animation_count {
+        let animation = &actor.animations[animation_index];
+        let name = actor.animation_names.get(animation_index).map(|n| *n).unwrap_or_else(|| format!("UNNAMED_{animation_index}").leak() );
 
-        let y_offset = animation.dst_sprite_y_offset;
-        for x_offset in animation.dst_sprite_x_offsets.iter() {
-            csv_out.push_str(&format!("{};{};", x_offset, y_offset));
+        let sprite_count = animation.dst_rect.len();
+
+        csv_out.push_str(name);
+        csv_out.push_str(&format!(";{};{};{};{};", OFFSET_PX, sprite_count, animation.dst_sprite_size.width, animation.dst_sprite_size.height));
+
+        for sprite in animation.dst_rect.iter() {
+            csv_out.push_str(&format!("{},{},{},{};", sprite.left, sprite.top, sprite.right, sprite.bottom));
         }
+
         csv_out.push_str("\r\n");
     }
 
-    let mut file = File::create(out)?;
+    let mut file = File::create(&actor.dst_path_csv)?;
     file.write(csv_out.as_bytes())?;
 
     Ok(())
 }
 
-fn export_actor_sprites(asset: &PngAsset, animations: &mut [Animation]) {
-    let dst_total_size = exported_image_size(animations);
-    let dst_line_line = dst_total_size.width as usize * pixel_size(asset);
-    let total_dst_data_size = dst_line_line * (dst_total_size.height as usize);
-    let mut dst_data = vec![0u8; total_dst_data_size];
+//
+// Processing actors
+//
 
-    export_animation_data(asset, animations, &mut dst_data, dst_line_line);
-
-    if let Err(e) = save_dst_image(asset, dst_total_size.width, dst_total_size.height, &dst_data) {
-        println!("ERROR: Failed to export actors sprites: {:?}", e);
+fn process_actor_sprites(state: &mut AssetsState) {
+    fn process_single_actor<P: Copy+Default+PartialEq>(actor: &mut Actor) {
+        find_actor_animation_sources::<P>(actor);
+        prepare_actor_dst::<P>(actor);
+        compute_sprites_dst(actor);
+        copy_sprites_dst::<P>(actor);
     }
 
-    if let Err(e) = save_dst_csv(asset, animations) {
-        println!("ERROR: Failed to export actors sprites csv: {:?}", e);
-    }
-}
-
-fn generate_actors_sprites(state: &AssetsState) {
-    for actor in state.actors.iter() {
-        if actor.image_bytes.len() == 0 {
+    for actor in state.actors.iter_mut() {
+        if !actor.loaded {
             continue;
         }
 
-        let cell_height = actor.spritesheet_info.cell_height;
-        let animations_count = actor.image_info.height / cell_height;
-        let mut animations = Vec::with_capacity(animations_count as usize);
-        
-        for i in 0..animations_count {
-            let yrange = [(i*cell_height) as usize, ((i+1)*cell_height) as usize];
-            let mut animation = Animation::default();
-
-            animation.name = actor.spritesheet_info.animation_names[i as usize].to_string();
-
-            parse_src_sprites(actor, &mut animation, yrange);
-
-            animations.push(animation);
+        match (actor.src_image_info.bit_depth, actor.src_image_info.color_type) {
+            (png::BitDepth::Eight, png::ColorType::Rgba) => process_single_actor::<[u8;4]>(actor),
+            combined => unimplemented!("process_actor_sprites for {:?} is not implemented", combined)
         }
 
-        export_actor_sprites(actor, &mut animations);
+        if let Err(e) = export_image(actor) {
+            println!("ERROR: Failed to export actors sprites: {:?}", e);
+        }
+        
+        if let Err(e) = export_csv(actor) {
+            println!("ERROR: Failed to export actors sprites csv: {:?}", e);
+        }
     }
 }
 
 pub fn generate_sprites(filters: &[String]) {
-    let mut state = load_state();
-    load_state_data(&mut state, filters);
-    generate_actors_sprites(&state);
+    let mut state = AssetsState::default();
+    load_actors(filters, &mut state);
+    process_actor_sprites(&mut state);
 }

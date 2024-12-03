@@ -1,3 +1,4 @@
+mod shared;
 mod shaders;
 mod textures;
 mod generate_sprite;
