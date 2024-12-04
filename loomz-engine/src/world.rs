@@ -2,7 +2,8 @@ use std::slice;
 use std::sync::Arc;
 use fnv::FnvHashMap;
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
-use loomz_shared::{CommonError, CommonErrorType, assets::{LoomzAssetsBundle, TextureId}, api::{LoomzApi, WorldComponentUpdate, WorldComponent}};
+use loomz_shared::api::{LoomzApi, WorldComponent, WorldComponentUpdate, WorldAnimation, WorldAnimationUpdate};
+use loomz_shared::{assets::{LoomzAssetsBundle, TextureId}, CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, assets_err, chain_err};
 
 const WORLD_VERT_SRC: &[u8] = include_bytes!("../../assets/shaders/world.vert.spv");
@@ -41,6 +42,7 @@ struct WorldObject {
 }
 
 struct WorldModuleObjects {
+    animations: Vec<WorldAnimation>,
     instances: Vec<WorldObject>,
     index: Vec<u32>,
     vertex: Vec<WorldVertex>,
@@ -66,12 +68,14 @@ pub(crate) struct WorldModule {
 
     push_constants: [WorldPushConstant; 1],
     batches: Vec<WorldBatch>,
+    update_batches: bool,
 }
 
 impl WorldModule {
 
     pub fn init(core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<Box<Self>, CommonError> {
         let objects = WorldModuleObjects {
+            animations: Vec::with_capacity(16),
             instances: Vec::with_capacity(16),
             index: Vec::with_capacity(3000),
             vertex: Vec::with_capacity(2000)
@@ -96,6 +100,7 @@ impl WorldModule {
             data: Box::new(data),
             push_constants: [WorldPushConstant::default(); 1],
             batches: Vec::with_capacity(16),
+            update_batches: false,
         };
 
         world.setup_pipeline(core)?;
@@ -135,25 +140,13 @@ impl WorldModule {
         push.screen_height = swapchain_extent.height as f32;
     }
 
-    pub fn update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let mut update_batches = false;
-
-        if let Some(components) = api.world().components() {
-            let mut iter_components = components.iter();
-            while let Some(Some(update)) = iter_components.next() {
-                match update.uid.bound_value() {
-                    Some(index) => self.update_world_component(core, update, index)?,
-                    None => self.create_world_component(core, update)?
-                }
-                update_batches = true;
-            }
-        }
-
-        if update_batches && self.clear_batches() {
-            self.update_batches(core);
-        }
-
-        Ok(())
+    //
+    // Rendering
+    //
+    
+    #[inline(always)]
+    fn push_values(&self) -> &[u8] {
+        unsafe { self.push_constants.align_to::<u8>().1 }
     }
 
     pub fn render(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
@@ -172,15 +165,11 @@ impl WorldModule {
         }
     }
 
-    fn push_values(&self) -> &[u8] {
-        unsafe { self.push_constants.align_to::<u8>().1 }
-    }
-
     //
     // Updates
     //
-
-    fn update_world_component(&mut self, core: &mut LoomzEngineCore, update: &WorldComponentUpdate, index: usize) -> Result<(), CommonError> {
+    
+    fn update_world_component(&mut self, core: &mut LoomzEngineCore, update: WorldComponentUpdate, index: usize) -> Result<(), CommonError> {
         let component = update.component;
         let instance = &self.data.objects.instances[index];
         let old_texture_id = instance.component.texture_id;
@@ -198,7 +187,7 @@ impl WorldModule {
         Ok(())
     }
 
-    fn create_world_component(&mut self, core: &mut LoomzEngineCore, update: &WorldComponentUpdate) -> Result<(), CommonError> {
+    fn create_world_component(&mut self, core: &mut LoomzEngineCore, update: WorldComponentUpdate) -> Result<(), CommonError> {
         let component = update.component;
         let image_view = self.fetch_texture_view(core, component.texture_id)?;
         let obj = WorldObject {
@@ -215,10 +204,108 @@ impl WorldModule {
         Ok(())
     }
 
+    fn create_world_animation(&mut self, update: WorldAnimationUpdate) {
+        let animations = &mut self.data.objects.animations;
+        let new_id = animations.len() as u32;
+        animations.push(update.animation);
+        update.uid.bind(new_id);
+    }
+
+    fn api_update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        if let Some(animations) = api.world().animations() {
+            for update in animations {
+                match update.uid.bound_value() {
+                    Some(index) => { },
+                    None => {
+                        self.create_world_animation(update);
+                    }
+                }
+            }
+        }
+        
+        if let Some(components) = api.world().components() {
+            for update in components {
+                match update.uid.bound_value() {
+                    Some(index) => self.update_world_component(core, update, index)?,
+                    None => {
+                        self.update_batches = true;
+                        self.create_world_component(core, update)?
+                    }
+                }
+                
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        self.api_update(api, core)?;
+        
+        if self.update_batches {
+            self.clear_batches();
+            if !self.data.objects.instances.is_empty() {
+                self.update_batches(core);
+            }
+
+            self.update_batches = false;
+        }
+
+        Ok(())
+    }
 
     //
     // Batching
     //
+
+    fn clear_batches(&mut self) -> bool {
+        self.data.objects.index.clear();
+        self.data.objects.vertex.clear();
+        self.data.descriptors.alloc.clear_sets(0);
+        self.data.descriptors.updates.clear();
+        self.batches.clear();
+        self.data.objects.instances.len() > 0
+    }
+   
+    fn generate_batch(
+        batches: &mut Vec<WorldBatch>,
+        descriptors: &mut WorldModuleDescriptors,
+        batch: &mut WorldBatch,
+        image_view: vk::ImageView
+    ) {
+        let next_set = descriptors.alloc.next_set(0);
+
+        let mut new_batch = *batch;
+        new_batch.set = next_set;
+        batches.push(new_batch);
+
+        descriptors.updates.write_simple_image(next_set, image_view, &descriptors.texture_params);
+
+        *batch = WorldBatch::default();
+    }
+
+    unsafe fn generate_indices(index_offset: u32, vertex_offset: u32, indices: *mut u32) {
+        let v = vertex_offset;
+        let indices = indices.offset(index_offset as isize);
+        indices.offset(0).write(v);
+        indices.offset(1).write(v+2);
+        indices.offset(2).write(v+1);
+        indices.offset(3).write(v+2);
+        indices.offset(4).write(v+3);
+        indices.offset(5).write(v+1);
+    }
+    
+    unsafe fn generate_vertex(vertex_offset: u32, vertex: *mut WorldVertex, component: WorldComponent) {
+        let [x, y] = component.position.splat();
+        let [w, h] = component.size.splat();
+        let [uvl, uvt, uvr, uvb] = component.uv.splat();
+
+        let vertex = vertex.offset(vertex_offset as isize);
+        vertex.offset(0).write(WorldVertex { pos: [x,   y],   uv: [uvl, uvt] });
+        vertex.offset(1).write(WorldVertex { pos: [x+w, y],   uv: [uvr, uvt] });
+        vertex.offset(2).write(WorldVertex { pos: [x,   y+h], uv: [uvl, uvb] });
+        vertex.offset(3).write(WorldVertex { pos: [x+w, y+h], uv: [uvr, uvb] });
+    }
 
     fn update_batches(&mut self, core: &mut LoomzEngineCore) {
         let objects = &mut self.data.objects;
@@ -257,63 +344,7 @@ impl WorldModule {
             Self::generate_batch(&mut self.batches, &mut self.data.descriptors, &mut next_batch, last_view);
         }
 
-        self.upload_batch_data(core);
-        self.queue_descriptor_updates(core);
-    }
-
-    fn generate_batch(
-        batches: &mut Vec<WorldBatch>,
-        descriptors: &mut WorldModuleDescriptors,
-        batch: &mut WorldBatch,
-        image_view: vk::ImageView
-    ) {
-        let next_set = descriptors.alloc.next_set(0);
-
-        let mut new_batch = *batch;
-        new_batch.set = next_set;
-        batches.push(new_batch);
-
-        descriptors.updates.write_simple_image(next_set, image_view, &descriptors.texture_params);
-
-        *batch = WorldBatch::default();
-    }
-
-    fn clear_batches(&mut self) -> bool {
-        self.data.objects.index.clear();
-        self.data.objects.vertex.clear();
-        self.data.descriptors.alloc.clear_sets(0);
-        self.data.descriptors.updates.clear();
-        self.batches.clear();
-        self.data.objects.instances.len() > 0
-    }
-
-    unsafe fn generate_indices(index_offset: u32, vertex_offset: u32, indices: *mut u32) {
-        let v = vertex_offset;
-        let indices = indices.offset(index_offset as isize);
-        indices.offset(0).write(v);
-        indices.offset(1).write(v+2);
-        indices.offset(2).write(v+1);
-        indices.offset(3).write(v+2);
-        indices.offset(4).write(v+3);
-        indices.offset(5).write(v+1);
-    }
-    
-    unsafe fn generate_vertex(vertex_offset: u32, vertex: *mut WorldVertex, component: WorldComponent) {
-        let [x, y] = component.position.splat();
-        let [w, h] = component.size.splat();
-
-        let vertex = vertex.offset(vertex_offset as isize);
-        vertex.offset(0).write(WorldVertex { pos: [x,   y],   uv: [0.0, 0.0] });
-        vertex.offset(1).write(WorldVertex { pos: [x+w, y],   uv: [1.0, 0.0] });
-        vertex.offset(2).write(WorldVertex { pos: [x,   y+h], uv: [0.0, 1.0] });
-        vertex.offset(3).write(WorldVertex { pos: [x+w, y+h], uv: [1.0, 1.0] });
-    }
-
-    fn upload_batch_data(&self, core: &mut LoomzEngineCore) {
         self.vertex.set_data(core, &self.data.objects.index, &self.data.objects.vertex);
-    }
-
-    fn queue_descriptor_updates(&mut self, core: &mut LoomzEngineCore) {
         self.data.descriptors.updates.submit(core);
     }
 

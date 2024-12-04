@@ -10,9 +10,13 @@ const ASSET_METADATA_PATH: &'static str = "./assets/assets.csv";
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TextureId(pub NonZeroU32);
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct JsonId(pub NonZeroU32);
+
 #[derive(Copy, Clone)]
 enum AssetId {
-    Texture(TextureId)
+    Texture(TextureId),
+    Json(JsonId)
 }
 
 pub struct AssetsTextureData {
@@ -23,7 +27,8 @@ pub struct AssetsTextureData {
 /// Static asset bundle referencing all the assets in the program
 pub struct LoomzAssetsBundle {
     assets_by_name: FnvHashMap<String, AssetId>,
-    textures: FnvHashMap<TextureId, AssetsTextureData>
+    textures: FnvHashMap<TextureId, AssetsTextureData>,
+    json: FnvHashMap<JsonId, String>,
 }
 
 impl LoomzAssetsBundle {
@@ -65,8 +70,19 @@ impl LoomzAssetsBundle {
         }
     }
 
+    pub fn json_id_by_name(&self, name: &str) -> Option<JsonId> {
+        match self.assets_by_name.get(name) {
+            Some(AssetId::Json(id)) => Some(*id),
+            _ => None
+        }
+    }
+
     pub fn texture<'a>(&'a self, id: TextureId) -> Option<&'a AssetsTextureData> {
         self.textures.get(&id)
+    }
+
+    pub fn json<'a>(&'a self, id: JsonId) -> Option<&'a String> {
+        self.json.get(&id)
     }
 
     fn split_csv<CB: FnMut(&[&str])>(csv: &str, mut cb: CB) {
@@ -103,6 +119,7 @@ impl LoomzAssetsBundle {
     fn parse_asset(&mut self, id: NonZeroU32, args: &[&str]) -> Result<(), CommonError> {
         match args[0] {
             "TEXTURE" => self.parse_texture(id, args),
+            "JSON" => self.parse_json(id, args),
             _ => Err(assets_err!("Unknown asset type {:?}", args[0]))
         }
     }
@@ -121,6 +138,18 @@ impl LoomzAssetsBundle {
         Ok(())
     }
 
+    fn parse_json(&mut self, id: NonZeroU32, args: &[&str]) -> Result<(), CommonError> {
+        let path = format!("./assets/{}", args[3]);
+        let src = ::std::fs::read_to_string(path)
+            .map_err(|err|  assets_err!("Failed to open json file {:?}", err) )?;
+
+        let name = args[2].to_string();
+        self.assets_by_name.insert(name, AssetId::Json(JsonId(id)));
+        self.json.insert(JsonId(id), src);
+
+        Ok(())
+    }
+
 }
 
 impl Default for LoomzAssetsBundle {
@@ -128,6 +157,7 @@ impl Default for LoomzAssetsBundle {
         LoomzAssetsBundle {
             assets_by_name: FnvHashMap::default(),
             textures: FnvHashMap::default(),
+            json: FnvHashMap::default(),
         }
     }
 }

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
-crate-type = ["lib", "dylib"]
+crate-type = ["lib"]
 
 [features]
 default = []
@@ -12,3 +12,4 @@ hot-reload = []
 
 [dependencies]
 loomz-shared = { path = "../loomz-shared" }
+jsonic = "0.2.12"

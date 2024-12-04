@@ -4,7 +4,7 @@ use parking_lot::{MutexGuard, Mutex};
 use crate::assets::{LoomzAssetsBundle, TextureId};
 use crate::store::{StoreAndLoad, SaveFileReaderBase, SaveFileWriterBase};
 use crate::inputs::InputBuffer;
-use crate::base_types::_2d::{Position, Size};
+use crate::base_types::{RectF32, _2d::{Position, Size}};
 use crate::CommonError;
 
 #[derive(Clone)]
@@ -58,23 +58,37 @@ impl Default for Uid {
 
 
 const WORLD_COMPONENT_UPDATES_CAP: usize = 100;
-type ComponentUpdates = Box<[Option<WorldComponentUpdate>; WORLD_COMPONENT_UPDATES_CAP]>;
+type WorldComponentUpdates = Box<[Option<WorldComponentUpdate>; WORLD_COMPONENT_UPDATES_CAP]>;
+
+const WORLD_ANIMATION_UPDATES_CAP: usize = 20;
+type WorldAnimationUpdates = Box<[Option<WorldAnimationUpdate>; WORLD_ANIMATION_UPDATES_CAP]>;
 
 pub struct WorldComponentUpdate {
     pub uid: Uid,
-    pub component:WorldComponent,
+    pub component: WorldComponent,
+}
+
+pub struct WorldAnimationUpdate {
+    pub uid: Uid,
+    pub animation: WorldAnimation,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct WorldComponent {
     pub position: Position<f32>,
     pub size: Size<f32>,
+    pub uv: RectF32,
     pub texture_id: TextureId,
+}
+
+pub struct WorldAnimation {
 }
 
 pub struct WorldApi {
     components_length: AtomicUsize,
-    components: Mutex<ComponentUpdates>
+    components: Mutex<WorldComponentUpdates>,
+    animations_length: AtomicUsize,
+    animations: Mutex<WorldAnimationUpdates>,
 }
 
 impl WorldApi {
@@ -83,6 +97,8 @@ impl WorldApi {
         WorldApi {
             components_length: AtomicUsize::new(0),
             components: Mutex::new(new_boxed_array()),
+            animations_length: AtomicUsize::new(0),
+            animations: Mutex::new(new_boxed_array()),
         }
     }
 
@@ -96,16 +112,49 @@ impl WorldApi {
         });
     }
 
-    pub fn components(&self) -> Option<MutexGuard<ComponentUpdates>> {
+    pub fn components<'a>(&'a self) -> Option<impl Iterator<Item = WorldComponentUpdate> + 'a> {
         match self.components_length.load(Ordering::SeqCst) {
             0 => None,
             _ => {
-                self.components_length.store(0, Ordering::Relaxed);
-                let components_guard = self.components.lock();
-                Some(components_guard)
+                let mut index = 0;
+                let mut guard = self.components.lock();
+                self.components_length.store(0, Ordering::SeqCst);
+                Some(::std::iter::from_fn(move || {
+                    let value = guard[index].take();
+                    index += 1;
+                    value
+                }))
             },
         }
     }
+
+    pub fn create_animation(&self, uid: &Uid, animation: WorldAnimation) {
+        let mut animations = self.animations.lock();
+        let index = self.animations_length.fetch_add(1, Ordering::SeqCst);
+        assert!(index < WORLD_ANIMATION_UPDATES_CAP, "Increase animation buffer cap");
+
+        animations[index] = Some(WorldAnimationUpdate {
+            uid: uid.clone(),
+            animation,
+        });
+    }
+
+    pub fn animations<'a>(&'a self) -> Option<impl Iterator<Item = WorldAnimationUpdate> + 'a> {
+        match self.animations_length.load(Ordering::SeqCst) {
+            0 => None,
+            _ => {
+                let mut index = 0;
+                let mut guard = self.animations.lock();
+                self.animations_length.store(0, Ordering::SeqCst);
+                Some(::std::iter::from_fn(move || {
+                    let value = guard[index].take();
+                    index += 1;
+                    value
+                }))
+            },
+        }
+    }
+
 
 }
 
@@ -179,8 +228,8 @@ fn new_boxed_array<const S: usize, T: Default>() -> Box<[T; S]> {
     let mut data = Box::new_uninit();
     unsafe {
         let data_ptr = data.as_mut_ptr() as *mut T;
-        for i in 0..WORLD_COMPONENT_UPDATES_CAP {
-            data_ptr.offset(i as isize).write(T::default());
+        for i in 0..S {
+            data_ptr.add(i).write(T::default());
         }
 
         data.assume_init()

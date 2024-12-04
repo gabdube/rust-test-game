@@ -19,8 +19,7 @@ fn match_filter(entry: &Path, filters: &[String]) -> bool {
     }
 
     let entry_str = entry.to_str().unwrap_or("");
-    let entry_name = entry.file_name().and_then(|name| name.to_str() ).unwrap_or("");
-    filters.iter().any(|f| entry_str.starts_with(f) || entry_name.starts_with(f) )
+    filters.iter().any(|f| entry_str.matches(f).next().is_some() )
 }
 
 fn must_watch() -> bool {

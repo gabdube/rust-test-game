@@ -19,7 +19,6 @@ pub struct LoomzApplication {
     client: LoomzClient,
     engine: LoomzEngine,
     last_error: Option<CommonError>,
-    frame_count: u64,
 }
 
 impl LoomzApplication {
@@ -35,7 +34,6 @@ impl LoomzApplication {
             client,
             engine,
             last_error: None,
-            frame_count: 0,
         };
 
         Ok(app)
@@ -71,7 +69,6 @@ impl LoomzApplication {
     pub fn redraw(&mut self) -> Result<(), CommonError> {
         self.engine.render()?;
         self.window().request_redraw();
-        self.frame_count += 1;
         Ok(())
     }
 

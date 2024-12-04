@@ -1,14 +1,9 @@
+#![allow(dead_code)]
+
 #[derive(Debug, Default, Copy, Clone)]
 pub struct Size {
     pub width: u32,
     pub height: u32
-}
-
-impl Size {
-    #[inline(always)]
-    pub fn splat(&self) -> [u32; 2] {
-        [self.width, self.height]
-    }
 }
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -16,14 +11,6 @@ pub struct Offset {
     pub x: u32,
     pub y: u32
 }
-
-impl Offset {
-    #[inline(always)]
-    pub fn splat(&self) -> [u32; 2] {
-        [self.x, self.y]
-    }
-}
-
 
 #[derive(Debug, Default, Copy, Clone)]
 pub struct Rect {

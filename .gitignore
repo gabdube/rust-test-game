@@ -6,8 +6,8 @@
 *.aseprite
 *.zip
 *.kra
+*.json
 .DS_Store
 todo.md
 temp.md
 pipeline.cache
-assets/dev/textures/*.csv

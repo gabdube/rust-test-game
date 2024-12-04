@@ -5,7 +5,7 @@ use crate::shared::{Rect, Size, size};
 
 const SRC_ROOT: &str = "assets/dev/tiny_sword/";
 const DST_ROOT: &str = "assets/dev/textures/";
-const OFFSET_PX: u32 = 2;
+const PADDING_PX: u32 = 2;
 
 struct OutputInfo(png::OutputInfo);
 
@@ -40,9 +40,10 @@ struct ActorAnimation {
 /// All the info required to read and process a "actor" sprites 
 #[derive(Clone)]
 struct Actor {
+    file_name: String,
     src_path: &'static str,
     dst_path: String,
-    dst_path_csv: String,
+    dst_path_json: String,
     src_sprite_size: Size,
     src_image_info: OutputInfo,
     dst_image_info: OutputInfo,
@@ -71,19 +72,16 @@ fn load_actors_source(actor: &mut Actor) {
     actor.src_bytes = vec![0; reader.output_buffer_size()];
     actor.src_image_info.0 = reader.next_frame(&mut actor.src_bytes).unwrap();
     actor.loaded = true;
-
-    // Also save the dst_path while we're at it
-    let name = ::std::path::Path::new(&path).file_stem().and_then(|n| n.to_str() ).unwrap();
-    actor.dst_path = format!("{DST_ROOT}{name}.png");
-    actor.dst_path_csv = format!("{DST_ROOT}{name}.csv");
 }
 
 fn load_actors(filters: &[String], state: &mut AssetsState) {
-    const fn actor(src_path: &'static str, src_sprite_size: Size, animation_names: &'static [&'static str]) -> Actor {
+    fn actor(src_path: &'static str, src_sprite_size: Size, animation_names: &'static [&'static str]) -> Actor {
+        let file_name = ::std::path::Path::new(&src_path).file_stem().and_then(|n| n.to_str() ).unwrap();
         Actor {
+            file_name: file_name.to_string(),
             src_path,
-            dst_path: String::new(),
-            dst_path_csv: String::new(),
+            dst_path: format!("{DST_ROOT}{file_name}.png"),
+            dst_path_json: format!("{DST_ROOT}{file_name}.json"),
             src_sprite_size,
             src_image_info: OutputInfo::default(),
             dst_image_info: OutputInfo::default(),
@@ -95,12 +93,11 @@ fn load_actors(filters: &[String], state: &mut AssetsState) {
         }
     }
 
-    const ACTORS: &[Actor] = &[
-        actor("Factions/Knights/Troops/Pawn/Blue/Pawn_Blue.png", size(192, 192), &["idle", "walk", "hammer", "axe", "idle_hold", "idle_walk"]),
-        actor("Factions/Knights/Troops/Warrior/Blue/Warrior_Blue.png", size(192, 192), &["idle", "walk", "strike-horz-1", "strike-horz-2", "strike-bottom-1", "strike-bottom-2", "strike-top-1", "strike-top-2"]),
-    ];
-
-    for actor in ACTORS.iter() {
+    let mut actors = Vec::with_capacity(10);
+    actors.push(actor("Factions/Knights/Troops/Pawn/Blue/Pawn_Blue.png", size(192, 192), &["idle", "walk", "hammer", "axe", "idle_hold", "idle_walk"]));
+    actors.push(actor("Factions/Knights/Troops/Warrior/Blue/Warrior_Blue.png", size(192, 192), &["idle", "walk", "strike-horz-1", "strike-horz-2", "strike-bottom-1", "strike-bottom-2", "strike-top-1", "strike-top-2"]));
+    
+    for actor in actors.iter() {
         if !filters.is_empty() {
             if !filters.iter().any(|f| actor.src_path.matches(f).next().is_some() ) {
                 continue;
@@ -212,10 +209,10 @@ fn prepare_actor_dst<P>(actor: &mut Actor) {
         animation.dst_sprite_size = size(offsets_max.left + offsets_max.right, offsets_max.top + offsets_max.bottom);
 
         let sprite_count = animation.src_offset.len() as u32;
-        let total_width = (animation.dst_sprite_size.width * sprite_count) + (OFFSET_PX * sprite_count);
+        let total_width = (animation.dst_sprite_size.width * sprite_count) + (PADDING_PX * sprite_count);
 
         dst_width = u32::max(dst_width, total_width);
-        dst_height += animation.dst_sprite_size.height + OFFSET_PX;
+        dst_height += animation.dst_sprite_size.height + PADDING_PX;
     }
 
     actor.dst_image_info = actor.src_image_info.clone();
@@ -252,11 +249,11 @@ fn compute_sprites_dst(actor: &mut Actor) {
                 bottom: y_loc + height,
             });
 
-            x += dst_size.width + OFFSET_PX;
+            x += dst_size.width + PADDING_PX;
         }
 
         x = 0;
-        y += dst_size.height + OFFSET_PX;
+        y += dst_size.height + PADDING_PX;
     }
 }
 
@@ -332,30 +329,53 @@ fn export_image(actor: &mut Actor) -> Result<(), Box<dyn ::std::error::Error>> {
     Ok(())
 }
 
-fn export_csv(actor: &Actor) -> Result<(), Box<dyn ::std::error::Error>> {
+fn export_json(actor: &Actor) -> Result<(), Box<dyn ::std::error::Error>> {
     use std::io::Write;
 
-    let mut csv_out = String::with_capacity(actor.animations.len() * 100);
+    fn write_line<V: ::std::fmt::Debug>(js_out: &mut String, key: &str, value: V) {
+        js_out.push_str(&format!("      {:?}: {:?},\r\n", key, value));
+    }
+
+    let default_buffer_size = 10_000;
+    let mut js_out = String::with_capacity(default_buffer_size);
+
+    js_out.push_str("{\r\n");
+    js_out.push_str(&format!("  \"name\": {:?},\r\n", actor.file_name));
+    js_out.push_str(&"  \"animations\": [\r\n");
 
     let animation_count = actor.animations.len();
     for animation_index in 0..animation_count {
         let animation = &actor.animations[animation_index];
+        let sprite_count = animation.dst_rect.len();
         let name = actor.animation_names.get(animation_index).map(|n| *n).unwrap_or_else(|| format!("UNNAMED_{animation_index}").leak() );
 
-        let sprite_count = animation.dst_rect.len();
+        js_out.push_str(&"    {\r\n");
+        write_line(&mut js_out, "name", name);
+        write_line(&mut js_out, "sprite_count", sprite_count);
+        write_line(&mut js_out, "sprite_padding", PADDING_PX);
+        write_line(&mut js_out, "sprite_width", animation.dst_sprite_size.width);
+        write_line(&mut js_out, "sprite_height", animation.dst_sprite_size.height);
 
-        csv_out.push_str(name);
-        csv_out.push_str(&format!(";{};{};{};{};", OFFSET_PX, sprite_count, animation.dst_sprite_size.width, animation.dst_sprite_size.height));
-
-        for sprite in animation.dst_rect.iter() {
-            csv_out.push_str(&format!("{},{},{},{};", sprite.left, sprite.top, sprite.right, sprite.bottom));
+        js_out.push_str("      \"sprites\": [");
+        for i in 0..sprite_count {
+            let sprite = animation.dst_rect[i];
+            js_out.push_str(&format!("[{},{},{},{}]", sprite.left, sprite.top, sprite.right, sprite.bottom));
+            if i != (sprite_count-1) {
+                js_out.push_str(", ");
+            }
         }
+        js_out.push_str("]\r\n    }");
 
-        csv_out.push_str("\r\n");
+        if animation_index != animation_count - 1{
+            js_out.push(',');
+        }
+        js_out.push_str(&"\r\n");
     }
 
-    let mut file = File::create(&actor.dst_path_csv)?;
-    file.write(csv_out.as_bytes())?;
+    js_out.push_str("  ]\r\n}");
+
+    let mut file = File::create(&actor.dst_path_json)?;
+    file.write(js_out.as_bytes())?;
 
     Ok(())
 }
@@ -386,8 +406,8 @@ fn process_actor_sprites(state: &mut AssetsState) {
             println!("ERROR: Failed to export actors sprites: {:?}", e);
         }
         
-        if let Err(e) = export_csv(actor) {
-            println!("ERROR: Failed to export actors sprites csv: {:?}", e);
+        if let Err(e) = export_json(actor) {
+            println!("ERROR: Failed to export actors sprites json: {:?}", e);
         }
     }
 }

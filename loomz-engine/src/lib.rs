@@ -2,10 +2,10 @@ mod world;
 mod record;
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 use loomz_engine_core::LoomzEngineCore;
 use loomz_shared::{backend_init_err, CommonError, api::LoomzApi};
-
 
 pub struct LoomzEngine {
     api: LoomzApi,
@@ -24,7 +24,7 @@ impl LoomzEngine {
             api: api.clone(),
             core,
             world,
-            pipeline_cache
+            pipeline_cache,
         };
 
         engine.compile_pipelines()?;
