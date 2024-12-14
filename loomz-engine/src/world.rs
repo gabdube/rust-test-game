@@ -1,7 +1,7 @@
-use std::slice;
+use std::{slice, u32};
 use std::sync::Arc;
 use fnv::FnvHashMap;
-use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
+use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
 use loomz_shared::api::{LoomzApi, WorldComponent, WorldComponentUpdate, WorldAnimation, WorldAnimationUpdate};
 use loomz_shared::{assets::{LoomzAssetsBundle, TextureId}, CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, assets_err, chain_err};
@@ -11,6 +11,12 @@ const WORLD_FRAG_SRC: &[u8] = include_bytes!("../../assets/shaders/world.frag.sp
 
 const PUSH_STAGE_FLAGS: vk::ShaderStageFlags = vk::ShaderStageFlags::VERTEX;
 const PUSH_SIZE: u32 = size_of::<WorldPushConstant>() as u32;
+
+const GLOBAL_LAYOUT_INDEX: usize = 0;
+const SPRITES_BUFFER_DATA_BINDING: usize = 0;
+
+const BATCH_LAYOUT_INDEX: usize = 1;
+const TEXTURE_BINDING: usize = 0;
 
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
@@ -23,29 +29,35 @@ pub struct WorldPushConstant {
 #[derive(Default, Copy, Clone)]
 pub struct WorldVertex {
     pub pos: [f32; 2],
-    pub uv: [f32; 2],
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
-pub struct WorldBatch {
-    pub set: vk::DescriptorSet,
-    pub index_count: u32,
-    pub first_index: u32,
-    pub vertex_offset: i32,
+#[derive(Default, Copy, Clone)]
+pub struct SpriteData {
+    pub offset: [f32; 2],
+    pub size: [f32; 2],
+    pub uv_offset: [f32; 2],
+    pub uv_size: [f32; 2],
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct WorldBatch {
+    pub dst_set: vk::DescriptorSet,
+    pub instances_count: u32,
+    pub instances_offset: u32,
+}
+
+#[derive(Copy, Clone)]
 struct WorldObject {
     image_view: vk::ImageView,
+    sprite_index: u32,
     component: WorldComponent,
-    vertex_offset: u32,
 }
 
 struct WorldModuleObjects {
     animations: Vec<WorldAnimation>,
     instances: Vec<WorldObject>,
-    index: Vec<u32>,
-    vertex: Vec<WorldVertex>,
 }
 
 struct WorldModuleDescriptors {
@@ -57,17 +69,23 @@ struct WorldModuleDescriptors {
 struct WorldData {
     textures: FnvHashMap<TextureId, Texture>,
     descriptors: WorldModuleDescriptors,
+    sprites: StorageAlloc<SpriteData>,
     objects: WorldModuleObjects,
 }
 
+#[repr(C)]
 pub(crate) struct WorldModule {
     assets: Arc<LoomzAssetsBundle>,
+    data: Box<WorldData>,
+
     pipeline: GraphicsPipeline,
     vertex: VertexAlloc<WorldVertex>,
-    data: Box<WorldData>,
+
+    sprites_data_set: vk::DescriptorSet,
 
     push_constants: [WorldPushConstant; 1],
     batches: Vec<WorldBatch>,
+
     update_batches: bool,
 }
 
@@ -77,8 +95,6 @@ impl WorldModule {
         let objects = WorldModuleObjects {
             animations: Vec::with_capacity(16),
             instances: Vec::with_capacity(16),
-            index: Vec::with_capacity(3000),
-            vertex: Vec::with_capacity(2000)
         };
 
         let descriptors = WorldModuleDescriptors {
@@ -89,23 +105,30 @@ impl WorldModule {
 
         let data = WorldData {
             textures: FnvHashMap::default(),
-            objects,
             descriptors,
+            sprites: StorageAlloc::default(),
+            objects,
         };
 
         let mut world = WorldModule {
             assets: api.assets(),
+            data: Box::new(data),
+
             pipeline: GraphicsPipeline::new(),
             vertex: VertexAlloc::default(),
-            data: Box::new(data),
+
+            
+            sprites_data_set: vk::DescriptorSet::null(),
+           
             push_constants: [WorldPushConstant::default(); 1],
             batches: Vec::with_capacity(16),
             update_batches: false,
         };
 
         world.setup_pipeline(core)?;
-        world.setup_buffers(core)?;
         world.setup_descriptors(core)?;
+        world.setup_vertex_buffers(core)?;
+        world.setup_sprites_buffers(core)?;
 
         Ok(Box::new(world))
     }
@@ -119,6 +142,7 @@ impl WorldModule {
 
         self.pipeline.destroy(&core.ctx);
         self.vertex.free(core);
+        self.data.sprites.free(core);
     }
 
     pub fn pipeline(&mut self) -> &mut GraphicsPipeline {
@@ -151,17 +175,17 @@ impl WorldModule {
 
     pub fn render(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
         let device = &ctx.device;
+        let layout = self.pipeline.pipeline_layout();
 
         device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, self.pipeline.handle());
         device.cmd_bind_index_buffer(cmd, self.vertex.buffer, self.vertex.index_offset(), vk::IndexType::UINT32);
         device.cmd_bind_vertex_buffers(cmd, 0, slice::from_ref(&self.vertex.buffer), &self.vertex.vertex_offset());
-
-        let layout = self.pipeline.pipeline_layout();
         device.cmd_push_constants(cmd, layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, self.push_values());
+        device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, layout, GLOBAL_LAYOUT_INDEX as u32, slice::from_ref(&self.sprites_data_set), &[]);
 
         for batch in self.batches.iter() {
-            device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, layout, 0, slice::from_ref(&batch.set), &[]);
-            device.cmd_draw_indexed(cmd, batch.index_count, 1, batch.first_index, batch.vertex_offset, 0);
+            device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, layout, BATCH_LAYOUT_INDEX as u32, slice::from_ref(&batch.dst_set), &[]);
+            device.cmd_draw_indexed(cmd, 6, batch.instances_count, 0, 0, batch.instances_offset);
         }
     }
 
@@ -181,7 +205,7 @@ impl WorldModule {
         self.data.objects.instances[index] = WorldObject {
             component,
             image_view,
-            vertex_offset: 0,
+            sprite_index: u32::MAX,
         };
         
         Ok(())
@@ -193,7 +217,7 @@ impl WorldModule {
         let obj = WorldObject {
             component,
             image_view,
-            vertex_offset: 0,
+            sprite_index: u32::MAX,
         };
 
         let instances = &mut self.data.objects.instances;
@@ -228,8 +252,8 @@ impl WorldModule {
                 match update.uid.bound_value() {
                     Some(index) => self.update_world_component(core, update, index)?,
                     None => {
+                        self.create_world_component(core, update)?;
                         self.update_batches = true;
-                        self.create_world_component(core, update)?
                     }
                 }
                 
@@ -239,18 +263,28 @@ impl WorldModule {
         Ok(())
     }
 
-    pub fn update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        self.api_update(api, core)?;
-        
-        if self.update_batches {
-            self.clear_batches();
-            if !self.data.objects.instances.is_empty() {
-                self.update_batches(core);
-            }
-
-            self.update_batches = false;
+    fn batches_update(&mut self, core: &mut LoomzEngineCore) {
+        if !self.update_batches {
+            return;
         }
 
+        self.clear_batches();
+
+        if !self.data.objects.instances.is_empty() {
+            self.build_batches(core);
+        }
+
+        self.update_batches = false;
+    }
+
+    fn animation_update(&mut self, core: &mut LoomzEngineCore) {
+
+    }
+
+    pub fn update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        self.api_update(api, core)?;
+        self.animation_update(core);
+        self.batches_update(core);
         Ok(())
     }
 
@@ -258,93 +292,14 @@ impl WorldModule {
     // Batching
     //
 
-    fn clear_batches(&mut self) -> bool {
-        self.data.objects.index.clear();
-        self.data.objects.vertex.clear();
-        self.data.descriptors.alloc.clear_sets(0);
-        self.data.descriptors.updates.clear();
+    fn clear_batches(&mut self) {
+        self.data.descriptors.alloc.clear_sets(BATCH_LAYOUT_INDEX);
         self.batches.clear();
-        self.data.objects.instances.len() > 0
     }
    
-    fn generate_batch(
-        batches: &mut Vec<WorldBatch>,
-        descriptors: &mut WorldModuleDescriptors,
-        batch: &mut WorldBatch,
-        image_view: vk::ImageView
-    ) {
-        let next_set = descriptors.alloc.next_set(0);
-
-        let mut new_batch = *batch;
-        new_batch.set = next_set;
-        batches.push(new_batch);
-
-        descriptors.updates.write_simple_image(next_set, image_view, &descriptors.texture_params);
-
-        *batch = WorldBatch::default();
-    }
-
-    unsafe fn generate_indices(index_offset: u32, vertex_offset: u32, indices: *mut u32) {
-        let v = vertex_offset;
-        let indices = indices.offset(index_offset as isize);
-        indices.offset(0).write(v);
-        indices.offset(1).write(v+2);
-        indices.offset(2).write(v+1);
-        indices.offset(3).write(v+2);
-        indices.offset(4).write(v+3);
-        indices.offset(5).write(v+1);
-    }
-    
-    unsafe fn generate_vertex(vertex_offset: u32, vertex: *mut WorldVertex, component: WorldComponent) {
-        let [x, y] = component.position.splat();
-        let [w, h] = component.size.splat();
-        let [uvl, uvt, uvr, uvb] = component.uv.splat();
-
-        let vertex = vertex.offset(vertex_offset as isize);
-        vertex.offset(0).write(WorldVertex { pos: [x,   y],   uv: [uvl, uvt] });
-        vertex.offset(1).write(WorldVertex { pos: [x+w, y],   uv: [uvr, uvt] });
-        vertex.offset(2).write(WorldVertex { pos: [x,   y+h], uv: [uvl, uvb] });
-        vertex.offset(3).write(WorldVertex { pos: [x+w, y+h], uv: [uvr, uvb] });
-    }
-
-    fn update_batches(&mut self, core: &mut LoomzEngineCore) {
-        let objects = &mut self.data.objects;
-        unsafe {
-            objects.index.set_len(objects.instances.len() * 6);
-            objects.vertex.set_len(objects.instances.len() * 4);
-        }
-
-        let index_ptr = objects.index.as_mut_ptr();
-        let vertex_ptr = objects.vertex.as_mut_ptr();
-
-        let mut index_offset = 0;
-        let mut vertex_offset = 0;
-        let mut last_view = objects.instances[0].image_view;
-        let mut next_batch = WorldBatch::default();
-
-        for instance in objects.instances.iter_mut() {
-            if instance.image_view != last_view {
-                Self::generate_batch(&mut self.batches, &mut self.data.descriptors, &mut next_batch, instance.image_view);
-                last_view = instance.image_view;
-            }
-
-            unsafe {
-                Self::generate_indices(index_offset, vertex_offset, index_ptr);
-                Self::generate_vertex(vertex_offset, vertex_ptr, instance.component);
-            }
-
-            instance.vertex_offset = vertex_offset;
-
-            index_offset += 6;
-            vertex_offset += 4;
-            next_batch.index_count += 6;
-        }
-
-        if next_batch.index_count > 0 {
-            Self::generate_batch(&mut self.batches, &mut self.data.descriptors, &mut next_batch, last_view);
-        }
-
-        self.vertex.set_data(core, &self.data.objects.index, &self.data.objects.vertex);
+    fn build_batches(&mut self, core: &mut LoomzEngineCore) {
+        let mut batcher = WorldBatcher::new(self);
+        batcher.build();
         self.data.descriptors.updates.submit(core);
     }
 
@@ -372,7 +327,7 @@ impl WorldModule {
     // Setup
     //
 
-    fn pipeline_descriptor_bindings() -> &'static [PipelineLayoutSetBinding; 1] {
+    fn pipeline_descriptor_bindings_batch() -> &'static [PipelineLayoutSetBinding; 1] {
         &[
             PipelineLayoutSetBinding {
                 descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
@@ -382,13 +337,29 @@ impl WorldModule {
         ]
     }
 
+    fn pipeline_descriptor_bindings_global() -> &'static [PipelineLayoutSetBinding; 1] {
+        &[
+            PipelineLayoutSetBinding {
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                stage_flags: vk::ShaderStageFlags::VERTEX,
+                descriptor_count: 1,
+            },
+        ]
+    }
+
     fn setup_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let ctx = &core.ctx;
 
         // Descriptor set layouts
-        let bindings_batch = Self::pipeline_descriptor_bindings();
-        let layout_batch = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, bindings_batch)
+        let bindings_global = Self::pipeline_descriptor_bindings_global();
+        let layout_global = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, bindings_global)
             .map_err(|err| backend_init_err!("Failed to create global descriptor set layout: {}", err) )?;
+
+        let bindings_batch = Self::pipeline_descriptor_bindings_batch();
+        let layout_batch = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, bindings_batch)
+            .map_err(|err| backend_init_err!("Failed to create batch descriptor set layout: {}", err) )?;
+
+        let layouts = &[layout_global, layout_batch];
 
         // Pipeline layout
         let constant_range = vk::PushConstantRange {
@@ -397,8 +368,8 @@ impl WorldModule {
             stage_flags: vk::ShaderStageFlags::VERTEX,
         };
         let pipeline_create_info = vk::PipelineLayoutCreateInfo {
-            set_layout_count: 1,
-            p_set_layouts: &layout_batch,
+            set_layout_count: layouts.len() as u32,
+            p_set_layouts: layouts.as_ptr(),
             push_constant_range_count: 1,
             p_push_constant_ranges: &constant_range,
             ..Default::default()
@@ -409,7 +380,7 @@ impl WorldModule {
 
         // Shader source
         let modules = GraphicsShaderModules::new(ctx, WORLD_VERT_SRC, WORLD_FRAG_SRC)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute debug pipeline shader modules") )?;
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute world pipeline shader modules") )?;
 
         // Pipeline
         let vertex_fields = [
@@ -418,18 +389,14 @@ impl WorldModule {
                 offset: 0,
                 format: vk::Format::R32G32_SFLOAT,
             },
-            PipelineVertexFormat {
-                location: 1,
-                offset: 8,
-                format: vk::Format::R32G32_SFLOAT,
-            },
         ];
 
         let pipeline = &mut self.pipeline;
         pipeline.set_shader_modules(modules);
         pipeline.set_vertex_format::<WorldVertex>(&vertex_fields);
         pipeline.set_pipeline_layout(pipeline_layout);
-        pipeline.set_descriptor_set_layout(0, layout_batch);
+        pipeline.set_descriptor_set_layout(GLOBAL_LAYOUT_INDEX as usize, layout_global);
+        pipeline.set_descriptor_set_layout(BATCH_LAYOUT_INDEX as usize, layout_batch);
         pipeline.set_depth_testing(false);
         pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
             polygon_mode: vk::PolygonMode::FILL,
@@ -461,47 +428,148 @@ impl WorldModule {
         Ok(())
     }
 
-    fn setup_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let vertex_capacity = 2000;
-        let index_capacity = 3000;
-        self.vertex = VertexAlloc::new(core, vertex_capacity, index_capacity)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create vertex alloc: {err}") )?;
-        Ok(())
-    }
-
     fn setup_descriptors(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         use loomz_engine_core::descriptors::DescriptorsAllocation;
         
         let allocations = [
             DescriptorsAllocation {
-                layout: self.pipeline.descriptor_set_layout(0),
-                bindings: Self::pipeline_descriptor_bindings(),
+                layout: self.pipeline.descriptor_set_layout(GLOBAL_LAYOUT_INDEX),
+                bindings: Self::pipeline_descriptor_bindings_global(),
+                count: 1,
+            },
+            DescriptorsAllocation {
+                layout: self.pipeline.descriptor_set_layout(BATCH_LAYOUT_INDEX),
+                bindings: Self::pipeline_descriptor_bindings_batch(),
                 count: 10,
             },
         ];
 
         self.data.descriptors.alloc = DescriptorsAllocator::new(core, &allocations)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to prellocate descriptor sets: {err}") )?;
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to prellocate descriptor sets") )?;
 
         self.data.descriptors.texture_params = DescriptorWriteImageParams {
             sampler: core.resources.linear_sampler,
             descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            dst_binding: 0,
+            dst_binding: TEXTURE_BINDING as u32,
             image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         };
 
         Ok(())
     }
 
+    fn setup_vertex_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        let vertex_capacity = 4;
+        let index_capacity = 6;
+        self.vertex = VertexAlloc::new(core, index_capacity, vertex_capacity)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create vertex alloc: {err}") )?;
+
+        let indices = [0, 1, 2, 2, 3, 1];
+        let vertex = [
+            WorldVertex { pos: [0.0,   0.0] },
+            WorldVertex { pos: [1.0,   0.0] },
+            WorldVertex { pos: [0.0,   1.0] },
+            WorldVertex { pos: [1.0,   1.0] },
+        ];
+
+        self.vertex.set_data(core, &indices, &vertex);
+
+        Ok(())
+    }
+
+    fn setup_sprites_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        let descriptors = &mut self.data.descriptors;
+
+        let sprites_capacity = 100;
+        self.data.sprites = StorageAlloc::new(core, sprites_capacity)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create storage alloc: {err}") )?;
+
+        self.sprites_data_set = descriptors.alloc.next_set(GLOBAL_LAYOUT_INDEX);
+        descriptors.updates.write_storage_buffer(self.sprites_data_set, &self.data.sprites, SPRITES_BUFFER_DATA_BINDING as u32);
+        descriptors.updates.submit(core);
+
+        Ok(())
+    }
+
 }
 
-impl Default for WorldBatch {
-    fn default() -> Self {
-        WorldBatch {
-            set: vk::DescriptorSet::null(),
-            first_index: 0,
-            index_count: 0,
-            vertex_offset: 0
+struct WorldBatcher<'a> {
+    current_view: vk::ImageView,
+    batches: &'a mut Vec<WorldBatch>,
+    data: &'a mut WorldData,
+    instance_index: usize,
+    batch_index: usize,
+}
+
+impl<'a> WorldBatcher<'a> {
+
+    fn new(world: &'a mut WorldModule) -> Self {
+        let mut batcher = WorldBatcher {
+            current_view: vk::ImageView::null(),
+            batches: &mut world.batches,
+            data: &mut world.data,
+            instance_index: 0,
+            batch_index: 0,
+        };
+
+        batcher.first_batch();
+
+        batcher
+    }
+
+    fn build(&mut self) {
+        let max_instance = self.data.objects.instances.len();
+        while self.instance_index != max_instance {
+            let instance = &mut self.data.objects.instances[self.instance_index];
+            instance.sprite_index = self.instance_index as u32;
+
+            let image_view = instance.image_view;            
+            if self.current_view == image_view {
+                self.batches[self.batch_index].instances_count += 1;
+            } else {
+                self.next_batch(image_view)
+            }
+
+            self.instance_index += 1;
         }
     }
+
+    fn first_batch(&mut self) {
+        let instance = &mut self.data.objects.instances[0];
+        instance.sprite_index = self.instance_index as u32;
+
+        let dst_set = self.data.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
+        self.data.descriptors.updates.write_simple_image(dst_set, instance.image_view, &self.data.descriptors.texture_params);
+        
+        let component = instance.component;
+        self.data.sprites.write_data(self.instance_index, SpriteData {
+            offset: component.position.splat(),
+            size: component.size.splat(),
+            uv_offset: component.uv.offset(),
+            uv_size: component.uv.size(),
+        });
+
+        self.batches.push(WorldBatch {
+            dst_set,
+            instances_count: 1,
+            instances_offset: 0,
+        });
+
+        self.current_view = instance.image_view;
+        self.instance_index += 1;
+    }
+
+    fn next_batch(&mut self, image_view: vk::ImageView) {
+        let dst_set = self.data.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
+        self.data.descriptors.updates.write_simple_image(dst_set, image_view, &self.data.descriptors.texture_params);
+
+        self.batches.push(WorldBatch {
+            dst_set,
+            instances_count: 1,
+            instances_offset: self.instance_index as u32,
+        });
+
+        self.current_view = image_view;
+        self.batch_index += 1;
+    }
+
 }

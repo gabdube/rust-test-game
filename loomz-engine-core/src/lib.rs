@@ -32,6 +32,8 @@ pub struct VulkanEngineInfo {
     pub sample_count: vk::SampleCountFlags,
     pub color_format: vk::Format,
     pub depth_format: vk::Format,
+
+    pub storage_min_align: u32,
 }
 
 /// Holder for the shared gpu resources used in the engine
@@ -43,6 +45,7 @@ pub struct VulkanGlobalResources {
     pub surface: vk::SurfaceKHR,
     pub vertex_alloc: alloc::DeviceMemoryAlloc,
     pub images_alloc: alloc::DeviceMemoryAlloc,
+    pub uniforms_alloc: alloc::HostVisibleAlloc,
     pub attachments: helpers::RenderAttachments,
 }
 
@@ -128,6 +131,7 @@ impl LoomzEngineCore {
         self.resources.attachments.free(&ctx.device);
         self.resources.vertex_alloc.free(&ctx.device);
         self.resources.images_alloc.free(&ctx.device);
+        self.resources.uniforms_alloc.free(&ctx.device);
         self.staging.destroy(&ctx.device);
 
         ctx.device.destroy();

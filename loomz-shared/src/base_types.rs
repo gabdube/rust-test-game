@@ -13,6 +13,16 @@ impl RectF32 {
         [self.left, self.top, self.right, self.bottom]
     }
 
+    #[inline]
+    pub const fn offset(&self) -> [f32; 2] {
+        [self.left, self.top]
+    }
+
+    #[inline]
+    pub const fn size(&self) -> [f32; 2] {
+        [self.right - self.left, self.bottom - self.top]
+    }
+
 }
 
 #[derive(Copy, Clone, Default, Debug)]

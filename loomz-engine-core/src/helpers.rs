@@ -89,7 +89,12 @@ pub fn fetch_attachments_memory_index(instance: &vk::wrapper::Instance, physical
     }
 }
 
-pub fn fetch_memory_index(instance: &vk::wrapper::Instance, physical_device: vk::PhysicalDevice, optimal_flags: vk::MemoryPropertyFlags, min_flags: vk::MemoryPropertyFlags) -> Option<u32> {
+pub fn fetch_memory_index(
+    instance: &vk::wrapper::Instance,
+    physical_device: vk::PhysicalDevice,
+    optimal_flags: vk::MemoryPropertyFlags,
+    min_flags: vk::MemoryPropertyFlags
+) -> Option<u32> {
     let properties = instance.get_physical_device_memory_properties(physical_device);
 
     let mut memory_type_index_optimal = None;

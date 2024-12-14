@@ -30,6 +30,8 @@ pub(crate) fn setup_info(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanEngi
     let color_format = color_format(ctx)?;
     let depth_format = depth_format(ctx)?;
 
+    let device_info = ctx.instance.instance.get_physical_device_properties(ctx.device.physical_device);
+
     Ok(Box::new(VulkanEngineInfo {
         graphics_queue_info,
         window_extent: vk::Extent2D::default(),
@@ -39,6 +41,7 @@ pub(crate) fn setup_info(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanEngi
         color_format,
         depth_format,
         sample_count,
+        storage_min_align: device_info.limits.min_storage_buffer_offset_alignment as u32,
     }))
 }
 
@@ -112,12 +115,14 @@ fn init_resources(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanGlobalResou
         surface: vk::SurfaceKHR::null(),
         vertex_alloc: crate::alloc::DeviceMemoryAlloc::default(),
         images_alloc: crate::alloc::DeviceMemoryAlloc::default(),
+        uniforms_alloc: crate::alloc::HostVisibleAlloc::default(),
         attachments: helpers::RenderAttachments::default(),
     };
 
     setup_commands(setup, &mut resources)?;
     setup_vertex_memory(setup, &mut resources)?;
     setup_images_memory(setup, &mut resources)?;
+    setup_uniforms_memory(setup, &mut resources)?;
     setup_samplers(setup, &mut resources)?;
 
     Ok(Box::new(resources))
@@ -162,7 +167,7 @@ fn setup_vertex_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlob
     let device_type_index = crate::helpers::fetch_memory_index(instance, ctx.device.physical_device, flags, flags)
         .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for vertex") )?;
     
-    let vertex_size = KB*100;
+    let vertex_size = KB*10;
     let default_alloc_capacity = 16;
     
     resources.vertex_alloc = DeviceMemoryAlloc::new(&ctx.device, vertex_size, default_alloc_capacity, device_type_index)
@@ -185,6 +190,24 @@ fn setup_images_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlob
 
     resources.images_alloc = DeviceMemoryAlloc::new(&ctx.device, images_size, default_alloc_capacity, device_type_index)
         .map_err(|err| backend_init_err!("Failed to create images memory: {err}") )?;
+
+    Ok(())
+}
+
+fn setup_uniforms_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResources) -> Result<(), CommonError> {
+    use crate::alloc::{HostVisibleAlloc, KB};
+
+    let ctx = setup.ctx.as_ref().unwrap();
+    let instance = &ctx.instance.instance;
+    let flags = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
+    let host_type_index = crate::helpers::fetch_memory_index(instance, ctx.device.physical_device, flags, flags)
+        .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for uniforms") )?;
+
+    let uniforms_size = KB*10;
+    let default_alloc_capacity = 16;
+
+    resources.uniforms_alloc = HostVisibleAlloc::new(&ctx.device, uniforms_size, default_alloc_capacity, host_type_index)
+        .map_err(|err| backend_init_err!("Failed to create uniforms memory: {err}") )?;
 
     Ok(())
 }

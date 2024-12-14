@@ -47,6 +47,19 @@ impl DescriptorWriteBuffer {
         });
     }
 
+    pub fn write_storage_buffer<T: Copy>(&mut self, dst_set: vk::DescriptorSet, store: &crate::alloc::StorageAlloc<T>, dst_binding: u32) {
+        self.writes.push(DescriptorWrite {
+            dst_set,
+            dst_binding,
+            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+            param: DescriptorWriteParam::Buffer(vk::DescriptorBufferInfo {
+                buffer: store.buffer,
+                offset: 0,
+                range: store.bytes_range(),
+            })
+        });
+    }
+
     pub fn submit(&mut self, engine: &mut LoomzEngineCore) {
         engine.descriptors.updates.append(&mut self.writes);
     }
@@ -137,7 +150,7 @@ impl DescriptorsAllocator {
             max_sets += alloc.count;
 
             for binding in alloc.bindings {
-                let index = pool_sizes[0.. pool_size_count].iter().position(|ps| ps.descriptor_count == binding.descriptor_count );
+                let index = pool_sizes[0.. pool_size_count].iter().position(|ps| ps.ty == binding.descriptor_type );
                 match index {
                     Some(i) => {
                         pool_sizes[i].descriptor_count += binding.descriptor_count * alloc.count;

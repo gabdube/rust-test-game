@@ -85,7 +85,7 @@ impl LoomzEngineCore {
         let subresource_range = vk::ImageSubresourceRange::base_color();
 
         let pixel_data = asset.data.mimap_level_data(0); // TODO, 
-        let buffer_offset = staging.copy_data(pixel_data);
+        let buffer_offset = staging.copy_data_with_align(pixel_data, 16);
 
         // Pixel copy
         let image_copy = StagingImageCopy {

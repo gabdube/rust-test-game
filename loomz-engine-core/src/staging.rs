@@ -25,7 +25,8 @@ pub struct VulkanStaging {
 
 impl VulkanStaging {
 
-    pub(crate) fn destroy(self, device: &vk::wrapper::Device) {
+    pub(crate) fn destroy(mut self, device: &vk::wrapper::Device) {
+        self.mapped_data = None;
         device.unmap_memory(self.memory);
         device.destroy_buffer(self.buffer);
         device.free_memory(self.memory);
@@ -35,13 +36,13 @@ impl VulkanStaging {
         self.vertex_buffer_copies.push(StagingBufferCopy { dst_buffer, copy });
     }
 
-    pub fn copy_data<T: Copy>(&mut self, data: &[T]) -> vk::DeviceSize {
+    pub fn copy_data_with_align<T: Copy>(&mut self, data: &[T], align: usize) -> vk::DeviceSize {
         let data_ptr = match self.mapped_data {
             Some(ptr) => ptr,
             None => unreachable!("mapped_data must always be there at runtime")
         };
 
-        let offset = crate::helpers::align_device(self.upload_offset, align_of::<T>() as _);
+        let offset = crate::helpers::align_device(self.upload_offset, align as _);
         let size_bytes = (data.len() * size_of::<T>()) as vk::DeviceSize;
 
         if offset+size_bytes > self.buffer_capacity {
@@ -57,6 +58,10 @@ impl VulkanStaging {
         self.upload_offset += size_bytes;
 
         offset
+    }
+
+    pub fn copy_data<T: Copy>(&mut self, data: &[T]) -> vk::DeviceSize {
+        self.copy_data_with_align(data, align_of::<T>())
     }
 
     #[cold]
