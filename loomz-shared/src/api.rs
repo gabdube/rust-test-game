@@ -1,6 +1,6 @@
 //! Common data transfer api between loomz-client and loomz-engine
 use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, AtomicU32, Ordering}};
-use parking_lot::{MutexGuard, Mutex};
+use parking_lot::Mutex;
 use crate::assets::{LoomzAssetsBundle, TextureId};
 use crate::store::{StoreAndLoad, SaveFileReaderBase, SaveFileWriterBase};
 use crate::inputs::InputBuffer;
@@ -159,7 +159,7 @@ impl WorldApi {
 }
 
 struct InnerInputs {
-    buffer: Mutex<InputBuffer>,
+    buffer: InputBuffer,
     new_inputs: AtomicBool,
 }
 
@@ -181,7 +181,7 @@ impl LoomzApi {
         let world = WorldApi::init();
 
         let inputs = InnerInputs {
-            buffer: Mutex::new(InputBuffer::new()),
+            buffer: InputBuffer::new(),
             new_inputs: AtomicBool::new(false)
         };
 
@@ -206,14 +206,14 @@ impl LoomzApi {
         &self.inner.assets
     }
 
-    pub fn inputs<'a>(&'a self) -> MutexGuard<'a, InputBuffer> {
+    pub fn write_inputs(&self) -> InputBuffer {
         self.inner.inputs.new_inputs.store(true, Ordering::Relaxed);
-        self.inner.inputs.buffer.lock()
+        self.inner.inputs.buffer.clone()
     }
 
-    pub fn new_inputs<'a>(&'a self) -> Option<MutexGuard<'a, InputBuffer>> {
-        match self.inner.inputs.new_inputs.fetch_not(Ordering::Relaxed) {
-            true => Some(self.inner.inputs.buffer.lock()),
+    pub fn read_inputs(&self) -> Option<InputBuffer> {
+        match self.inner.inputs.new_inputs.fetch_and(false, Ordering::Relaxed) {
+            true => Some(self.inner.inputs.buffer.clone()),
             false => None
         }
     }

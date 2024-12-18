@@ -70,6 +70,10 @@ impl LoomzAssetsBundle {
         }
     }
 
+    pub fn texture<'a>(&'a self, id: TextureId) -> Option<&'a AssetsTextureData> {
+        self.textures.get(&id)
+    }
+
     pub fn json_id_by_name(&self, name: &str) -> Option<JsonId> {
         match self.assets_by_name.get(name) {
             Some(AssetId::Json(id)) => Some(*id),
@@ -77,12 +81,13 @@ impl LoomzAssetsBundle {
         }
     }
 
-    pub fn texture<'a>(&'a self, id: TextureId) -> Option<&'a AssetsTextureData> {
-        self.textures.get(&id)
-    }
-
     pub fn json<'a>(&'a self, id: JsonId) -> Option<&'a String> {
         self.json.get(&id)
+    }
+
+    pub fn json_by_name<'a>(&'a self, name: &str) -> Option<&'a String> {
+        self.json_id_by_name(name)
+            .and_then(|id| self.json.get(&id) )
     }
 
     fn split_csv<CB: FnMut(&[&str])>(csv: &str, mut cb: CB) {

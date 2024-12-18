@@ -45,9 +45,10 @@ impl RgbaU8 {
 
 /// User friendly re-export from base types
 pub mod _2d {
+    use std::ops::{Mul, AddAssign};
 
     #[repr(C)]
-    #[derive(Copy, Clone, Default, Debug)]
+    #[derive(Copy, Clone, Default, Debug, PartialEq)]
     pub struct Position<T> {
         pub x: T,
         pub y: T,
@@ -60,11 +61,35 @@ pub mod _2d {
         }
     }
 
+    impl Position<f32> {
+        pub const fn out_of_range(&self, target: Self, fuzz: f32) -> bool {
+            self.x < (target.x - fuzz) || self.x > (target.x + fuzz) ||
+            self.y < (target.y - fuzz) || self.y > (target.y + fuzz)
+        }
+    }
+
+    impl AddAssign<Position<f64>> for Position<f32> {
+        fn add_assign(&mut self, rhs: Position<f64>) {
+            self.x += rhs.x as f32;
+            self.y += rhs.y as f32;
+        }
+    }
+
     impl Position<f64> {
         pub fn as_f32(&self) -> Position<f32> {
             Position {
                 x: self.x as f32,
                 y: self.y as f32
+            }
+        }
+    }
+
+    impl Mul<f64> for Position<f64> {
+        type Output = Self;
+        fn mul(self, rhs: f64) -> Self::Output {
+            Position {
+                x: self.x * rhs,
+                y: self.y * rhs
             }
         }
     }

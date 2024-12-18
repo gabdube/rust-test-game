@@ -44,13 +44,13 @@ impl<'a> ApplicationHandler for LoomzApplication {
                     event_loop.exit();
                 }
 
-                self.api.inputs().update_screen_size(size.width as f32, size.height as f32);
+                self.api.write_inputs().update_screen_size(size.width as f32, size.height as f32);
             },
             WindowEvent::CursorMoved { device_id: _, position } => {
-                self.api.inputs().update_cursor_position(position.x, position.y);
+                self.api.write_inputs().update_cursor_position(position.x, position.y);
             },
             WindowEvent::MouseInput { device_id: _, state, button } => {
-                let mut inputs = self.api.inputs();
+                let mut inputs = self.api.write_inputs();
                 parse_mouse_input(&mut inputs, state, button);
             },
             WindowEvent::CloseRequested => {
@@ -75,7 +75,7 @@ fn create_window(event_loop: &ActiveEventLoop) -> Result<Window, CommonError> {
 fn parse_mouse_input(inputs: &mut InputBuffer, state: ElementState, btn: MouseButton) {
     use loomz_shared::inputs::MouseButtonState;
 
-    let mut button_state = inputs.mouse_buttons;
+    let mut button_state = inputs.mouse_buttons_value();
     let flag = match btn {
         MouseButton::Left => MouseButtonState::LEFT,
         MouseButton::Right => MouseButtonState::RIGHT,

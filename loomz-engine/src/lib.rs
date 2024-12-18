@@ -78,7 +78,7 @@ impl LoomzEngine {
         // Collect pipelines create info from modules
         const PIPELINE_BUILD_CAPACITY: usize = 4;
         let mut pipeline_infos: Vec<vk::GraphicsPipelineCreateInfo> = Vec::with_capacity(PIPELINE_BUILD_CAPACITY);
-        pipeline_infos.push(self.world.pipeline().create_info());
+        self.world.write_pipeline_create_infos(&mut pipeline_infos);
 
         // Pipeline creation
         let device = &self.core.ctx.device;
@@ -87,7 +87,7 @@ impl LoomzEngine {
             .map_err(|err| backend_init_err!("Failed to compile create pipelines: {:?}", err) )?;
 
         // Assign pipeline handle
-        self.world.pipeline().set_handle(pipelines[0]);
+        self.world.set_pipeline_handle(pipelines[0]);
 
         Ok(())
     }

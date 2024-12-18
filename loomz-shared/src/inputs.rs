@@ -1,4 +1,6 @@
+use std::sync::Arc;
 use bitflags::bitflags;
+use parking_lot::{Mutex, MutexGuard};
 use crate::base_types::_2d::{Position, Size, pos, size};
 
 bitflags! {
@@ -19,7 +21,7 @@ bitflags! {
 }
 
 
-pub struct InputBuffer {
+struct InnerInputBuffer {
     pub update_flags: InputUpdateFlags,
     pub cursor_position_old: Position<f64>,
     pub cursor_position: Position<f64>,
@@ -28,10 +30,10 @@ pub struct InputBuffer {
     pub screen_size: Size<f32>,
 }
 
-impl InputBuffer {
+impl InnerInputBuffer {
 
-    pub fn new() -> Self {
-        InputBuffer {
+    fn new() -> Self {
+        InnerInputBuffer {
             update_flags: InputUpdateFlags::empty(),
             cursor_position_old: pos(0.0, 0.0),
             cursor_position: pos(0.0, 0.0),
@@ -41,7 +43,7 @@ impl InputBuffer {
         }
     }
 
-    pub fn cursor_position(&mut self) -> Option<Position<f64>> {
+    fn cursor_position(&mut self) -> Option<Position<f64>> {
         match self.update_flags.contains(InputUpdateFlags::MOUSE_MOVE) {
             true => {
                 self.update_flags.remove(InputUpdateFlags::MOUSE_MOVE);
@@ -53,19 +55,19 @@ impl InputBuffer {
         }
     }
 
-    pub fn update_cursor_position(&mut self, x: f64, y: f64) {
+    fn update_cursor_position(&mut self, x: f64, y: f64) {
         self.update_flags |= InputUpdateFlags::MOUSE_MOVE;
         self.cursor_position_old = self.cursor_position;
         self.cursor_position = pos(x, y);
     }
 
-    pub fn update_mouse_button(&mut self, btns: MouseButtonState) {
+    fn update_mouse_button(&mut self, btns: MouseButtonState) {
         self.update_flags |= InputUpdateFlags::MOUSE_BTN;
         self.mouse_buttons_old = self.mouse_buttons;
         self.mouse_buttons = btns;
     }
 
-    pub fn screen_size(&mut self) -> Option<Size<f32>> {
+    fn screen_size(&mut self) -> Option<Size<f32>> {
         match self.update_flags.contains(InputUpdateFlags::SCREEN_RESIZED) {
             true => {
                 self.update_flags.remove(InputUpdateFlags::SCREEN_RESIZED);
@@ -77,10 +79,52 @@ impl InputBuffer {
         }
     }
 
-    pub fn update_screen_size(&mut self, width: f32, height: f32) {
+    fn update_screen_size(&mut self, width: f32, height: f32) {
         self.update_flags |= InputUpdateFlags::SCREEN_RESIZED;
         self.screen_size = size(width, height);
 
     }
 
+}
+
+#[derive(Clone)]
+pub struct InputBuffer {
+    inner: Arc<Mutex<InnerInputBuffer>>,
+}
+
+impl InputBuffer {
+
+    pub fn new() -> Self {
+        InputBuffer {
+            inner: Arc::new(Mutex::new(InnerInputBuffer::new()))
+        }
+    }
+
+    pub fn cursor_position(&self) -> Option<Position<f64>> {
+        self.inputs().cursor_position()
+    }
+
+    pub fn update_cursor_position(&self, x: f64, y: f64) {
+        self.inputs().update_cursor_position(x, y);
+    }
+    
+    pub fn update_mouse_button(&self, btns: MouseButtonState) {
+        self.inputs().update_mouse_button(btns)
+    }
+
+    pub fn mouse_buttons_value(&self) -> MouseButtonState {
+        self.inputs().mouse_buttons
+    }
+
+    pub fn screen_size(&self) -> Option<Size<f32>> {
+        self.inputs().screen_size()
+    }
+
+    pub fn update_screen_size(&self, width: f32, height: f32) {
+        self.inputs().update_screen_size(width, height);
+    }
+
+    fn inputs<'a>(&'a self) -> MutexGuard<'a, InnerInputBuffer> {
+        self.inner.lock()
+    }
 }

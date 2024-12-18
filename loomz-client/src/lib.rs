@@ -1,8 +1,14 @@
 mod store;
 
-use loomz_shared::base_types::{RectF32, _2d::{pos, size}};
+use std::time::Instant;
+use loomz_shared::{_2d::Position, base_types::{RectF32, _2d::{pos, size}}};
 use loomz_shared::api::{Uid, WorldComponent};
 use loomz_shared::{assets_err, chain_err, CommonError, CommonErrorType, LoomzApi};
+
+pub struct Player {
+    id: Uid,
+    component: WorldComponent,
+}
 
 #[derive(Default)]
 pub struct PawnTemplate {
@@ -20,22 +26,42 @@ pub enum GameState {
     Gameplay,
 }
 
+struct ClientTiming {
+    last: Instant,
+    delta_ms: f64,
+}
+
 pub struct LoomzClient {
     api: LoomzApi,
+    timing: ClientTiming, 
+
     state: GameState,
     templates: Templates,
+
+    player: Option<Player>,
+    target_position: Position<f32>,
 }
 
 impl LoomzClient {
 
     pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
-        let client = LoomzClient {
+        let timing = ClientTiming {
+            last: Instant::now(),
+            delta_ms: 0.0,
+        };
+        
+        let mut client = LoomzClient {
             api: api.clone(),
+            timing,
+
             state: GameState::Uninitialized,
             templates: Templates::default(),
+
+            player: None,
+            target_position: Position::default(),
         };
 
-        Self::init_player(api)?;
+        client.init_player(api)?;
         client.init_templates()?;
 
         Ok(client)
@@ -56,6 +82,8 @@ impl LoomzClient {
     }
 
     pub fn update(&mut self) -> Result<(), CommonError> {
+        self.update_timing();
+
         match self.state {
             GameState::Uninitialized => self.uninitialized(),
             GameState::Gameplay => self.gameplay(),
@@ -64,21 +92,38 @@ impl LoomzClient {
         Ok(())
     }
 
+    fn update_timing(&mut self) {
+        let elapsed = self.timing.last.elapsed();
+        self.timing.last = Instant::now();
+        self.timing.delta_ms = elapsed.as_secs_f64();
+    }
+
     fn uninitialized(&mut self) {
         self.state = GameState::Gameplay;
     }
 
     fn gameplay(&mut self) {
-        // if let Some(mut input) = self.api.new_inputs() {
-        //     let world = self.api.world();
+        if let Some(new_input) = self.api.read_inputs() {
+            if let Some(cursor_position) = new_input.cursor_position() {
+                self.on_cursor_moved(cursor_position);
+            }
+        }
 
-        //     if let Some(screen_size) = input.screen_size() {
-        //         let extent = self.api.assets_ref().texture(self.player.component.texture_id).unwrap().data.extent();
-        //         self.player.component.position.x = (screen_size.width - (extent.width as f32)) / 2.0;
-        //         self.player.component.position.y = (screen_size.height - (extent.height as f32)) / 2.0;
-        //         world.update_component(&self.player.id, self.player.component);
-        //     }
-        // }
+        if let Some(player) = self.player.as_mut() {
+            let position = player.component.position;
+            let target = self.target_position;
+
+            if position.out_of_range(target, 2.0) {
+                let speed = 300.0 * self.timing.delta_ms;
+                let angle = f32::atan2(target.y - position.y, target.x - position.x) as f64;
+                player.component.position += pos(speed * f64::cos(angle), speed * f64::sin(angle));
+                self.api.world().update_component(&player.id, player.component);
+            }
+        }
+    }
+
+    fn on_cursor_moved(&mut self, position: Position<f64>) {
+        self.target_position = position.as_f32();
     }
 
     fn init_templates(&self) -> Result<(), CommonError> {
@@ -104,15 +149,14 @@ impl LoomzClient {
 
         // Pawn
         {
-            let pawn_json_id = assets.json_id_by_name("pawn_sprites").ok_or_else(|| assets_err!("Failed to find json \"pawn_sprites\"") )?;
-            let pawn_json_source = assets.json(pawn_json_id).unwrap();
+            let pawn_json_source = assets.json_by_name("pawn_sprites").ok_or_else(|| assets_err!("Failed to find json \"pawn_sprites\"") )?;
             let pawn_json = jsonic::parse(pawn_json_source).map_err(|err| assets_err!("Failed to parse json: {:?}", err) )?;
             
             let animations = pawn_json["animations"].elements().unwrap();
             for animation in animations {
                 let uid = match animation["name"].as_str() {
                     Some("idle") => &self.templates.pawn.idle,
-                    _ => { continue; }
+                    _ => { continue; } 
                 };
 
                 let sprite_count: usize = parse(&animation["sprite_count"]);
@@ -137,20 +181,25 @@ impl LoomzClient {
         Ok(())
     }
 
-    fn init_player(api: &LoomzApi) -> Result<(), CommonError> {
-        let assets = api.assets_ref();
-        let texture_id = assets.texture_id_by_name("pawn")
+    fn init_player(&mut self, api: &LoomzApi) -> Result<(), CommonError> {
+        let texture_id = api.assets_ref().texture_id_by_name("pawn")
             .ok_or_else(|| assets_err!("Failed to find texture \"pawn\"") )?;
 
-        let uid = Uid::new();
-        let component = WorldComponent {
-            position: pos(10.0, 10.0),
-            size: size(59.0, 59.0),
-            uv: RectF32 { left: 1.0, top: 0.0, right: 59.0, bottom: 59.0 },
-            texture_id,
+        let start_position = pos(100.0, 100.0);
+        let player = Player {
+            id: Uid::new(),
+            component:  WorldComponent {
+                position: start_position,
+                size: size(59.0, 59.0),
+                uv: RectF32 { left: 1.0, top: 0.0, right: 59.0, bottom: 59.0 },
+                texture_id,
+            }
         };
 
-        api.world().update_component(&uid, component);
+        api.world().update_component(&player.id, player.component);
+
+        self.player = Some(player);
+        self.target_position = start_position;
 
         Ok(())
     }
