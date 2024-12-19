@@ -81,10 +81,6 @@ impl LoomzAssetsBundle {
         }
     }
 
-    pub fn json<'a>(&'a self, id: JsonId) -> Option<&'a String> {
-        self.json.get(&id)
-    }
-
     pub fn json_by_name<'a>(&'a self, name: &str) -> Option<&'a String> {
         self.json_id_by_name(name)
             .and_then(|id| self.json.get(&id) )

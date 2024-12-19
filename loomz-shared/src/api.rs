@@ -1,162 +1,14 @@
 //! Common data transfer api between loomz-client and loomz-engine
-use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, AtomicU32, Ordering}};
-use parking_lot::Mutex;
-use crate::assets::{LoomzAssetsBundle, TextureId};
-use crate::store::{StoreAndLoad, SaveFileReaderBase, SaveFileWriterBase};
+mod base;
+pub use base::*;
+
+mod world;
+pub use world::*;
+
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use crate::assets::LoomzAssetsBundle;
 use crate::inputs::InputBuffer;
-use crate::base_types::{RectF32, _2d::{Position, Size}};
 use crate::CommonError;
-
-#[derive(Clone)]
-pub struct Uid(Arc<AtomicU32>);
-
-impl Uid {
-    pub fn new() -> Self {
-        Uid(Arc::new(AtomicU32::new(u32::MAX)))
-    }
-
-    #[inline]
-    pub fn bind(&self, val: u32) {
-        self.0.store(val, Ordering::SeqCst);
-    }
-
-    #[inline]
-    pub fn is_unbound(&self) -> bool {
-        self.0.load(Ordering::SeqCst) == u32::MAX
-    }
-
-    #[inline]
-    pub fn value(&self) -> u32 {
-        self.0.load(Ordering::SeqCst)
-    }
-
-    #[inline]
-    pub fn bound_value(&self) -> Option<usize> {
-        let value = self.0.load(Ordering::SeqCst) as usize;
-        match value == (u32::MAX as usize) {
-            true => None,
-            false => Some(value)
-        }
-    }
-}
-
-impl StoreAndLoad for Uid {
-    fn load(reader: &mut SaveFileReaderBase) -> Self {
-        Uid(Arc::new(AtomicU32::new(reader.read_u32())))
-    }
-
-    fn store(&self, writer: &mut SaveFileWriterBase) {
-        writer.write_u32(self.0.load(Ordering::Relaxed));
-    }
-}
-
-impl Default for Uid {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-
-const WORLD_COMPONENT_UPDATES_CAP: usize = 100;
-type WorldComponentUpdates = Box<[Option<WorldComponentUpdate>; WORLD_COMPONENT_UPDATES_CAP]>;
-
-const WORLD_ANIMATION_UPDATES_CAP: usize = 20;
-type WorldAnimationUpdates = Box<[Option<WorldAnimationUpdate>; WORLD_ANIMATION_UPDATES_CAP]>;
-
-pub struct WorldComponentUpdate {
-    pub uid: Uid,
-    pub component: WorldComponent,
-}
-
-pub struct WorldAnimationUpdate {
-    pub uid: Uid,
-    pub animation: WorldAnimation,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct WorldComponent {
-    pub position: Position<f32>,
-    pub size: Size<f32>,
-    pub uv: RectF32,
-    pub texture_id: TextureId,
-}
-
-pub struct WorldAnimation {
-}
-
-pub struct WorldApi {
-    components_length: AtomicUsize,
-    components: Mutex<WorldComponentUpdates>,
-    animations_length: AtomicUsize,
-    animations: Mutex<WorldAnimationUpdates>,
-}
-
-impl WorldApi {
-
-    pub fn init() -> Self {
-        WorldApi {
-            components_length: AtomicUsize::new(0),
-            components: Mutex::new(new_boxed_array()),
-            animations_length: AtomicUsize::new(0),
-            animations: Mutex::new(new_boxed_array()),
-        }
-    }
-
-    pub fn update_component(&self, uid: &Uid, component: WorldComponent) {
-        let mut components = self.components.lock();
-        let index = self.components_length.fetch_add(1, Ordering::SeqCst);
-        assert!(index < WORLD_COMPONENT_UPDATES_CAP, "Increase components buffer cap");
-        components[index] = Some(WorldComponentUpdate {
-            uid: uid.clone(),
-            component,
-        });
-    }
-
-    pub fn components<'a>(&'a self) -> Option<impl Iterator<Item = WorldComponentUpdate> + 'a> {
-        match self.components_length.load(Ordering::SeqCst) {
-            0 => None,
-            _ => {
-                let mut index = 0;
-                let mut guard = self.components.lock();
-                self.components_length.store(0, Ordering::SeqCst);
-                Some(::std::iter::from_fn(move || {
-                    let value = guard[index].take();
-                    index += 1;
-                    value
-                }))
-            },
-        }
-    }
-
-    pub fn create_animation(&self, uid: &Uid, animation: WorldAnimation) {
-        let mut animations = self.animations.lock();
-        let index = self.animations_length.fetch_add(1, Ordering::SeqCst);
-        assert!(index < WORLD_ANIMATION_UPDATES_CAP, "Increase animation buffer cap");
-
-        animations[index] = Some(WorldAnimationUpdate {
-            uid: uid.clone(),
-            animation,
-        });
-    }
-
-    pub fn animations<'a>(&'a self) -> Option<impl Iterator<Item = WorldAnimationUpdate> + 'a> {
-        match self.animations_length.load(Ordering::SeqCst) {
-            0 => None,
-            _ => {
-                let mut index = 0;
-                let mut guard = self.animations.lock();
-                self.animations_length.store(0, Ordering::SeqCst);
-                Some(::std::iter::from_fn(move || {
-                    let value = guard[index].take();
-                    index += 1;
-                    value
-                }))
-            },
-        }
-    }
-
-
-}
 
 struct InnerInputs {
     buffer: InputBuffer,
@@ -222,16 +74,4 @@ impl LoomzApi {
         &self.inner.world
     }
 
-}
-
-fn new_boxed_array<const S: usize, T: Default>() -> Box<[T; S]> {
-    let mut data = Box::new_uninit();
-    unsafe {
-        let data_ptr = data.as_mut_ptr() as *mut T;
-        for i in 0..S {
-            data_ptr.add(i).write(T::default());
-        }
-
-        data.assume_init()
-    }
 }

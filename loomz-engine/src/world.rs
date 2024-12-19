@@ -1,8 +1,8 @@
-use std::{slice, u32};
-use std::sync::Arc;
+use std::{slice, sync::Arc, time::Instant, u32, usize};
 use fnv::FnvHashMap;
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
-use loomz_shared::api::{LoomzApi, WorldComponent, WorldComponentUpdate, WorldAnimation, WorldAnimationUpdate};
+use loomz_shared::_2d::{Position, Size};
+use loomz_shared::api::{LoomzApi, WorldAnimationId, WorldAnimation, WorldActorId, WorldActor};
 use loomz_shared::{assets::{LoomzAssetsBundle, TextureId}, CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, assets_err, chain_err};
 
@@ -48,30 +48,33 @@ pub struct WorldBatch {
     pub instances_offset: u32,
 }
 
-#[derive(Copy, Clone)]
-struct WorldObject {
-    image_view: vk::ImageView,
-    component: WorldComponent,
-}
-
-struct WorldData {
-    assets: Arc<LoomzAssetsBundle>,
-    textures: FnvHashMap<TextureId, Texture>,
-    sprites: StorageAlloc<SpriteData>,
-    animations: Vec<WorldAnimation>,
-    instances: Vec<WorldObject>,
-}
-
 struct WorldModuleDescriptors {
     alloc: DescriptorsAllocator,
     updates: DescriptorWriteBuffer,
     texture_params: DescriptorWriteImageParams,
 }
 
+/// Graphics resources that are not accessed often
 struct WorldResources {
     descriptors: WorldModuleDescriptors,
     pipeline: GraphicsPipeline,
     vertex: VertexAlloc<WorldVertex>,
+}
+
+#[derive(Copy, Clone)]
+struct WorldInstance {
+    image_view: vk::ImageView,
+    position: Position<f32>,
+    size: Size<f32>,
+    uv_offset: [f32; 2],
+    uv_size: [f32; 2],
+}
+
+struct WorldInstanceAnimation {
+    tick: Instant,
+    instance_index: usize,
+    animation: WorldAnimation,
+    current_frame: u32,
 }
 
 /// Data used on rendering
@@ -86,10 +89,20 @@ struct WorldRender {
     push_constants: [WorldPushConstant; 1],
 }
 
+/// World data to be rendered on screen
+struct WorldData {
+    assets: Arc<LoomzAssetsBundle>,
+    textures: FnvHashMap<TextureId, Texture>,
+    sprites: StorageAlloc<SpriteData>,
+    animations: Vec<WorldAnimation>,
+    instance_animations: Vec<WorldInstanceAnimation>,
+    instances: Vec<WorldInstance>,
+}
+
 #[repr(C)]
 pub(crate) struct WorldModule {
-    data: Box<WorldData>,
     resources: Box<WorldResources>,
+    data: Box<WorldData>,
     render: Box<WorldRender>,
     batches: Vec<WorldBatch>,
     update_batches: bool,
@@ -115,6 +128,7 @@ impl WorldModule {
             textures: FnvHashMap::default(),
             sprites: StorageAlloc::default(),
             animations: Vec::with_capacity(16),
+            instance_animations: Vec::with_capacity(16),
             instances: Vec::with_capacity(16),
         };
 
@@ -212,97 +226,151 @@ impl WorldModule {
     //
     // Updates
     //
-    
-    fn update_world_component(&mut self, core: &mut LoomzEngineCore, update: WorldComponentUpdate, index: usize) -> Result<(), CommonError> {
-        let new_component = update.component;
-        let mut instance = self.data.instances[index];
-        
-        if instance.component.texture_id != new_component.texture_id {
-            instance.image_view = Self::fetch_texture_view(core, &mut self.data, update.component.texture_id)?;
+
+    fn update_world_actor_animation(&mut self, core: &mut LoomzEngineCore, actor_index: usize, animation: WorldAnimation) -> Result<(), CommonError> {
+        let instance_animation = WorldInstanceAnimation {
+            tick: Instant::now(),
+            instance_index: actor_index,
+            animation,
+            current_frame: 0
+        };
+
+        // Insert or create new animation
+        let instance_animation_index = self.data.instance_animations
+            .iter().position(|anim| anim.instance_index == actor_index )
+            .unwrap_or(usize::MAX);
+
+        if instance_animation_index == usize::MAX {
+            self.data.instance_animations.push(instance_animation);
+        } else {
+            self.data.instance_animations[instance_animation_index] = instance_animation;
+        }
+
+        // Update instance image
+        let new_image_view = self.fetch_texture_view(core, animation.texture_id)?;
+        let old_image_view = self.data.instances[actor_index].image_view;
+        if new_image_view != old_image_view {
+            self.data.instances[actor_index].image_view = new_image_view;
             self.update_batches = true;
         }
 
-        instance.component = new_component;
-        self.data.instances[index] = instance;
-        self.data.sprites.write_data(index, SpriteData::from(new_component));
+        // Initialize the instance UV
+        let instance = &mut self.data.instances[actor_index];
+        instance.uv_offset = [0.0, 0.0];
+        instance.uv_size = [60.0, 59.0];
+
+        Ok(())
+
+    }
+    
+    fn update_world_actor(&mut self, core: &mut LoomzEngineCore, actor_index: usize, param: WorldActor) -> Result<(), CommonError> {
+        match param {
+            WorldActor::Position(position) => {
+                self.data.instances[actor_index].position = position;
+            },
+            WorldActor::Size(size) => {
+                self.data.instances[actor_index].size = size;
+            },
+            WorldActor::Animation(animation_id) => {
+                let animation = animation_id.bound_value().and_then(|index| self.data.animations.get(index).copied() );
+                match animation {
+                    Some(animation) => { self.update_world_actor_animation(core, actor_index, animation)?; },
+                    None => { println!("Error. Animation is not valid.") }
+                }
+            }
+        }
+
+        self.data.sprites.write_data(actor_index, SpriteData::from(self.data.instances[actor_index]));
 
         Ok(())
     }
 
-    fn create_world_component(&mut self, core: &mut LoomzEngineCore, update: WorldComponentUpdate) -> Result<(), CommonError> {
-        let component = update.component;
-        let image_view = Self::fetch_texture_view(core, &mut self.data, component.texture_id)?;
-        let obj = WorldObject {
-            component,
-            image_view,
-        };
-
+    fn create_world_actor(&mut self, id: WorldActorId) -> Result<usize, CommonError> {
         let instances = &mut self.data.instances;
-        let new_instance_index = instances.len();
-        instances.push(obj);
+        let new_id = instances.len();
+        
+        instances.push(WorldInstance {
+            image_view: vk::ImageView::null(),
+            position: Position::default(),
+            size: Size::default(),
+            uv_offset: [0.0, 0.0],
+            uv_size: [0.0, 0.0],
+        });
 
-        self.data.sprites.write_data(new_instance_index, SpriteData::from(component));
-        self.update_batches = true;
+        id.bind(new_id as u32);
 
-        update.uid.bind(new_instance_index as u32);
-
-        Ok(())
+        Ok(new_id)
     }
 
-    fn create_world_animation(&mut self, update: WorldAnimationUpdate) {
+    fn create_world_animation(&mut self, id: WorldAnimationId, animation: WorldAnimation) {
         let animations = &mut self.data.animations;
         let new_id = animations.len() as u32;
-        animations.push(update.animation);
-        update.uid.bind(new_id);
+        animations.push(animation);
+        id.bind(new_id);
     }
 
     fn api_update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        if let Some(animations) = api.world().animations() {
-            for update in animations {
-                match update.uid.bound_value() {
+        if let Some(animations) = api.world().read_animations() {
+            for (id, animation) in animations {
+                match id.bound_value() {
                     Some(index) => panic!("Animations cannot be updated. Tried to update animation ID {index}"),
-                    None => self.create_world_animation(update)
+                    None => self.create_world_animation(id, animation)
                 }
             }
         }
-        
-        if let Some(components) = api.world().components() {
-            for update in components {
-                match update.uid.bound_value() {
-                    Some(index) => self.update_world_component(core, update, index)?,
-                    None => self.create_world_component(core, update)?
+
+        if let Some(actors) = api.world().read_actors() {
+            for (id, actor) in actors {
+                match id.bound_value() {
+                    Some(index) => self.update_world_actor(core, index, actor)?,
+                    None => {
+                        let index = self.create_world_actor(id)?;
+                        self.update_world_actor(core, index, actor)?;
+                    }
                 }
-                
             }
         }
 
         Ok(())
     }
 
-    fn batches_update(&mut self, core: &mut LoomzEngineCore) {
-        if !self.update_batches {
-            return;
+    fn animation_update(&mut self) {
+        let now = Instant::now();
+        for instance_animation in self.data.instance_animations.iter_mut() {
+            let elapsed = now.duration_since(instance_animation.tick).as_secs_f32();
+            if elapsed > instance_animation.animation.interval {
+                let instance = &mut self.data.instances[instance_animation.instance_index];
+                //self.data.sprites.write_data(instance_animation.instance_index, SpriteData::from(&instance));
+                
+                instance_animation.tick = now;
+                
+                if instance_animation.current_frame == instance_animation.animation.last_frame {
+                    instance_animation.current_frame = 0;
+                } else {
+                    instance_animation.current_frame += 1;
+                }
+            }
         }
+    }
 
+    fn batches_update(&mut self, core: &mut LoomzEngineCore) {
         self.resources.descriptors.alloc.clear_sets(BATCH_LAYOUT_INDEX);
         self.batches.clear();
 
-        if !self.data.instances.is_empty() {
-            WorldBatcher::build(self);
-        }
+        WorldBatcher::build(self);
 
         self.resources.descriptors.updates.submit(core);
         self.update_batches = false;
     }
-
-    fn animation_update(&mut self, core: &mut LoomzEngineCore) {
-
-    }
-
+    
     pub fn update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         self.api_update(api, core)?;
-        self.animation_update(core);
-        self.batches_update(core);
+        self.animation_update();
+
+        if self.update_batches {
+            self.batches_update(core);
+        }
+
         Ok(())
     }
 
@@ -310,18 +378,18 @@ impl WorldModule {
     // Data
     //
    
-    fn fetch_texture_view(core: &mut LoomzEngineCore, data: &mut WorldData, id: TextureId) -> Result<vk::ImageView, CommonError> {
-        if let Some(texture) = data.textures.get(&id) {
+    fn fetch_texture_view(&mut self, core: &mut LoomzEngineCore, id: TextureId) -> Result<vk::ImageView, CommonError> {
+        if let Some(texture) = self.data.textures.get(&id) {
             return Ok(texture.view);
         }
 
-        let texture_asset = data.assets.texture(id)
+        let texture_asset = self.data.assets.texture(id)
             .ok_or_else(|| assets_err!("Unkown asset with ID {id:?}") )?;
 
         let texture = core.create_texture_from_asset(&texture_asset)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
 
-        data.textures.insert(id, texture);
+        self.data.textures.insert(id, texture);
 
         Ok(texture.view)
     }
@@ -506,8 +574,7 @@ impl WorldModule {
 struct WorldBatcher<'a> {
     current_view: vk::ImageView,
     batches: &'a mut Vec<WorldBatch>,
-    instances: &'a mut [WorldObject],
-    sprites: &'a mut StorageAlloc<SpriteData>,
+    instances: &'a mut [WorldInstance],
     descriptors: &'a mut WorldModuleDescriptors,
     instance_index: usize,
     batch_index: usize,
@@ -520,38 +587,55 @@ impl<'a> WorldBatcher<'a> {
             current_view: vk::ImageView::null(),
             batches: &mut world.batches,
             instances: &mut world.data.instances,
-            sprites: &mut world.data.sprites,
             descriptors: &mut world.resources.descriptors,
             instance_index: 0,
             batch_index: 0,
         };
+
+        println!("Batching");
 
         batcher.first_batch();
         batcher.remaining_batches();
     }
 
     fn first_batch(&mut self) {
-        let instance = &mut self.instances[0];
+        let mut found = false;
+        let max_instance = self.instances.len();
 
-        let dst_set = self.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
-        self.descriptors.updates.write_simple_image(dst_set, instance.image_view, &self.descriptors.texture_params);
+        while !found && self.instance_index != max_instance {
+            let instance = self.instances[self.instance_index];
+            if instance.image_view.is_null() {
+                // Sprite is not renderable
+                self.instance_index += 1;
+                continue;
+            }
 
-        self.batches.push(WorldBatch {
-            dst_set,
-            instances_count: 1,
-            instances_offset: 0,
-        });
-
-        self.sprites.write_data(0, SpriteData::from(instance.component));
-
-        self.current_view = instance.image_view;
-        self.instance_index += 1;
+            let dst_set = self.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
+            self.descriptors.updates.write_simple_image(dst_set, instance.image_view, &self.descriptors.texture_params);
+    
+            self.batches.push(WorldBatch {
+                dst_set,
+                instances_count: 1,
+                instances_offset: 0,
+            });
+    
+            self.current_view = instance.image_view;
+            self.instance_index += 1;
+            found = true;
+        }
     }
 
     fn remaining_batches(&mut self) {
         let max_instance = self.instances.len();
         while self.instance_index != max_instance {
-            let image_view = self.instances[self.instance_index].image_view;
+            let instance = self.instances[self.instance_index];
+            if instance.image_view.is_null() {
+                // Sprite is not renderable
+                self.instance_index += 1;
+                continue;
+            }
+
+            let image_view = instance.image_view;
             if self.current_view == image_view {
                 self.batches[self.batch_index].instances_count += 1;
             } else {
@@ -578,17 +662,17 @@ impl<'a> WorldBatcher<'a> {
 
 }
 
-impl From<WorldComponent> for SpriteData {
-    fn from(component: WorldComponent) -> Self {
-        let mut position = component.position;
-        position.x -= component.size.width * 0.5;
-        position.y -= component.size.height * 0.5;
+impl From<WorldInstance> for SpriteData {
+    fn from(instance: WorldInstance) -> Self {
+        let mut position = instance.position;
+        position.x -= instance.size.width * 0.5;
+        position.y -= instance.size.height * 0.5;
 
         SpriteData {
             offset: position.splat(),
-            size: component.size.splat(),
-            uv_offset: component.uv.offset(),
-            uv_size: component.uv.size(),
+            size: instance.size.splat(),
+            uv_offset: instance.uv_offset,
+            uv_size: instance.uv_size,
         }
     }
 }
