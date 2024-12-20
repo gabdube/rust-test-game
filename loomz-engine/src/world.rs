@@ -1,9 +1,8 @@
 use std::{slice, sync::Arc, time::Instant, u32, usize};
 use fnv::FnvHashMap;
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
-use loomz_shared::_2d::{Position, Size};
 use loomz_shared::api::{LoomzApi, WorldAnimationId, WorldAnimation, WorldActorId, WorldActor};
-use loomz_shared::{assets::{LoomzAssetsBundle, TextureId}, CommonError, CommonErrorType};
+use loomz_shared::{assets::{LoomzAssetsBundle, TextureId}, _2d::Position, CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, assets_err, chain_err};
 
 const WORLD_VERT_SRC: &[u8] = include_bytes!("../../assets/shaders/world.vert.spv");
@@ -65,11 +64,10 @@ struct WorldResources {
 struct WorldInstance {
     image_view: vk::ImageView,
     position: Position<f32>,
-    size: Size<f32>,
     uv_offset: [f32; 2],
     uv_size: [f32; 2],
 }
-
+ 
 struct WorldInstanceAnimation {
     tick: Instant,
     instance_index: usize,
@@ -256,8 +254,8 @@ impl WorldModule {
 
         // Initialize the instance UV
         let instance = &mut self.data.instances[actor_index];
-        instance.uv_offset = [0.0, 0.0];
-        instance.uv_size = [60.0, 59.0];
+        instance.uv_offset = [animation.x, animation.y];
+        instance.uv_size = [animation.sprite_width, animation.sprite_height];
 
         Ok(())
 
@@ -267,9 +265,6 @@ impl WorldModule {
         match param {
             WorldActor::Position(position) => {
                 self.data.instances[actor_index].position = position;
-            },
-            WorldActor::Size(size) => {
-                self.data.instances[actor_index].size = size;
             },
             WorldActor::Animation(animation_id) => {
                 let animation = animation_id.bound_value().and_then(|index| self.data.animations.get(index).copied() );
@@ -292,7 +287,6 @@ impl WorldModule {
         instances.push(WorldInstance {
             image_view: vk::ImageView::null(),
             position: Position::default(),
-            size: Size::default(),
             uv_offset: [0.0, 0.0],
             uv_size: [0.0, 0.0],
         });
@@ -339,9 +333,15 @@ impl WorldModule {
         for instance_animation in self.data.instance_animations.iter_mut() {
             let elapsed = now.duration_since(instance_animation.tick).as_secs_f32();
             if elapsed > instance_animation.animation.interval {
+                let animation = instance_animation.animation;
+                let i = instance_animation.current_frame as f32;
+                let uv_x = animation.x + (animation.sprite_width * i) + (animation.padding * i);
+
                 let instance = &mut self.data.instances[instance_animation.instance_index];
-                //self.data.sprites.write_data(instance_animation.instance_index, SpriteData::from(&instance));
-                
+                instance.uv_offset[0] = uv_x;
+
+                self.data.sprites.write_data(instance_animation.instance_index, SpriteData::from(*instance));
+
                 instance_animation.tick = now;
                 
                 if instance_animation.current_frame == instance_animation.animation.last_frame {
@@ -592,8 +592,6 @@ impl<'a> WorldBatcher<'a> {
             batch_index: 0,
         };
 
-        println!("Batching");
-
         batcher.first_batch();
         batcher.remaining_batches();
     }
@@ -664,13 +662,15 @@ impl<'a> WorldBatcher<'a> {
 
 impl From<WorldInstance> for SpriteData {
     fn from(instance: WorldInstance) -> Self {
+        let [width, height] = instance.uv_size;
+
         let mut position = instance.position;
-        position.x -= instance.size.width * 0.5;
-        position.y -= instance.size.height * 0.5;
+        position.x -= width * 0.5;
+        position.y -= height * 0.5;
 
         SpriteData {
             offset: position.splat(),
-            size: instance.size.splat(),
+            size: instance.uv_size,
             uv_offset: instance.uv_offset,
             uv_size: instance.uv_size,
         }

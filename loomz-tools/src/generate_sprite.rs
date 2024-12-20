@@ -1,7 +1,7 @@
 //! Generate optimized sprites from the data in `assets/dev/tiny_sword`
 //! Call this script using `cargo run -p loomz-tools --release -- -c generate_sprites -f [optional_filters]`
 use std::{fs::File, u32};
-use crate::shared::{Rect, Size, size};
+use crate::shared::{Rect, Size, Offset, size};
 
 const SRC_ROOT: &str = "assets/dev/tiny_sword/";
 const DST_ROOT: &str = "assets/dev/textures/";
@@ -35,6 +35,9 @@ struct ActorAnimation {
     dst_rect: Vec<Rect>,
     dst_sprite_offset: Rect,
     dst_sprite_size: Size,
+
+    /// Top left corner of the first sprite in the destination image
+    dst_sprite_start: Offset,
 }
 
 /// All the info required to read and process a "actor" sprites 
@@ -166,6 +169,7 @@ fn build_actor_animation<P: Copy+Default+PartialEq>(actor: &mut Actor, animation
         dst_rect: Vec::with_capacity(sprite_count),
         dst_sprite_offset: Rect::default(),
         dst_sprite_size: Size::default(),
+        dst_sprite_start: Offset::default(),
     };
 
     for i in 0..sprite_count {
@@ -232,6 +236,8 @@ fn compute_sprites_dst(actor: &mut Actor) {
         let sprite_count = animation.src_rect.len();
         let dst_size = animation.dst_sprite_size;
         let dst_offset = animation.dst_sprite_offset;
+
+        animation.dst_sprite_start = Offset { x, y };
 
         for sprite_index in 0..sprite_count {
             let src = animation.src_rect[sprite_index];
@@ -332,8 +338,12 @@ fn export_image(actor: &mut Actor) -> Result<(), Box<dyn ::std::error::Error>> {
 fn export_json(actor: &Actor) -> Result<(), Box<dyn ::std::error::Error>> {
     use std::io::Write;
 
-    fn write_line<V: ::std::fmt::Debug>(js_out: &mut String, key: &str, value: V) {
-        js_out.push_str(&format!("      {:?}: {:?},\r\n", key, value));
+    fn write_line<V: ::std::fmt::Debug>(js_out: &mut String, key: &str, value: V, last: bool) {
+        js_out.push_str(&format!("      {:?}: {:?}", key, value));
+        match last {
+            true => js_out.push_str("\r\n"),
+            false => js_out.push_str(",\r\n"),
+        }
     }
 
     let default_buffer_size = 10_000;
@@ -341,6 +351,7 @@ fn export_json(actor: &Actor) -> Result<(), Box<dyn ::std::error::Error>> {
 
     js_out.push_str("{\r\n");
     js_out.push_str(&format!("  \"name\": {:?},\r\n", actor.file_name));
+    js_out.push_str(&format!("  \"asset\": {:?},\r\n", actor.file_name.to_ascii_lowercase()));
     js_out.push_str(&"  \"animations\": [\r\n");
 
     let animation_count = actor.animations.len();
@@ -350,26 +361,19 @@ fn export_json(actor: &Actor) -> Result<(), Box<dyn ::std::error::Error>> {
         let name = actor.animation_names.get(animation_index).map(|n| *n).unwrap_or_else(|| format!("UNNAMED_{animation_index}").leak() );
 
         js_out.push_str(&"    {\r\n");
-        write_line(&mut js_out, "name", name);
-        write_line(&mut js_out, "sprite_count", sprite_count);
-        write_line(&mut js_out, "sprite_padding", PADDING_PX);
-        write_line(&mut js_out, "sprite_width", animation.dst_sprite_size.width);
-        write_line(&mut js_out, "sprite_height", animation.dst_sprite_size.height);
-
-        js_out.push_str("      \"sprites\": [");
-        for i in 0..sprite_count {
-            let sprite = animation.dst_rect[i];
-            js_out.push_str(&format!("[{},{},{},{}]", sprite.left, sprite.top, sprite.right, sprite.bottom));
-            if i != (sprite_count-1) {
-                js_out.push_str(", ");
-            }
-        }
-        js_out.push_str("]\r\n    }");
+        write_line(&mut js_out, "name", name, false);
+        write_line(&mut js_out, "count", sprite_count, false);
+        write_line(&mut js_out, "padding", PADDING_PX, false);
+        write_line(&mut js_out, "x", animation.dst_sprite_start.x, false);
+        write_line(&mut js_out, "y", animation.dst_sprite_start.y, false);
+        write_line(&mut js_out, "width", animation.dst_sprite_size.width, false);
+        write_line(&mut js_out, "height", animation.dst_sprite_size.height, true);
 
         if animation_index != animation_count - 1{
-            js_out.push(',');
+            js_out.push_str("    },\r\n");
+        } else {
+            js_out.push_str("    }\r\n");
         }
-        js_out.push_str(&"\r\n");
     }
 
     js_out.push_str("  ]\r\n}");

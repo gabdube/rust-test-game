@@ -1,8 +1,7 @@
 use loomz_shared::api::{LoomzApi, WorldAnimationId};
-use loomz_shared::base_types::RectF32;
 use loomz_shared::{assets_err, CommonError};
 
-const ANIMATION_INTERVAL: f32 = 1.0 / 24.0; // 24fps
+const ANIMATION_INTERVAL: f32 = 1.0 / 16.0; // 16fps
 
 #[derive(Default)]
 pub struct PawnAnimation {
@@ -61,24 +60,23 @@ impl Animations {
                 None => { continue; }
             };
 
-            let sprite_count: usize = parse(&animation["sprite_count"]);
+            let sprite_count: u32 = parse(&animation["count"]);
             if sprite_count == 0 {
                 continue;
             }
 
-            let sprite_padding: u32 = parse(&animation["sprite_padding"]);
-            let sprite_width: u32 = parse(&animation["sprite_width"]);
-            let sprite_height: u32 = parse(&animation["sprite_height"]);
-
-            let mut sprites = Vec::with_capacity(sprite_count);
-            let sprites_data = &animation["sprites"];
-            for i in 0..sprite_count {
-                sprites.push(parse_rect(&sprites_data[i]));
-            }
+            let padding: f32 = parse(&animation["padding"]);
+            let x: f32 = parse(&animation["x"]);
+            let y: f32 = parse(&animation["y"]);
+            let sprite_width: f32 = parse(&animation["width"]);
+            let sprite_height: f32 = parse(&animation["height"]);
 
             let animation = loomz_shared::WorldAnimation {
                 texture_id,
-                last_frame: (sprite_count - 1) as u32,
+                padding,
+                x, y,
+                sprite_width, sprite_height,
+                last_frame: sprite_count - 1,
                 interval: ANIMATION_INTERVAL
             };
 
@@ -93,14 +91,5 @@ fn parse<T: ::std::str::FromStr>(item: &jsonic::json_item::JsonItem) -> T {
     match item.as_str().and_then(|value| value.parse::<T>().ok() ) {
         Some(v) => v,
         _ => panic!("Failed to parse json value")
-    }
-}
-
-fn parse_rect(item: &jsonic::json_item::JsonItem) -> RectF32 {
-    RectF32 {
-        left: parse(&item[0]),
-        top: parse(&item[1]),
-        right: parse(&item[2]),
-        bottom: parse(&item[3]),
     }
 }

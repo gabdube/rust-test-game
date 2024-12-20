@@ -1,4 +1,4 @@
-use crate::_2d::{Position, Size};
+use crate::_2d::Position;
 use crate::assets::TextureId;
 use super::base::{Id, MessageQueue};
 
@@ -11,13 +11,17 @@ pub type WorldActorId = Id<WorldActorTag>;
 #[derive(Copy, Clone)]
 pub struct WorldAnimation {
     pub texture_id: TextureId,
+    pub padding: f32,
+    pub x: f32,
+    pub y: f32,
+    pub sprite_width: f32,
+    pub sprite_height: f32,
     pub last_frame: u32,
     pub interval: f32,
 }
 
 pub enum WorldActor {
     Position(Position<f32>),
-    Size(Size<f32>),
     Animation(WorldAnimationId),
 }
 
@@ -43,9 +47,8 @@ impl WorldApi {
         self.animations.read_values()
     }
 
-    pub fn create_actor(&self, id: &WorldActorId, position: Position<f32>, size: Size<f32>, animation_id: &WorldAnimationId) {
+    pub fn create_actor(&self, id: &WorldActorId, position: Position<f32>, animation_id: &WorldAnimationId) {
         self.actors.push(id, WorldActor::Position(position));
-        self.actors.push(id, WorldActor::Size(size));
         self.actors.push(id, WorldActor::Animation(animation_id.clone()));
     }
 

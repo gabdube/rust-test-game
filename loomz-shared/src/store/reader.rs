@@ -90,4 +90,8 @@ impl<'a> SaveFileReaderBase<'a> {
         T::load(self)
     }
 
+    pub fn skip(&mut self, count: usize) {
+        self.current_offset += count;
+    }
+
 }

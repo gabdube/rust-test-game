@@ -4,10 +4,11 @@ mod animations;
 use animations::Animations;
 
 use std::time::Instant;
-use loomz_shared::{_2d::Position, base_types::_2d::{pos, size}};
+use loomz_shared::{_2d::Position, base_types::_2d::pos};
 use loomz_shared::api::{WorldActorId, WorldActor};
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
+#[derive(Default)]
 pub struct Player {
     id: WorldActorId,
     position: Position<f32>,
@@ -26,12 +27,12 @@ struct ClientTiming {
 
 pub struct LoomzClient {
     api: LoomzApi,
-    timing: ClientTiming, 
-
-    state: GameState,
+    timing: ClientTiming,
     animations: Animations,
 
-    player: Option<Player>,
+    state: GameState,
+
+    player: Player,
     target_position: Position<f32>,
 }
 
@@ -43,20 +44,18 @@ impl LoomzClient {
             delta_ms: 0.0,
         };
         
-        let mut client = LoomzClient {
+        let client = LoomzClient {
             api: api.clone(),
             timing,
 
             state: GameState::Uninitialized,
             animations: Animations::default(),
 
-            player: None,
+            player: Player::default(),
             target_position: Position::default(),
         };
 
         client.animations.load(api)?;
-        client.init_player(api)?;
-        
 
         Ok(client)
     }
@@ -67,20 +66,24 @@ impl LoomzClient {
 
         let mut client = Self::init(api)?;
         client.state = reader.read_from_u32();
+        client.target_position = reader.read();
+        client.player = reader.load();
 
         Ok(client)
     }
 
     pub fn export(&self, writer: &mut crate::store::SaveFileWriter) {
         writer.write_into_u32(self.state);
+        writer.write(&self.target_position);
+        writer.store(&self.player);
     }
 
     pub fn update(&mut self) -> Result<(), CommonError> {
         self.update_timing();
 
         match self.state {
-            GameState::Uninitialized => self.uninitialized(),
-            GameState::Gameplay => self.gameplay(),
+            GameState::Uninitialized => self.uninitialized()?,
+            GameState::Gameplay => self.gameplay()?,
         }
 
         Ok(())
@@ -92,50 +95,51 @@ impl LoomzClient {
         self.timing.delta_ms = elapsed.as_secs_f64();
     }
 
-    fn uninitialized(&mut self) {
+    fn uninitialized(&mut self) -> Result<(), CommonError> {
+        self.init_player()?;
         self.state = GameState::Gameplay;
+        Ok(())
     }
 
-    fn gameplay(&mut self) {
+    fn gameplay(&mut self) -> Result<(), CommonError> {
         if let Some(new_input) = self.api.read_inputs() {
             if let Some(cursor_position) = new_input.cursor_position() {
                 self.on_cursor_moved(cursor_position);
             }
         }
 
-        if let Some(player) = self.player.as_mut() {
-            let world = self.api.world();
-            let position = player.position;
-            let target = self.target_position;
+        let world = self.api.world();
+        let position = self.player.position;
+        let target = self.target_position;
 
-            if position.out_of_range(target, 2.0) {
-                let speed = 300.0 * self.timing.delta_ms;
-                let angle = f32::atan2(target.y - position.y, target.x - position.x) as f64;
-                player.position += pos(speed * f64::cos(angle), speed * f64::sin(angle));
-                world.update_actor(&player.id, WorldActor::Position(player.position));
-            }
+        if position.out_of_range(target, 2.0) {
+            let speed = 200.0 * self.timing.delta_ms;
+            let angle = f32::atan2(target.y - position.y, target.x - position.x) as f64;
+            self.player.position += pos(speed * f64::cos(angle), speed * f64::sin(angle));
+            world.update_actor(&self.player.id, WorldActor::Position(self.player.position));
         }
+
+        Ok(())
     }
 
     fn on_cursor_moved(&mut self, position: Position<f64>) {
         self.target_position = position.as_f32();
     }
 
-    fn init_player(&mut self, api: &LoomzApi) -> Result<(), CommonError> {
+    fn init_player(&mut self) -> Result<(), CommonError> {
         let start_position = pos(100.0, 100.0);
         let player = Player {
             id: WorldActorId::new(),
             position: start_position,
         };
 
-        api.world().create_actor(
+        self.api.world().create_actor(
             &player.id,
             player.position,
-            size(64.0, 64.0),
-            &self.animations.pawn.idle,
+            &self.animations.pawn.walk,
         );
 
-        self.player = Some(player);
+        self.player = player;
         self.target_position = start_position;
 
         Ok(())
@@ -232,6 +236,19 @@ mod hot {
     }
 }
 
+impl loomz_shared::store::StoreAndLoad for Player {
+    fn load(reader: &mut loomz_shared::store::SaveFileReaderBase) -> Self {
+        Player {
+            id: reader.load(),
+            position: reader.read(),
+        }
+    }
+
+    fn store(&self, writer: &mut loomz_shared::store::SaveFileWriterBase) {
+        writer.store(&self.id);
+        writer.write(&self.position);
+    }
+}
 
 impl From<u32> for GameState {
     fn from(value: u32) -> Self {
