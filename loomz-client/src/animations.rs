@@ -3,6 +3,17 @@ use loomz_shared::{assets_err, CommonError};
 
 const ANIMATION_INTERVAL: f32 = 1.0 / 16.0; // 16fps
 
+#[derive(Default, Copy, Clone, PartialEq)]
+pub enum PawnAnimationType {
+    #[default]
+    Idle,
+    Walk,
+    Hammer,
+    Axe,
+    IdleHold,
+    IdleWalk
+}
+
 #[derive(Default)]
 pub struct PawnAnimation {
     pub idle: WorldAnimationId,
@@ -91,5 +102,31 @@ fn parse<T: ::std::str::FromStr>(item: &jsonic::json_item::JsonItem) -> T {
     match item.as_str().and_then(|value| value.parse::<T>().ok() ) {
         Some(v) => v,
         _ => panic!("Failed to parse json value")
+    }
+}
+
+impl From<u32> for PawnAnimationType {
+    fn from(value: u32) -> Self {
+        match value {
+            1 => PawnAnimationType::Walk,
+            2 => PawnAnimationType::Hammer,
+            3 => PawnAnimationType::Axe,
+            4 => PawnAnimationType::IdleHold,
+            5 => PawnAnimationType::IdleWalk,
+            _ => PawnAnimationType::Idle,
+        }
+    }
+}
+
+impl From<PawnAnimationType> for u32 {
+    fn from(value: PawnAnimationType) -> Self {
+        match value {
+            PawnAnimationType::Idle => 0,
+            PawnAnimationType::Walk => 1,
+            PawnAnimationType::Hammer => 2,
+            PawnAnimationType::Axe => 3,
+            PawnAnimationType::IdleHold => 4,
+            PawnAnimationType::IdleWalk => 5
+        }
     }
 }

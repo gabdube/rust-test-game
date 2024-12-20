@@ -17,4 +17,3 @@ strip = "debuginfo"
 [profile.release]
 opt-level = 2
 strip = "debuginfo"
-panic = "abort"

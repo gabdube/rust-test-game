@@ -3,7 +3,7 @@ use fnv::FnvHashMap;
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
 use loomz_shared::api::{LoomzApi, WorldAnimationId, WorldAnimation, WorldActorId, WorldActor};
 use loomz_shared::{assets::{LoomzAssetsBundle, TextureId}, _2d::Position, CommonError, CommonErrorType};
-use loomz_shared::{backend_init_err, assets_err, chain_err};
+use loomz_shared::{backend_init_err, assets_err, backend_err, chain_err};
 
 const WORLD_VERT_SRC: &[u8] = include_bytes!("../../assets/shaders/world.vert.spv");
 const WORLD_FRAG_SRC: &[u8] = include_bytes!("../../assets/shaders/world.frag.spv");
@@ -66,6 +66,7 @@ struct WorldInstance {
     position: Position<f32>,
     uv_offset: [f32; 2],
     uv_size: [f32; 2],
+    flipped: bool,
 }
  
 struct WorldInstanceAnimation {
@@ -230,7 +231,7 @@ impl WorldModule {
             tick: Instant::now(),
             instance_index: actor_index,
             animation,
-            current_frame: 0
+            current_frame: 0,
         };
 
         // Insert or create new animation
@@ -266,11 +267,15 @@ impl WorldModule {
             WorldActor::Position(position) => {
                 self.data.instances[actor_index].position = position;
             },
+            WorldActor::Flip(flipped) => {
+                self.data.instances[actor_index].flipped = flipped;
+            },
             WorldActor::Animation(animation_id) => {
-                let animation = animation_id.bound_value().and_then(|index| self.data.animations.get(index).copied() );
+                let animation_index = animation_id.bound_value();
+                let animation = animation_index.and_then(|index| self.data.animations.get(index).copied() );
                 match animation {
                     Some(animation) => { self.update_world_actor_animation(core, actor_index, animation)?; },
-                    None => { println!("Error. Animation is not valid.") }
+                    None => { return Err(backend_err!("Failed to find an animation with ID {animation_index:?}")); }
                 }
             }
         }
@@ -289,6 +294,7 @@ impl WorldModule {
             position: Position::default(),
             uv_offset: [0.0, 0.0],
             uv_size: [0.0, 0.0],
+            flipped: false,
         });
 
         id.bind(new_id as u32);
@@ -332,23 +338,26 @@ impl WorldModule {
         let now = Instant::now();
         for instance_animation in self.data.instance_animations.iter_mut() {
             let elapsed = now.duration_since(instance_animation.tick).as_secs_f32();
-            if elapsed > instance_animation.animation.interval {
-                let animation = instance_animation.animation;
-                let i = instance_animation.current_frame as f32;
-                let uv_x = animation.x + (animation.sprite_width * i) + (animation.padding * i);
+            if elapsed < instance_animation.animation.interval {
+                continue;
+            }
 
-                let instance = &mut self.data.instances[instance_animation.instance_index];
-                instance.uv_offset[0] = uv_x;
+            let i = instance_animation.current_frame as f32;
+            let animation = instance_animation.animation;
+            let mut instance = self.data.instances[instance_animation.instance_index];
 
-                self.data.sprites.write_data(instance_animation.instance_index, SpriteData::from(*instance));
+            let uv_x = animation.x + (animation.sprite_width * i) + (animation.padding * i);
+            instance.uv_offset[0] = uv_x;
 
-                instance_animation.tick = now;
-                
-                if instance_animation.current_frame == instance_animation.animation.last_frame {
-                    instance_animation.current_frame = 0;
-                } else {
-                    instance_animation.current_frame += 1;
-                }
+            self.data.instances[instance_animation.instance_index] = instance;
+            self.data.sprites.write_data(instance_animation.instance_index, SpriteData::from(instance));
+
+            instance_animation.tick = now;
+            
+            if instance_animation.current_frame == instance_animation.animation.last_frame {
+                instance_animation.current_frame = 0;
+            } else {
+                instance_animation.current_frame += 1;
             }
         }
     }
@@ -662,17 +671,24 @@ impl<'a> WorldBatcher<'a> {
 
 impl From<WorldInstance> for SpriteData {
     fn from(instance: WorldInstance) -> Self {
-        let [width, height] = instance.uv_size;
+        let size = instance.uv_size;
 
-        let mut position = instance.position;
-        position.x -= width * 0.5;
-        position.y -= height * 0.5;
+        let mut offset = instance.position.splat();
+        offset[0] -= size[0] * 0.5;
+        offset[1] -= size[1] * 0.5;
+
+        let mut uv_offset = instance.uv_offset;
+        let mut uv_size = instance.uv_size;
+        if instance.flipped {
+            uv_offset[0] += size[0];
+            uv_size[0] *= -1.0;
+        }
 
         SpriteData {
-            offset: position.splat(),
-            size: instance.uv_size,
-            uv_offset: instance.uv_offset,
-            uv_size: instance.uv_size,
+            offset,
+            size,
+            uv_offset,
+            uv_size,
         }
     }
 }

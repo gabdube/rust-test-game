@@ -86,6 +86,10 @@ impl<'a> SaveFileReaderBase<'a> {
         T::from(self.read_u32())
     }
 
+    pub fn read_bool(&mut self) -> bool {
+        self.read_u32() == 1
+    }
+
     pub fn load<T: StoreAndLoad>(&mut self) -> T {
         T::load(self)
     }

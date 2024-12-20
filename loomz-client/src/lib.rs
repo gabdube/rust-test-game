@@ -1,17 +1,20 @@
 mod store;
 
 mod animations;
-use animations::Animations;
+use animations::{Animations, PawnAnimationType};
 
 use std::time::Instant;
 use loomz_shared::{_2d::Position, base_types::_2d::pos};
 use loomz_shared::api::{WorldActorId, WorldActor};
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
+
 #[derive(Default)]
 pub struct Player {
     id: WorldActorId,
     position: Position<f32>,
+    animation: PawnAnimationType,
+    flip: bool,
 }
 
 #[derive(Copy, Clone)]
@@ -115,8 +118,29 @@ impl LoomzClient {
         if position.out_of_range(target, 2.0) {
             let speed = 200.0 * self.timing.delta_ms;
             let angle = f32::atan2(target.y - position.y, target.x - position.x) as f64;
-            self.player.position += pos(speed * f64::cos(angle), speed * f64::sin(angle));
+            let speed_x = speed * f64::cos(angle);
+            let speed_y = speed * f64::sin(angle);
+
+            self.player.position += pos(speed_x, speed_y);
             world.update_actor(&self.player.id, WorldActor::Position(self.player.position));
+
+            if self.player.animation != PawnAnimationType::Walk {
+                world.update_actor(&self.player.id, WorldActor::Animation(self.animations.pawn.walk.clone()));
+                self.player.animation = PawnAnimationType::Walk;
+            }
+
+            if speed_x < 0.0 && !self.player.flip {
+                self.player.flip = true;
+                world.update_actor(&self.player.id, WorldActor::Flip(true));
+            } else if speed_x > 0.0 && self.player.flip {
+                self.player.flip = false;
+                world.update_actor(&self.player.id, WorldActor::Flip(false));
+            }
+        } else {
+            if self.player.animation != PawnAnimationType::Idle {
+                world.update_actor(&self.player.id, WorldActor::Animation(self.animations.pawn.idle.clone()));
+                self.player.animation = PawnAnimationType::Idle;
+            }
         }
 
         Ok(())
@@ -131,6 +155,8 @@ impl LoomzClient {
         let player = Player {
             id: WorldActorId::new(),
             position: start_position,
+            animation: PawnAnimationType::Idle,
+            flip: false,
         };
 
         self.api.world().create_actor(
@@ -241,12 +267,16 @@ impl loomz_shared::store::StoreAndLoad for Player {
         Player {
             id: reader.load(),
             position: reader.read(),
+            animation: reader.read_from_u32(),
+            flip: reader.read_bool(),
         }
     }
 
     fn store(&self, writer: &mut loomz_shared::store::SaveFileWriterBase) {
         writer.store(&self.id);
         writer.write(&self.position);
+        writer.write_into_u32(self.animation);
+        writer.write_into_u32(self.flip);
     }
 }
 

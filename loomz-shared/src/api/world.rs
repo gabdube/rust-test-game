@@ -23,6 +23,7 @@ pub struct WorldAnimation {
 pub enum WorldActor {
     Position(Position<f32>),
     Animation(WorldAnimationId),
+    Flip(bool),
 }
 
 pub struct WorldApi {
