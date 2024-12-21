@@ -2,6 +2,10 @@ mod store;
 
 mod animations;
 use animations::{Animations, PawnAnimationType};
+use gui::Gui;
+
+mod gui;
+
 
 use std::time::Instant;
 use loomz_shared::{_2d::Position, base_types::_2d::pos};
@@ -20,6 +24,7 @@ pub struct Player {
 #[derive(Copy, Clone)]
 pub enum GameState {
     Uninitialized,
+    MainMenu,
     Gameplay,
 }
 
@@ -28,15 +33,18 @@ struct ClientTiming {
     delta_ms: f64,
 }
 
+#[repr(C)]
 pub struct LoomzClient {
     api: LoomzApi,
     timing: ClientTiming,
-    animations: Animations,
-
-    state: GameState,
+    animations: Box<Animations>,
 
     player: Player,
     target_position: Position<f32>,
+
+    gui: gui::Gui,
+
+    state: GameState,
 }
 
 impl LoomzClient {
@@ -50,12 +58,14 @@ impl LoomzClient {
         let client = LoomzClient {
             api: api.clone(),
             timing,
-
-            state: GameState::Uninitialized,
-            animations: Animations::default(),
+            animations: Box::default(),
 
             player: Player::default(),
             target_position: Position::default(),
+
+            gui: Gui::default(),
+
+            state: GameState::Uninitialized,
         };
 
         client.animations.load(api)?;
@@ -86,6 +96,7 @@ impl LoomzClient {
 
         match self.state {
             GameState::Uninitialized => self.uninitialized()?,
+            GameState::MainMenu => self.main_menu(),
             GameState::Gameplay => self.gameplay()?,
         }
 
@@ -99,9 +110,18 @@ impl LoomzClient {
     }
 
     fn uninitialized(&mut self) -> Result<(), CommonError> {
-        self.init_player()?;
-        self.state = GameState::Gameplay;
+        // self.init_player()?;
+        self.init_main_menu();
+        self.state = GameState::MainMenu;
         Ok(())
+    }
+
+    fn main_menu(&mut self) {
+        let gui = gui::Gui::build(&self.api, |gui| {
+            gui.font_style("default", "roboto", 50.0);
+            gui.font("default");
+            gui.text("Hello World!");
+        });
     }
 
     fn gameplay(&mut self) -> Result<(), CommonError> {
@@ -125,7 +145,7 @@ impl LoomzClient {
             world.update_actor(&self.player.id, WorldActor::Position(self.player.position));
 
             if self.player.animation != PawnAnimationType::Walk {
-                world.update_actor(&self.player.id, WorldActor::Animation(self.animations.pawn.walk.clone()));
+                world.update_actor(&self.player.id, WorldActor::Animation(self.animations.warrior.walk.clone()));
                 self.player.animation = PawnAnimationType::Walk;
             }
 
@@ -138,7 +158,7 @@ impl LoomzClient {
             }
         } else {
             if self.player.animation != PawnAnimationType::Idle {
-                world.update_actor(&self.player.id, WorldActor::Animation(self.animations.pawn.idle.clone()));
+                world.update_actor(&self.player.id, WorldActor::Animation(self.animations.warrior.strike_t2.clone()));
                 self.player.animation = PawnAnimationType::Idle;
             }
         }
@@ -162,13 +182,17 @@ impl LoomzClient {
         self.api.world().create_actor(
             &player.id,
             player.position,
-            &self.animations.pawn.walk,
+            &self.animations.warrior.idle,
         );
 
         self.player = player;
         self.target_position = start_position;
 
         Ok(())
+    }
+
+    fn init_main_menu(&mut self)  {
+
     }
 
 }
@@ -283,7 +307,8 @@ impl loomz_shared::store::StoreAndLoad for Player {
 impl From<u32> for GameState {
     fn from(value: u32) -> Self {
         match value {
-            1 => GameState::Gameplay,
+            1 => GameState::MainMenu,
+            2 => GameState::Gameplay,
             _ => GameState::Uninitialized,
         }
     }
@@ -293,7 +318,8 @@ impl From<GameState> for u32 {
     fn from(value: GameState) -> Self {
         match value {
             GameState::Uninitialized => 0,
-            GameState::Gameplay => 1,
+            GameState::MainMenu => 1,
+            GameState::Gameplay => 2,
         }
     }
 }

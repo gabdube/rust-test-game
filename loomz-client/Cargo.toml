@@ -12,4 +12,4 @@ hot-reload = []
 
 [dependencies]
 loomz-shared = { path = "../loomz-shared" }
-jsonic = "0.2.12"
+serde_json = "1.0"

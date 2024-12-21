@@ -92,8 +92,11 @@ impl<ID: Clone, T> MessageQueue<ID, T> {
     pub fn push(&self, id: &ID, data: T) {
         let mut buffer = self.buffer.lock();
         let index = self.length.fetch_add(1, Ordering::SeqCst);
-        assert!(index < buffer.len(), "Increase message queue capacity");
-        buffer[index] = Some((id.clone(), data));
+        if index >= buffer.len() {
+            println!("ERROR: Not enough capacity to hold more than {} messages. Increase the message queue capacity", buffer.len());
+        } else {
+            buffer[index] = Some((id.clone(), data));
+        }
     }
 
     pub fn read_values<'a>(&'a self) -> Option<impl Iterator<Item = (ID, T)> + 'a> {
@@ -104,9 +107,12 @@ impl<ID: Clone, T> MessageQueue<ID, T> {
                 let mut guard = self.buffer.lock();
                 self.length.store(0, Ordering::SeqCst);
                 Some(::std::iter::from_fn(move || {
-                    let value = guard[index].take();
-                    index += 1;
-                    value
+                    if index < guard.len() {
+                        index += 1;
+                        guard[index - 1].take()
+                    } else {
+                        None
+                    }
                 }))
             }
         }

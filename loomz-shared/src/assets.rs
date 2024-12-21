@@ -1,4 +1,5 @@
 pub mod ktx;
+pub mod msdf_font;
 
 use std::sync::Arc;
 use std::num::NonZeroU32;
@@ -13,10 +14,14 @@ pub struct TextureId(pub NonZeroU32);
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct JsonId(pub NonZeroU32);
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MsdfFontId(pub NonZeroU32);
+
 #[derive(Copy, Clone)]
 enum AssetId {
     Texture(TextureId),
-    Json(JsonId)
+    Json(JsonId),
+    MsdfFont(MsdfFontId),
 }
 
 pub struct AssetsTextureData {
@@ -24,11 +29,18 @@ pub struct AssetsTextureData {
     pub data: ktx::KtxFile,
 }
 
+pub struct AssetsMsdfFontData {
+    pub image_info: png::OutputInfo,
+    pub image_data: Box<[u8]>,
+    pub font_data: msdf_font::MsdfFontData,
+}
+
 /// Static asset bundle referencing all the assets in the program
 pub struct LoomzAssetsBundle {
     assets_by_name: FnvHashMap<String, AssetId>,
     textures: FnvHashMap<TextureId, AssetsTextureData>,
     json: FnvHashMap<JsonId, String>,
+    msdf_fonts: FnvHashMap<MsdfFontId, AssetsMsdfFontData>,
 }
 
 impl LoomzAssetsBundle {
@@ -121,6 +133,7 @@ impl LoomzAssetsBundle {
         match args[0] {
             "TEXTURE" => self.parse_texture(id, args),
             "JSON" => self.parse_json(id, args),
+            "MSDF_FONT" => self.parse_msdf_font(id, args),
             _ => Err(assets_err!("Unknown asset type {:?}", args[0]))
         }
     }
@@ -151,6 +164,39 @@ impl LoomzAssetsBundle {
         Ok(())
     }
 
+    fn parse_msdf_font(&mut self, id: NonZeroU32, args: &[&str]) -> Result<(), CommonError> {
+        let (image_info, image_data) = {
+            let image_path = format!("./assets/fonts/{}", args[3]);
+            let src = ::std::fs::File::open(&image_path)
+                .map_err(|err| assets_err!("Failed to open {:?} {:?}", image_path, err) )?;
+
+            let decoder = png::Decoder::new(src);
+            let mut reader = decoder.read_info().unwrap();
+            let mut image_data = vec![0; reader.output_buffer_size()];
+            let image_info = reader.next_frame(&mut image_data).unwrap();
+
+            (image_info, image_data)
+        };
+
+        let font_data = {
+            let data_path = format!("./assets/fonts/{}", args[4]);
+            let src = ::std::fs::read(&data_path)
+                .map_err(|err| assets_err!("Failed to open {:?} {:?}", data_path, err) )?;
+
+            msdf_font::MsdfFontData::from_bytes(&src)?
+        };
+       
+        let name = args[2].to_string();
+        self.assets_by_name.insert(name, AssetId::MsdfFont(MsdfFontId(id)));
+        self.msdf_fonts.insert(MsdfFontId(id), AssetsMsdfFontData {
+            image_info,
+            image_data: image_data.into_boxed_slice(),
+            font_data,
+        });
+
+        Ok(())
+    }
+
 }
 
 impl Default for LoomzAssetsBundle {
@@ -159,6 +205,7 @@ impl Default for LoomzAssetsBundle {
             assets_by_name: FnvHashMap::default(),
             textures: FnvHashMap::default(),
             json: FnvHashMap::default(),
+            msdf_fonts: FnvHashMap::default(),
         }
     }
 }

@@ -38,15 +38,45 @@ impl PawnAnimation {
     }
 }
 
+#[derive(Default)]
+pub struct WarriorAnimation {
+    pub idle: WorldAnimationId,
+    pub walk: WorldAnimationId,
+    pub strike_h1: WorldAnimationId,
+    pub strike_h2: WorldAnimationId,
+    pub strike_b1: WorldAnimationId,
+    pub strike_b2: WorldAnimationId,
+    pub strike_t1: WorldAnimationId,
+    pub strike_t2: WorldAnimationId,
+}
+
+impl WarriorAnimation {
+    fn map_id(&self, name: &str) -> Option<&WorldAnimationId> {
+        match name {
+            "idle" => Some(&self.idle),
+            "walk" => Some(&self.walk),
+            "strike-horz-1" => Some(&self.strike_h1),
+            "strike-horz-2" => Some(&self.strike_h2),
+            "strike-bottom-1" => Some(&self.strike_b1),
+            "strike-bottom-2" => Some(&self.strike_b2),
+            "strike-top-1" => Some(&self.strike_t1),
+            "strike-top-2" => Some(&self.strike_t2),
+            _ => None,
+        }
+    }
+}
+
 
 #[derive(Default)]
 pub struct Animations {
     pub pawn: PawnAnimation,
+    pub warrior: WarriorAnimation,
 }
 
 impl Animations {
     pub fn load(&self, api: &LoomzApi) -> Result<(), CommonError> {
         self.load_animation(api, "pawn_sprites", |name| { self.pawn.map_id(name) })?;
+        self.load_animation(api, "warrior_sprites", |name| { self.warrior.map_id(name) })?;
         Ok(())
     }
 
@@ -58,29 +88,29 @@ impl Animations {
         let world = api.world();
 
         let json_source = assets.json_by_name(asset_name).ok_or_else(|| assets_err!("Failed to find json {asset_name:?}") )?;
-        let json = jsonic::parse(json_source).map_err(|err| assets_err!("Failed to parse json: {err:?}") )?;
-        
+        let json: serde_json::Value = serde_json::from_str(json_source).map_err(|err| assets_err!("Failed to parse json: {err:?}") )?;
+
         let texture_asset_name = json["asset"].as_str().unwrap_or("");
         let texture_id = assets.texture_id_by_name(texture_asset_name).ok_or_else(|| assets_err!("Failed to find texture asset {texture_asset_name:?}") )?;
-        
-        let animations = json["animations"].elements().ok_or_else(|| assets_err!("Missing json key \"animations\"") )?;
-        
+
+        let animations = json["animations"].as_array().ok_or_else(|| assets_err!("Missing json key \"animations\"") )?;
+
         for animation in animations {
             let id = match animation["name"].as_str().and_then(|name| id_map(name) ) {
                 Some(id) => id,
                 None => { continue; }
             };
 
-            let sprite_count: u32 = parse(&animation["count"]);
+            let sprite_count: u32 = parse_u32(&animation["count"]);
             if sprite_count == 0 {
                 continue;
             }
 
-            let padding: f32 = parse(&animation["padding"]);
-            let x: f32 = parse(&animation["x"]);
-            let y: f32 = parse(&animation["y"]);
-            let sprite_width: f32 = parse(&animation["width"]);
-            let sprite_height: f32 = parse(&animation["height"]);
+            let padding: f32 = parse_f32(&animation["padding"]);
+            let x: f32 = parse_f32(&animation["x"]);
+            let y: f32 = parse_f32(&animation["y"]);
+            let sprite_width: f32 = parse_f32(&animation["width"]);
+            let sprite_height: f32 = parse_f32(&animation["height"]);
 
             let animation = loomz_shared::WorldAnimation {
                 texture_id,
@@ -98,11 +128,12 @@ impl Animations {
     }
 }
 
-fn parse<T: ::std::str::FromStr>(item: &jsonic::json_item::JsonItem) -> T {
-    match item.as_str().and_then(|value| value.parse::<T>().ok() ) {
-        Some(v) => v,
-        _ => panic!("Failed to parse json value")
-    }
+fn parse_u32(item: &serde_json::Value) -> u32 {
+    item.as_u64().map(|v| v as u32).unwrap_or(0)
+}
+
+fn parse_f32(item: &serde_json::Value) -> f32 {
+    item.as_f64().map(|v| v as f32).unwrap_or(0.0)
 }
 
 impl From<u32> for PawnAnimationType {

@@ -7,6 +7,8 @@
 *.zip
 *.kra
 *.json
+*.ttf
+*.bin
 .DS_Store
 todo.md
 temp.md
