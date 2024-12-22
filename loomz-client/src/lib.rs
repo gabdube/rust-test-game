@@ -2,14 +2,10 @@ mod store;
 
 mod animations;
 use animations::{Animations, PawnAnimationType};
-use gui::Gui;
-
-mod gui;
-
 
 use std::time::Instant;
 use loomz_shared::{_2d::Position, base_types::_2d::pos};
-use loomz_shared::api::{WorldActorId, WorldActor};
+use loomz_shared::api::{WorldActorId, WorldActor, GuiId, Gui};
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
 
@@ -19,6 +15,11 @@ pub struct Player {
     position: Position<f32>,
     animation: PawnAnimationType,
     flip: bool,
+}
+
+pub struct MainMenu {
+    id: GuiId,
+    gui: Gui
 }
 
 #[derive(Copy, Clone)]
@@ -42,7 +43,7 @@ pub struct LoomzClient {
     player: Player,
     target_position: Position<f32>,
 
-    gui: gui::Gui,
+    main_menu: MainMenu,
 
     state: GameState,
 }
@@ -54,6 +55,11 @@ impl LoomzClient {
             last: Instant::now(),
             delta_ms: 0.0,
         };
+
+        let main_menu = MainMenu {
+            id: GuiId::new(),
+            gui: Gui::default(),
+        };
         
         let client = LoomzClient {
             api: api.clone(),
@@ -63,7 +69,7 @@ impl LoomzClient {
             player: Player::default(),
             target_position: Position::default(),
 
-            gui: Gui::default(),
+            main_menu,
 
             state: GameState::Uninitialized,
         };
@@ -110,18 +116,15 @@ impl LoomzClient {
     }
 
     fn uninitialized(&mut self) -> Result<(), CommonError> {
-        // self.init_player()?;
+        self.init_player()?;
         self.init_main_menu();
         self.state = GameState::MainMenu;
         Ok(())
     }
 
     fn main_menu(&mut self) {
-        let gui = gui::Gui::build(&self.api, |gui| {
-            gui.font_style("default", "roboto", 50.0);
-            gui.font("default");
-            gui.text("Hello World!");
-        });
+        self.main_menu.gui.update();
+        self.api.gui().update_gui(&self.main_menu.id, &self.main_menu.gui);
     }
 
     fn gameplay(&mut self) -> Result<(), CommonError> {
@@ -191,8 +194,15 @@ impl LoomzClient {
         Ok(())
     }
 
-    fn init_main_menu(&mut self)  {
+    fn init_main_menu(&mut self) {
+        self.main_menu.gui = Gui::build(&self.api, |gui| {
+            gui.font_style("default", "roboto", 50.0);
+            gui.font("default");
+            gui.text("Hello World!");
+        });
 
+        self.main_menu.gui.update();
+        self.api.gui().update_gui(&self.main_menu.id, &self.main_menu.gui);
     }
 
 }

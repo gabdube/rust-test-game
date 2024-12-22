@@ -53,6 +53,8 @@ struct GraphicsPipelineBuildInfo {
     render_info: vk::PipelineRenderingCreateInfo,
 
     descriptor_set_layouts: [vk::DescriptorSetLayout; MAX_PIPELINE_SET_LAYOUT],
+
+    shared_layout: bool,
 }
 
 pub struct GraphicsPipeline {
@@ -74,7 +76,11 @@ impl GraphicsPipeline {
     pub fn destroy(self, ctx: &VulkanContext) {
         let device = &ctx.device;
         device.destroy_pipeline(self.handle);
-        device.destroy_pipeline_layout(self.pipeline_layout);
+
+        if !self.build.shared_layout {
+            device.destroy_pipeline_layout(self.pipeline_layout);
+        }
+
         device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[0]);
         device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[1]);
         device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[2]);
@@ -98,8 +104,9 @@ impl GraphicsPipeline {
         self.handle = pipeline;
     }
 
-    pub fn set_pipeline_layout(&mut self, pipeline_layout: vk::PipelineLayout) {
+    pub fn set_pipeline_layout(&mut self, pipeline_layout: vk::PipelineLayout, shared: bool) {
         self.pipeline_layout = pipeline_layout;
+        self.build.shared_layout = shared;
     }
 
     pub fn set_descriptor_set_layout(&mut self, index: usize, layout: vk::DescriptorSetLayout) {
@@ -304,6 +311,8 @@ impl Default for GraphicsPipelineBuildInfo {
             render_info: vk::PipelineRenderingCreateInfo::default(),
 
             descriptor_set_layouts: [vk::DescriptorSetLayout::null(); 3],
+
+            shared_layout: false
         }
     }
 }

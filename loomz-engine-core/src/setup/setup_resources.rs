@@ -167,7 +167,7 @@ fn setup_vertex_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlob
     let device_type_index = crate::helpers::fetch_memory_index(instance, ctx.device.physical_device, flags, flags)
         .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for vertex") )?;
     
-    let vertex_size = KB*10;
+    let vertex_size = KB*100;
     let default_alloc_capacity = 16;
     
     resources.vertex_alloc = DeviceMemoryAlloc::new(&ctx.device, vertex_size, default_alloc_capacity, device_type_index)

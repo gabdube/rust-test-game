@@ -5,6 +5,9 @@ pub use base::*;
 mod world;
 pub use world::*;
 
+mod gui;
+pub use gui::*;
+
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crate::assets::LoomzAssetsBundle;
 use crate::inputs::InputBuffer;
@@ -19,6 +22,7 @@ struct ApiInner {
     assets: Arc<LoomzAssetsBundle>,
     inputs: InnerInputs,
     world: WorldApi,
+    gui: GuiApi,
 }
 
 #[derive(Clone)]
@@ -31,6 +35,7 @@ impl LoomzApi {
     pub fn init() -> Result<Self, CommonError> {
         let assets = LoomzAssetsBundle::load()?;
         let world = WorldApi::init();
+        let gui = GuiApi::init();
 
         let inputs = InnerInputs {
             buffer: InputBuffer::new(),
@@ -41,6 +46,7 @@ impl LoomzApi {
             assets,
             inputs,
             world,
+            gui,
         };
 
         let api = LoomzApi {
@@ -72,6 +78,10 @@ impl LoomzApi {
 
     pub fn world(&self) -> &WorldApi {
         &self.inner.world
+    }
+
+    pub fn gui(&self) -> &GuiApi {
+        &self.inner.gui
     }
 
 }

@@ -1,4 +1,4 @@
-use loomz_shared::api::LoomzApi;
+use crate::LoomzApi;
 
 pub struct GuiBuilder {
     api: LoomzApi
@@ -22,25 +22,6 @@ impl GuiBuilder {
 
     pub fn text(&mut self, value: &str) {
 
-    }
-
-}
-
-#[derive(Default)]
-pub struct Gui {
-
-}
-
-impl Gui {
-
-    pub fn build<F: FnOnce(&mut GuiBuilder)>(api: &LoomzApi, cb: F) -> Self {
-        let mut builder = GuiBuilder::new(api);
-
-        cb(&mut builder);
-
-        Gui {
-
-        }
     }
 
 }

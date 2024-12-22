@@ -1,4 +1,5 @@
 mod world;
+mod gui;
 mod record;
 
 use std::path::PathBuf;
@@ -10,6 +11,7 @@ pub struct LoomzEngine {
     api: LoomzApi,
     core: LoomzEngineCore,
     world: Box<world::WorldModule>,
+    gui: Box<gui::GuiModule>,
     pipeline_cache: vk::PipelineCache,
 }
 
@@ -18,11 +20,13 @@ impl LoomzEngine {
     pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
         let mut core = LoomzEngineCore::init()?;
         let world = world::WorldModule::init(&mut core, api)?;
+        let gui = gui::GuiModule::init(&mut core, api)?;
         let pipeline_cache = Self::load_pipeline_cache(&core)?;
         let mut engine = LoomzEngine {
             api: api.clone(),
             core,
             world,
+            gui,
             pipeline_cache,
         };
 
@@ -38,23 +42,28 @@ impl LoomzEngine {
 
         self.core.ctx.device.destroy_pipeline_cache(self.pipeline_cache);
         self.world.destroy(&mut self.core);
+        self.gui.destroy(&mut self.core);
         self.core.destroy();
     }
 
     pub fn set_output(&mut self, display: RawDisplayHandle, window: RawWindowHandle, window_size: [u32; 2]) -> Result<(), CommonError> {
         self.core.set_output(display, window, window_size)?;
         self.world.set_output(&self.core);
+        self.gui.set_output(&self.core);
         Ok(())
     }
 
     pub fn resize_output(&mut self, width: u32, height: u32) -> Result<(), CommonError> {
         self.core.resize_output(width, height)?;
         self.world.rebuild(&self.core);
+        self.gui.rebuild(&self.core);
         Ok(())
     }
 
     pub fn update(&mut self) -> Result<(), CommonError> {
-        self.world.update(&self.api, &mut self.core)
+        self.world.update(&self.api, &mut self.core)?;
+        self.gui.update(&self.api, &mut self.core)?;
+        Ok(())
     }
 
     pub fn render(&mut self) -> Result<(), CommonError> {
@@ -64,6 +73,7 @@ impl LoomzEngine {
             AcquireReturn::Invalid => {},
             AcquireReturn::Rebuild => {
                 self.world.rebuild(&self.core);
+                self.gui.rebuild(&self.core);
             },
             AcquireReturn::Render => {
                 record::record_commands(self)?;

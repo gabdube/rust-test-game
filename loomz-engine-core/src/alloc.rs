@@ -53,7 +53,7 @@ impl DeviceMemoryAlloc {
         let aligned_offset = crate::helpers::align_device(self.next_offset, info.alignment);
         let next_offset = aligned_offset + info.size;
         if next_offset > self.size {
-            panic!("TODO: reallocate memory");
+            panic!("TODO: reallocate memory, {}({}) > {}", next_offset, info.size, self.size);
         }
 
         self.allocations.push(MemoryRange {
@@ -130,7 +130,7 @@ impl HostVisibleAlloc {
         let aligned_offset = crate::helpers::align_device(self.next_offset, info.alignment);
         let next_offset = aligned_offset + info.size;
         if next_offset > self.size {
-            panic!("TODO: reallocate memory");
+            panic!("TODO: reallocate memory, {}({}) > {}", next_offset, info.size, self.size);
         }
 
         self.allocations.push(MemoryRange {
@@ -228,7 +228,7 @@ impl<V: Copy> VertexAlloc<V> {
     }
 
     pub fn vertex_offset(&self) -> [vk::DeviceSize; 1] {
-       [(self.index_capacity as vk::DeviceSize) * (size_of::<V>() as vk::DeviceSize)]
+       [(self.index_capacity as vk::DeviceSize) * (size_of::<u32>() as vk::DeviceSize)]
     } 
 
     pub fn set_data(&self, core: &mut LoomzEngineCore, index: &[u32], vertex: &[V]) {

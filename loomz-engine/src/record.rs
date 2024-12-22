@@ -15,6 +15,7 @@ pub(crate) fn record_commands(engine: &mut LoomzEngine) -> Result<(), CommonErro
     begin_render_main(ctx, cmd, recording);
 
     engine.world.render(ctx, cmd);
+    engine.gui.render(ctx, cmd);
 
     end_render_main(ctx, cmd);
     finalize_attachments(ctx, cmd, recording.output_image);

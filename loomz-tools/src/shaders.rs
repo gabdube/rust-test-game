@@ -3,12 +3,12 @@ use std::process::Command;
 use super::{Error, err, match_filter};
 
 fn glslang_in_path() -> bool {
-    Command::new("glslang").output().is_ok()
+    Command::new("glslangValidator").output().is_ok()
 }
 
 fn compile_shader(input: &Path, output: &Path) -> Result<(), Error> {
     println!("Compiling {:?} to {:?}", input, output);
-    let output = Command::new("glslang")
+    let output = Command::new("glslangValidator")
         .arg("-V100")
         .arg("-o")
         .arg(output)

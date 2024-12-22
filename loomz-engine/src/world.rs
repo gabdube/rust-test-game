@@ -98,7 +98,6 @@ struct WorldData {
     instances: Vec<WorldInstance>,
 }
 
-#[repr(C)]
 pub(crate) struct WorldModule {
     resources: Box<WorldResources>,
     data: Box<WorldData>,
@@ -474,7 +473,7 @@ impl WorldModule {
         let pipeline = &mut self.resources.pipeline;
         pipeline.set_shader_modules(modules);
         pipeline.set_vertex_format::<WorldVertex>(&vertex_fields);
-        pipeline.set_pipeline_layout(pipeline_layout);
+        pipeline.set_pipeline_layout(pipeline_layout, false);
         pipeline.set_descriptor_set_layout(GLOBAL_LAYOUT_INDEX as usize, layout_global);
         pipeline.set_descriptor_set_layout(BATCH_LAYOUT_INDEX as usize, layout_batch);
         pipeline.set_depth_testing(false);
