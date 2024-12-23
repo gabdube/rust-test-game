@@ -4,6 +4,7 @@ use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::{VertexA
 use loomz_shared::api::{LoomzApi, WorldAnimationId, WorldAnimation, WorldActorId, WorldActor};
 use loomz_shared::{assets::{LoomzAssetsBundle, TextureId}, _2d::Position, CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, assets_err, backend_err, chain_err};
+use super::pipeline_compiler::PipelineCompiler;
 
 const WORLD_VERT_SRC: &[u8] = include_bytes!("../../assets/shaders/world.vert.spv");
 const WORLD_FRAG_SRC: &[u8] = include_bytes!("../../assets/shaders/world.frag.spv");
@@ -55,14 +56,17 @@ struct WorldModuleDescriptors {
 
 /// Graphics resources that are not accessed often
 struct WorldResources {
+    assets: Arc<LoomzAssetsBundle>,
     descriptors: WorldModuleDescriptors,
     pipeline: GraphicsPipeline,
     vertex: VertexAlloc<WorldVertex>,
+    textures: FnvHashMap<TextureId, Texture>,
 }
 
 #[derive(Copy, Clone)]
 struct WorldInstance {
     image_view: vk::ImageView,
+    texture_id: Option<TextureId>,
     position: Position<f32>,
     uv_offset: [f32; 2],
     uv_size: [f32; 2],
@@ -90,8 +94,6 @@ struct WorldRender {
 
 /// World data to be rendered on screen
 struct WorldData {
-    assets: Arc<LoomzAssetsBundle>,
-    textures: FnvHashMap<TextureId, Texture>,
     sprites: StorageAlloc<SpriteData>,
     animations: Vec<WorldAnimation>,
     instance_animations: Vec<WorldInstanceAnimation>,
@@ -108,7 +110,7 @@ pub(crate) struct WorldModule {
 
 impl WorldModule {
 
-    pub fn init(core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<Box<Self>, CommonError> {
+    pub fn init(core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<Self, CommonError> {
         let descriptors = WorldModuleDescriptors {
             alloc: DescriptorsAllocator::default(),
             updates: DescriptorWriteBuffer::default(),
@@ -116,14 +118,14 @@ impl WorldModule {
         };
 
         let resources = WorldResources {
+            assets: api.assets(),
             descriptors,
             pipeline: GraphicsPipeline::new(),
             vertex: VertexAlloc::default(),
+            textures: FnvHashMap::default(),
         };
 
         let data = WorldData {
-            assets: api.assets(),
-            textures: FnvHashMap::default(),
             sprites: StorageAlloc::default(),
             animations: Vec::with_capacity(16),
             instance_animations: Vec::with_capacity(16),
@@ -154,7 +156,7 @@ impl WorldModule {
         world.setup_sprites_buffers(core)?;
         world.setup_render_data(core);
 
-        Ok(Box::new(world))
+        Ok(world)
     }
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
@@ -163,7 +165,7 @@ impl WorldModule {
         self.resources.vertex.free(core);
         self.data.sprites.free(core);
 
-        for texture in self.data.textures.values() {
+        for texture in self.resources.textures.values() {
             core.destroy_texture(*texture);
         }
     }
@@ -177,21 +179,19 @@ impl WorldModule {
     }
 
     pub fn rebuild(&mut self, core: &LoomzEngineCore) {
-        let swapchain_extent = core.info.swapchain_extent;
-        let push = &mut self.render.push_constants[0];
-        push.screen_width = swapchain_extent.width as f32;
-        push.screen_height = swapchain_extent.height as f32;
+        self.set_output(core);
     }
 
     //
     // Pipeline setup
     //
 
-    pub fn write_pipeline_create_infos(&mut self,  infos: &mut Vec<vk::GraphicsPipelineCreateInfo>) {
-        infos.push(self.resources.pipeline.create_info());
+    pub fn write_pipeline_create_infos(&mut self, compiler: &mut PipelineCompiler) {
+        compiler.add_pipeline_info("world", &mut self.resources.pipeline);
     }
 
-    pub fn set_pipeline_handle(&mut self, handle: vk::Pipeline) {
+    pub fn set_pipeline_handle(&mut self, compiler: &PipelineCompiler) {
+        let handle = compiler.get_pipeline("world");
         self.resources.pipeline.set_handle(handle);
         self.render.pipeline_handle = handle;
     }
@@ -245,10 +245,12 @@ impl WorldModule {
         }
 
         // Update instance image
-        let new_image_view = self.fetch_texture_view(core, animation.texture_id)?;
-        let old_image_view = self.data.instances[actor_index].image_view;
-        if new_image_view != old_image_view {
+        let new_texture_id = animation.texture_id;
+        let old_texture_id = self.data.instances[actor_index].texture_id;
+        if Some(new_texture_id) != old_texture_id {
+            let new_image_view = self.fetch_texture_view(core, animation.texture_id)?;
             self.data.instances[actor_index].image_view = new_image_view;
+            self.data.instances[actor_index].texture_id = Some(new_texture_id);
             self.update_batches = true;
         }
 
@@ -293,6 +295,7 @@ impl WorldModule {
             position: Position::default(),
             uv_offset: [0.0, 0.0],
             uv_size: [0.0, 0.0],
+            texture_id: None,
             flipped: false,
         });
 
@@ -387,17 +390,17 @@ impl WorldModule {
     //
    
     fn fetch_texture_view(&mut self, core: &mut LoomzEngineCore, id: TextureId) -> Result<vk::ImageView, CommonError> {
-        if let Some(texture) = self.data.textures.get(&id) {
+        if let Some(texture) = self.resources.textures.get(&id) {
             return Ok(texture.view);
         }
 
-        let texture_asset = self.data.assets.texture(id)
+        let texture_asset = self.resources.assets.texture(id)
             .ok_or_else(|| assets_err!("Unkown asset with ID {id:?}") )?;
 
         let texture = core.create_texture_from_asset(&texture_asset)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
 
-        self.data.textures.insert(id, texture);
+        self.resources.textures.insert(id, texture);
 
         Ok(texture.view)
     }

@@ -1,3 +1,4 @@
+mod pipeline_compiler;
 mod world;
 mod gui;
 mod record;
@@ -10,8 +11,8 @@ use loomz_shared::{backend_init_err, CommonError, api::LoomzApi};
 pub struct LoomzEngine {
     api: LoomzApi,
     core: LoomzEngineCore,
-    world: Box<world::WorldModule>,
-    gui: Box<gui::GuiModule>,
+    world: world::WorldModule,
+    gui: gui::GuiModule,
     pipeline_cache: vk::PipelineCache,
 }
 
@@ -20,7 +21,7 @@ impl LoomzEngine {
     pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
         let mut core = LoomzEngineCore::init()?;
         let world = world::WorldModule::init(&mut core, api)?;
-        let gui = gui::GuiModule::init(&mut core, api)?;
+        let gui = gui::GuiModule::init(&mut core)?;
         let pipeline_cache = Self::load_pipeline_cache(&core)?;
         let mut engine = LoomzEngine {
             api: api.clone(),
@@ -85,20 +86,12 @@ impl LoomzEngine {
     }
 
     fn compile_pipelines(&mut self) -> Result<(), CommonError> {
-        // Collect pipelines create info from modules
-        const PIPELINE_BUILD_CAPACITY: usize = 4;
-        let mut pipeline_infos: Vec<vk::GraphicsPipelineCreateInfo> = Vec::with_capacity(PIPELINE_BUILD_CAPACITY);
-        self.world.write_pipeline_create_infos(&mut pipeline_infos);
-
-        // Pipeline creation
-        let device = &self.core.ctx.device;
-        let mut pipelines = vec![vk::Pipeline::null(); pipeline_infos.len()];
-        device.create_graphics_pipelines(self.pipeline_cache, &pipeline_infos, &mut pipelines)
-            .map_err(|err| backend_init_err!("Failed to compile create pipelines: {:?}", err) )?;
-
-        // Assign pipeline handle
-        self.world.set_pipeline_handle(pipelines[0]);
-
+        let mut compiler = pipeline_compiler::PipelineCompiler::new();
+        self.world.write_pipeline_create_infos(&mut compiler);
+        self.gui.write_pipeline_create_infos(&mut compiler);
+        compiler.compile_pipelines(self.pipeline_cache, &self.core.ctx)?;
+        self.world.set_pipeline_handle(&compiler);
+        self.gui.set_pipeline_handle(&compiler);
         Ok(())
     }
 

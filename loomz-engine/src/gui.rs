@@ -1,8 +1,9 @@
 use std::{ptr, slice};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, alloc::VertexAlloc, pipelines::*};
-use loomz_shared::api::{LoomzApi};
+use loomz_shared::api::{LoomzApi, GuiId};
 use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, chain_err};
+use super::pipeline_compiler::PipelineCompiler;
 
 const PUSH_STAGE_FLAGS: vk::ShaderStageFlags = vk::ShaderStageFlags::VERTEX;
 const PUSH_SIZE: u32 = size_of::<GuiPushConstant>() as u32;
@@ -45,20 +46,42 @@ struct GuiRender {
     push_constants: [GuiPushConstant; 1],
 }
 
-pub struct GuiView {
+#[derive(Copy, Clone, Default)]
+struct TempText {
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+}
+
+struct GuiInstance {
+    id: GuiId,
+    text: Vec<TempText>,
+}
+
+struct GuiData {
+    instances: Vec<GuiInstance>,
+    indices: Vec<u32>,
+    vertex: Vec<GuiVertex>,
+}
+
+#[derive(Copy, Clone, Default)]
+pub struct GuiBatch {
     component_index_count: u32,
     text_index_count: u32,
+    text_vertex_count: u32,
 }
 
 pub(crate) struct GuiModule {
     resources: Box<GuiResources>,
     render: Box<GuiRender>,
-    views: Vec<GuiView>,
+    data: Box<GuiData>,
+    batches: Vec<GuiBatch>,
 }
 
 impl GuiModule {
 
-    pub fn init(core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<Box<Self>, CommonError> {
+    pub fn init(core: &mut LoomzEngineCore) -> Result<Self, CommonError> {
         let resources = GuiResources {
             pipeline_layout: vk::PipelineLayout::null(),
             text_pipeline: GraphicsPipeline::new(),
@@ -75,18 +98,26 @@ impl GuiModule {
             vertex_offset: [0],
             push_constants: [GuiPushConstant::default(); 1],
         };
+
+        let data = GuiData {
+            instances: Vec::with_capacity(4),
+            vertex: Vec::with_capacity(500),
+            indices: Vec::with_capacity(1000)
+        };
         
         let mut gui = GuiModule {
             resources: Box::new(resources),
             render: Box::new(render),
-            views: Vec::with_capacity(8),
+            data: Box::new(data),
+            batches: Vec::with_capacity(16),
         };
 
         gui.setup_pipelines(core)?;
         gui.setup_vertex_buffers(core)?;
         gui.setup_render_data();
+        gui.setup_test_data(core);
 
-        Ok(Box::new(gui))
+        Ok(gui)
     }
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
@@ -98,9 +129,34 @@ impl GuiModule {
     }
 
     pub fn set_output(&mut self, core: &LoomzEngineCore) {
+        let extent = core.info.swapchain_extent;
+        self.render.push_constants[0] = GuiPushConstant {
+            screen_width: extent.width as f32,
+            screen_height: extent.height as f32,
+        };
     }
 
     pub fn rebuild(&mut self, core: &LoomzEngineCore) {
+        self.set_output(core);
+    }
+
+    //
+    // Pipeline setup
+    //
+
+    pub fn write_pipeline_create_infos(&mut self, compiler: &mut PipelineCompiler) {
+        compiler.add_pipeline_info("gui_component", &mut self.resources.component_pipeline);
+        compiler.add_pipeline_info("gui_text", &mut self.resources.text_pipeline);
+    }
+
+    pub fn set_pipeline_handle(&mut self, compiler: &PipelineCompiler) {
+        let mut handle = compiler.get_pipeline("gui_component");
+        self.resources.component_pipeline.set_handle(handle);
+        self.render.component_pipeline_handle = handle;
+
+        handle = compiler.get_pipeline("gui_text");
+        self.resources.text_pipeline.set_handle(handle);
+        self.render.text_pipeline_handle = handle;
     }
 
     //
@@ -120,15 +176,15 @@ impl GuiModule {
         device.cmd_bind_vertex_buffers(cmd, 0, slice::from_ref(&render.vertex_buffer), &render.vertex_offset);
         device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push_values(&render.push_constants));
 
-        for view in self.views.iter() {
-            if view.component_index_count > 0 {
+        for batch in self.batches.iter() {
+            if batch.component_index_count > 0 {
                 device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, render.component_pipeline_handle);
-                device.cmd_draw_indexed(cmd, view.component_index_count, 1, 0, 0, 0);
+                device.cmd_draw_indexed(cmd, batch.component_index_count, 1, 0, 0, 0);
             }
             
-            if view.text_index_count > 0 {
+            if batch.text_index_count > 0 {
                 device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, render.text_pipeline_handle);
-                device.cmd_draw_indexed(cmd, view.text_index_count, 1, 0, 0, 0);
+                device.cmd_draw_indexed(cmd, batch.text_index_count, 1, 0, 0, 0);
             }
         }
     }
@@ -226,8 +282,8 @@ impl GuiModule {
     }
 
     fn setup_vertex_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let vertex_capacity = 1000;
-        let index_capacity = 1500;
+        let vertex_capacity = 500;
+        let index_capacity = 1000;
         self.resources.vertex = VertexAlloc::new(core, index_capacity, vertex_capacity)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create vertex alloc: {err}") )?;
 
@@ -241,6 +297,45 @@ impl GuiModule {
         render.vertex_buffer = self.resources.vertex.buffer;
         render.index_offset = self.resources.vertex.index_offset();
         render.vertex_offset = self.resources.vertex.vertex_offset();
+    }
+
+    fn setup_test_data(&mut self, core: &mut LoomzEngineCore) {
+        let id = { let id = GuiId::new(); id.bind(0); id };
+
+        let text1 = TempText { x1: 1100.0, y1: 50.0, x2: 1150.0, y2: 100.0 };
+        let text2 = TempText { x1: 1100.0, y1: 150.0, x2: 1150.0, y2: 200.0 };
+        self.data.instances.push(GuiInstance {
+            id,
+            text: vec![text1, text2],
+        });
+
+        let indices = &mut self.data.indices;
+        let vertex = &mut self.data.vertex;
+
+        let mut current_batch = GuiBatch::default();
+        for instance in self.data.instances.iter() {
+            for text in instance.text.iter() {
+                let i = current_batch.text_vertex_count;
+                indices.push(i+0);
+                indices.push(i+1);
+                indices.push(i+2);
+                indices.push(i+2);
+                indices.push(i+3);
+                indices.push(i+1);
+
+                let uv = [0.0, 0.0];
+                vertex.push(GuiVertex { pos: [text.x1, text.y1], uv });
+                vertex.push(GuiVertex { pos: [text.x2, text.y1], uv });
+                vertex.push(GuiVertex { pos: [text.x1, text.y2], uv });
+                vertex.push(GuiVertex { pos: [text.x2, text.y2], uv });
+
+                current_batch.text_index_count += 6;
+                current_batch.text_vertex_count += 4;
+            }
+        }
+
+        self.batches.push(current_batch);
+        self.resources.vertex.set_data(core, &self.data.indices, &self.data.vertex);
     }
 
 }
