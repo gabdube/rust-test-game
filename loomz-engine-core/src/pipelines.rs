@@ -79,11 +79,11 @@ impl GraphicsPipeline {
 
         if !self.build.shared_layout {
             device.destroy_pipeline_layout(self.pipeline_layout);
+            device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[0]);
+            device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[1]);
+            device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[2]);
         }
 
-        device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[0]);
-        device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[1]);
-        device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[2]);
         self.build.modules.destroy(ctx);
     }
 
@@ -95,7 +95,8 @@ impl GraphicsPipeline {
         self.pipeline_layout
     }
 
-    pub fn descriptor_set_layout(&self, index: usize) -> vk::DescriptorSetLayout {
+    pub fn descriptor_set_layout(&self, index: u32) -> vk::DescriptorSetLayout {
+        let index = index as usize;
         assert!(index < MAX_PIPELINE_SET_LAYOUT, "Max index of descriptor set layout allowed is {} (got {})", MAX_PIPELINE_SET_LAYOUT, index);
         self.build.descriptor_set_layouts[index]
     }

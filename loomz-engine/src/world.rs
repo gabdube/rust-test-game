@@ -12,10 +12,10 @@ const WORLD_FRAG_SRC: &[u8] = include_bytes!("../../assets/shaders/world.frag.sp
 const PUSH_STAGE_FLAGS: vk::ShaderStageFlags = vk::ShaderStageFlags::VERTEX;
 const PUSH_SIZE: u32 = size_of::<WorldPushConstant>() as u32;
 
-const GLOBAL_LAYOUT_INDEX: usize = 0;
+const GLOBAL_LAYOUT_INDEX: u32 = 0;
 const SPRITES_BUFFER_DATA_BINDING: usize = 0;
 
-const BATCH_LAYOUT_INDEX: usize = 1;
+const BATCH_LAYOUT_INDEX: u32 = 1;
 const TEXTURE_BINDING: usize = 0;
 
 #[repr(C)]
@@ -43,7 +43,7 @@ pub struct SpriteData {
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct WorldBatch {
-    pub dst_set: vk::DescriptorSet,
+    pub set: vk::DescriptorSet,
     pub instances_count: u32,
     pub instances_offset: u32,
 }
@@ -206,17 +206,18 @@ impl WorldModule {
             unsafe { constants.align_to::<u8>().1 }
         }
         
+        const GRAPHICS: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
         let device = &ctx.device;
         let render = *self.render;
 
-        device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, render.pipeline_handle);
+        device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
         device.cmd_bind_index_buffer(cmd, render.vertex_buffer, render.index_offset, vk::IndexType::UINT32);
         device.cmd_bind_vertex_buffers(cmd, 0, slice::from_ref(&render.vertex_buffer), &render.vertex_offset);
         device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push_values(&render.push_constants));
-        device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, render.pipeline_layout, GLOBAL_LAYOUT_INDEX as u32, slice::from_ref(&render.sprites), &[]);
+        device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, GLOBAL_LAYOUT_INDEX, slice::from_ref(&render.sprites), &[]);
 
         for batch in self.batches.iter() {
-            device.cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::GRAPHICS, render.pipeline_layout, BATCH_LAYOUT_INDEX as u32, slice::from_ref(&batch.dst_set), &[]);
+            device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, BATCH_LAYOUT_INDEX, slice::from_ref(&batch.set), &[]);
             device.cmd_draw_indexed(cmd, 6, batch.instances_count, 0, 0, batch.instances_offset);
         }
     }
@@ -441,7 +442,7 @@ impl WorldModule {
         let layout_batch = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, bindings_batch)
             .map_err(|err| backend_init_err!("Failed to create batch descriptor set layout: {}", err) )?;
 
-        let layouts = &[layout_global, layout_batch];
+        let layouts = [layout_global, layout_batch];
 
         // Pipeline layout
         let constant_range = vk::PushConstantRange {
@@ -619,11 +620,11 @@ impl<'a> WorldBatcher<'a> {
                 continue;
             }
 
-            let dst_set = self.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
-            self.descriptors.updates.write_simple_image(dst_set, instance.image_view, &self.descriptors.texture_params);
+            let set = self.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
+            self.descriptors.updates.write_simple_image(set, instance.image_view, &self.descriptors.texture_params);
     
             self.batches.push(WorldBatch {
-                dst_set,
+                set,
                 instances_count: 1,
                 instances_offset: 0,
             });
@@ -656,11 +657,11 @@ impl<'a> WorldBatcher<'a> {
     }
 
     fn next_batch(&mut self, image_view: vk::ImageView) {
-        let dst_set = self.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
-        self.descriptors.updates.write_simple_image(dst_set, image_view, &self.descriptors.texture_params);
+        let set = self.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
+        self.descriptors.updates.write_simple_image(set, image_view, &self.descriptors.texture_params);
 
         self.batches.push(WorldBatch {
-            dst_set,
+            set,
             instances_count: 1,
             instances_offset: self.instance_index as u32,
         });

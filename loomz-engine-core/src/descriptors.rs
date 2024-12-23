@@ -120,12 +120,14 @@ impl DescriptorsAllocator {
         core.ctx.device.destroy_descriptor_pool(self.pool);
     }
 
-    pub fn clear_sets(&mut self, index: usize) {
+    pub fn clear_sets(&mut self, index: u32) {
+        let index = index as usize;
         assert!(index < self.sets.len(), "Descriptor alloc was created with {} collections but access to index {} was requested", self.sets.len(), index);
         self.sets[index].next = 0;
     }
 
-    pub fn next_set(&mut self, index: usize) -> vk::DescriptorSet {
+    pub fn next_set(&mut self, index: u32) -> vk::DescriptorSet {
+        let index = index as usize;
         assert!(index < self.sets.len(), "Descriptor alloc was created with {} collections but access to index {} was requested", self.sets.len(), index);
 
         let set_collection = &mut self.sets[index];

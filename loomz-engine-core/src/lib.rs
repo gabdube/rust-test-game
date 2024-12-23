@@ -76,6 +76,7 @@ pub struct VulkanOutputInfo {
     pub drawings_sync: helpers::TimelineSemaphore,
     pub acquired_image_index: u32,
     pub rebuild: bool,
+    pub valid: bool,
 }
 
 pub struct VulkanDescriptorSubmit {
@@ -141,6 +142,10 @@ impl LoomzEngineCore {
     pub fn acquire_frame(&mut self) -> Result<AcquireReturn, CommonError> {
         use prepare::AcquireReturn;
 
+        if !self.output.valid {
+            return Ok(AcquireReturn::Invalid);
+        }
+
         let acquire = prepare::acquire_frame(self)?;
 
         if let AcquireReturn::Render = acquire {
@@ -162,19 +167,28 @@ impl LoomzEngineCore {
     }
 
     pub fn set_output(&mut self, display: RawDisplayHandle, window: RawWindowHandle, window_size: [u32; 2]) -> Result<(), CommonError> {
+        self.output.valid = window_size[0] > 0 && window_size[1] > 0;
+        if !self.output.valid {
+            return Ok(());
+        }
+
         let params = crate::setup::setup_target::SetupTargetParams {
             display,
             window,
         };
 
         self.info.window_extent = vk::Extent2D { width: window_size[0], height: window_size[1] };
-
         crate::setup::setup_target::setup_target(self, &params)?;
 
         Ok(())
     }
 
     pub fn resize_output(&mut self, width: u32, height: u32) -> Result<(), CommonError> {
+        self.output.valid = width > 0 && height > 0;
+        if !self.output.valid {
+            return Ok(());
+        }
+        
         let current_extent = self.info.window_extent;
         if current_extent.width == width && current_extent.height == height {
             return Ok(());

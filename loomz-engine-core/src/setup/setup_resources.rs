@@ -280,6 +280,7 @@ fn init_output(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanOutputInfo>, C
         output_present_ready: vk::Semaphore::null(),
         drawings_sync,
         rebuild: false,
+        valid: false,
     };
 
     Ok(Box::new(output))

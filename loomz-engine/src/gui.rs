@@ -1,9 +1,11 @@
-use std::{ptr, slice};
+use std::slice;
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, alloc::VertexAlloc, pipelines::*};
 use loomz_shared::api::{LoomzApi, GuiId};
 use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, chain_err};
 use super::pipeline_compiler::PipelineCompiler;
+
+const BATCH_LAYOUT_INDEX: u32 = 0;
 
 const PUSH_STAGE_FLAGS: vk::ShaderStageFlags = vk::ShaderStageFlags::VERTEX;
 const PUSH_SIZE: u32 = size_of::<GuiPushConstant>() as u32;
@@ -28,8 +30,9 @@ pub struct GuiVertex {
 }
 
 struct GuiResources {
-    vertex: VertexAlloc<GuiVertex>,
+    batch_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
+    vertex: VertexAlloc<GuiVertex>,
     text_pipeline: GraphicsPipeline,
     component_pipeline: GraphicsPipeline,
 }
@@ -67,9 +70,9 @@ struct GuiData {
 
 #[derive(Copy, Clone, Default)]
 pub struct GuiBatch {
-    component_index_count: u32,
-    text_index_count: u32,
-    text_vertex_count: u32,
+    set: vk::DescriptorSet,
+    index_count: u32,
+    first_index: u32,
 }
 
 pub(crate) struct GuiModule {
@@ -83,6 +86,7 @@ impl GuiModule {
 
     pub fn init(core: &mut LoomzEngineCore) -> Result<Self, CommonError> {
         let resources = GuiResources {
+            batch_layout: vk::DescriptorSetLayout::null(),
             pipeline_layout: vk::PipelineLayout::null(),
             text_pipeline: GraphicsPipeline::new(),
             component_pipeline: GraphicsPipeline::new(),
@@ -126,6 +130,7 @@ impl GuiModule {
         self.resources.vertex.free(core);
 
         core.ctx.device.destroy_pipeline_layout(self.resources.pipeline_layout);
+        core.ctx.device.destroy_descriptor_set_layout(self.resources.batch_layout);
     }
 
     pub fn set_output(&mut self, core: &LoomzEngineCore) {
@@ -169,6 +174,8 @@ impl GuiModule {
             unsafe { constants.align_to::<u8>().1 }
         }
 
+        const GRAPHICS: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
+
         let device = &ctx.device;
         let render = *self.render;
 
@@ -177,15 +184,9 @@ impl GuiModule {
         device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push_values(&render.push_constants));
 
         for batch in self.batches.iter() {
-            if batch.component_index_count > 0 {
-                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, render.component_pipeline_handle);
-                device.cmd_draw_indexed(cmd, batch.component_index_count, 1, 0, 0, 0);
-            }
-            
-            if batch.text_index_count > 0 {
-                device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, render.text_pipeline_handle);
-                device.cmd_draw_indexed(cmd, batch.text_index_count, 1, 0, 0, 0);
-            }
+            // device.cmd_bind_pipeline(cmd, GRAPHICS, render.component_pipeline_handle);
+            // device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, BATCH_LAYOUT_INDEX, slice::from_ref(&batch.set), &[]);
+            // device.cmd_draw_indexed(cmd, batch.index_count, batch.first_index, 0, 0, 0);
         }
     }
 
@@ -201,8 +202,25 @@ impl GuiModule {
     // Setup
     //
 
+    fn pipeline_descriptor_bindings_batch() -> &'static [PipelineLayoutSetBinding; 1] {
+        &[
+            PipelineLayoutSetBinding {
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                stage_flags: vk::ShaderStageFlags::FRAGMENT,
+                descriptor_count: 1,
+            },
+        ]
+    }
+
     fn setup_pipelines(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let ctx = &core.ctx;
+
+        // Descriptor set layouts
+        let bindings_batch = Self::pipeline_descriptor_bindings_batch();
+        let layout_batch = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, bindings_batch)
+            .map_err(|err| backend_init_err!("Failed to create batch descriptor set layout: {}", err) )?;
+
+        let layouts = [layout_batch];
 
         // Pipeline layout
         let constant_range = vk::PushConstantRange {
@@ -211,8 +229,8 @@ impl GuiModule {
             stage_flags: vk::ShaderStageFlags::VERTEX,
         };
         let pipeline_create_info = vk::PipelineLayoutCreateInfo {
-            set_layout_count: 0,
-            p_set_layouts: ptr::null(),
+            set_layout_count: layouts.len() as u32,
+            p_set_layouts: layouts.as_ptr(),
             push_constant_range_count: 1,
             p_push_constant_ranges: &constant_range,
             ..Default::default()
@@ -242,13 +260,16 @@ impl GuiModule {
             },
         ];
 
-        self.resources.pipeline_layout = pipeline_layout;
-        self.resources.component_pipeline.set_shader_modules(component_modules);
-        self.resources.text_pipeline.set_shader_modules(text_modules);
+        let res = &mut self.resources;
+        res.batch_layout = layout_batch;
+        res.pipeline_layout = pipeline_layout;
+        res.component_pipeline.set_shader_modules(component_modules);
+        res.text_pipeline.set_shader_modules(text_modules);
         
-        for pipeline in [&mut self.resources.component_pipeline, &mut self.resources.text_pipeline] {
+        for pipeline in [&mut res.component_pipeline, &mut res.text_pipeline] {
             pipeline.set_vertex_format::<GuiVertex>(&vertex_fields);
             pipeline.set_pipeline_layout(pipeline_layout, true);
+            pipeline.set_descriptor_set_layout(BATCH_LAYOUT_INDEX as usize, layout_batch);
             pipeline.set_depth_testing(false);
             pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
                 polygon_mode: vk::PolygonMode::FILL,
@@ -312,10 +333,11 @@ impl GuiModule {
         let indices = &mut self.data.indices;
         let vertex = &mut self.data.vertex;
 
+        let mut vertex_count = 0;
         let mut current_batch = GuiBatch::default();
         for instance in self.data.instances.iter() {
             for text in instance.text.iter() {
-                let i = current_batch.text_vertex_count;
+                let i = vertex_count;
                 indices.push(i+0);
                 indices.push(i+1);
                 indices.push(i+2);
@@ -329,8 +351,8 @@ impl GuiModule {
                 vertex.push(GuiVertex { pos: [text.x1, text.y2], uv });
                 vertex.push(GuiVertex { pos: [text.x2, text.y2], uv });
 
-                current_batch.text_index_count += 6;
-                current_batch.text_vertex_count += 4;
+                current_batch.index_count += 6;
+                vertex_count += 4;
             }
         }
 
