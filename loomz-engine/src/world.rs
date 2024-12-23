@@ -48,6 +48,7 @@ pub struct WorldBatch {
     pub instances_offset: u32,
 }
 
+#[derive(Default)]
 struct WorldModuleDescriptors {
     alloc: DescriptorsAllocator,
     updates: DescriptorWriteBuffer,
@@ -57,10 +58,10 @@ struct WorldModuleDescriptors {
 /// Graphics resources that are not accessed often
 struct WorldResources {
     assets: Arc<LoomzAssetsBundle>,
-    descriptors: WorldModuleDescriptors,
     pipeline: GraphicsPipeline,
     vertex: VertexAlloc<WorldVertex>,
     textures: FnvHashMap<TextureId, Texture>,
+    descriptors: WorldModuleDescriptors,
 }
 
 #[derive(Copy, Clone)]
@@ -111,18 +112,12 @@ pub(crate) struct WorldModule {
 impl WorldModule {
 
     pub fn init(core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<Self, CommonError> {
-        let descriptors = WorldModuleDescriptors {
-            alloc: DescriptorsAllocator::default(),
-            updates: DescriptorWriteBuffer::default(),
-            texture_params: DescriptorWriteImageParams::default(),
-        };
-
         let resources = WorldResources {
             assets: api.assets(),
-            descriptors,
             pipeline: GraphicsPipeline::new(),
             vertex: VertexAlloc::default(),
             textures: FnvHashMap::default(),
+            descriptors: WorldModuleDescriptors::default(),
         };
 
         let data = WorldData {

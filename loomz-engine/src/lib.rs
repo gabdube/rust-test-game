@@ -21,7 +21,7 @@ impl LoomzEngine {
     pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
         let mut core = LoomzEngineCore::init()?;
         let world = world::WorldModule::init(&mut core, api)?;
-        let gui = gui::GuiModule::init(&mut core)?;
+        let gui = gui::GuiModule::init(&mut core, api)?;
         let pipeline_cache = Self::load_pipeline_cache(&core)?;
         let mut engine = LoomzEngine {
             api: api.clone(),

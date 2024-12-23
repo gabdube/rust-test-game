@@ -1,4 +1,4 @@
-use loomz_shared::{backend_err, CommonError, assets::AssetsTextureData};
+use loomz_shared::{backend_err, unimplemented_err, CommonError, assets::{AssetsTextureData, AssetsMsdfFontData}};
 use crate::staging::StagingImageCopy;
 use super::LoomzEngineCore;
 
@@ -40,6 +40,41 @@ impl LoomzEngineCore {
         Ok(texture)
     }
 
+    pub fn create_texture_from_font_asset(&mut self, asset: &AssetsMsdfFontData) -> Result<Texture, CommonError> {
+        let raw_format = (asset.image_info.color_type, asset.image_info.bit_depth);
+        let format = match raw_format {
+            (png::ColorType::Rgb, png::BitDepth::Eight) => vk::Format::R8G8B8_UNORM,
+            _ => { return Err(unimplemented_err!("Image format {raw_format:?} not supported")); }
+        };
+
+        let extent = vk::Extent3D {
+            width: asset.image_info.width,
+            height: asset.image_info.height,
+            depth: 1,
+        };
+
+        let mut texture = Texture {
+            image: vk::Image::null(),
+            view: vk::ImageView::null(),
+            memory_offset: vk::DeviceSize::MAX,
+            format,
+            extent,
+        };
+
+        self.create_image(&mut texture)
+            .map_err(|err| backend_err!("Failed to create image: {err}") )?;
+    
+        self.allocate_image_memory(&mut texture)
+            .map_err(|err| backend_err!("Failed to allocate image memory: {err}") )?;
+
+        self.upload_font_image_memory(asset, &mut texture);
+
+        self.create_base_view(&mut texture)
+            .map_err(|err| backend_err!("Failed to create image view: {err}") )?;
+
+        Ok(texture)
+    }
+
     pub fn destroy_texture(&mut self, texture: Texture) {
         let device = &self.ctx.device;
         device.destroy_image_view(texture.view);
@@ -71,7 +106,7 @@ impl LoomzEngineCore {
     }
 
     /**
-        TODO:
+        TODO (when the need arise):
 
         * More finely grained layers and subresource range
         * Texture with more than one mipmap level
@@ -80,30 +115,64 @@ impl LoomzEngineCore {
     fn upload_image_memory(&mut self, asset: &AssetsTextureData, texture: &mut Texture) {
         let staging = &mut self.staging;
 
-        // 
         let image_subresource = vk::ImageSubresourceLayers::base_color();
         let subresource_range = vk::ImageSubresourceRange::base_color();
 
-        let pixel_data = asset.data.mimap_level_data(0); // TODO, 
-        let buffer_offset = staging.copy_data_with_align(pixel_data, 16);
+        let pixel_data = asset.data.mimap_level_data(0); // TODO, multiple mipmap
+        let buffer_offset = staging.copy_data_with_align(pixel_data, 16); // TODO remove block align
 
+        self.upload_image_shared(
+            texture.image,
+            buffer_offset,
+            texture.extent,
+            image_subresource,
+            subresource_range
+        );
+    }
+
+    fn upload_font_image_memory(&mut self, asset: &AssetsMsdfFontData, texture: &mut Texture) {
+        let staging = &mut self.staging;
+
+        let image_subresource = vk::ImageSubresourceLayers::base_color();
+        let subresource_range = vk::ImageSubresourceRange::base_color();
+        let buffer_offset = staging.copy_data_with_align(&asset.image_data, 24);  // TODO: remove the hardcoded rgb8 align
+
+        self.upload_image_shared(
+            texture.image,
+            buffer_offset,
+            texture.extent,
+            image_subresource,
+            subresource_range
+        );
+    }
+
+    fn upload_image_shared(
+        &mut self,
+        image: vk::Image,
+        buffer_offset: vk::DeviceSize,
+        image_extent: vk::Extent3D,
+        image_subresource: vk::ImageSubresourceLayers,
+        subresource_range: vk::ImageSubresourceRange
+    ) {
+        let staging = &mut self.staging;
+        
         // Pixel copy
         let image_copy = StagingImageCopy {
-            dst_image: texture.image,
+            dst_image: image,
             copy: vk::BufferImageCopy {
                 buffer_offset,
                 buffer_image_height: 0,
                 buffer_row_length: 0,
                 image_subresource,
                 image_offset: vk::Offset3D::default(),
-                image_extent: texture.extent,
+                image_extent,
             }
         };
         staging.image_copies.push(image_copy);
 
         // Transfer prepare
         let mut barrier = vk::ImageMemoryBarrier2 {
-            image: texture.image,
+            image,
             old_layout: vk::ImageLayout::UNDEFINED,
             new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             src_access_mask: vk::AccessFlags2::NONE,
@@ -118,7 +187,7 @@ impl LoomzEngineCore {
         // Transfer finalize
         // TODO: Support
         barrier = vk::ImageMemoryBarrier2 {
-            image: texture.image,
+            image,
             old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
             new_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
             src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,

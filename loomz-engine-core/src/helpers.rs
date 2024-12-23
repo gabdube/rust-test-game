@@ -66,6 +66,12 @@ pub const fn align_device(addr: vk::DeviceSize, align: vk::DeviceSize) -> vk::De
     ((addr + (align - 1)) & -align) as vk::DeviceSize
 }
 
+/// align DOES NOT need to be a power of 2
+#[inline]
+pub const fn pad_device(addr: vk::DeviceSize, align: vk::DeviceSize) -> vk::DeviceSize {
+    (addr - (addr % align)) + align
+}
+
 
 pub fn fetch_attachments_memory_index(instance: &vk::wrapper::Instance, physical_device: vk::PhysicalDevice) -> u32 {
     let properties = instance.get_physical_device_memory_properties(physical_device);

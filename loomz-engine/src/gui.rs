@@ -1,11 +1,14 @@
-use std::slice;
-use loomz_engine_core::{LoomzEngineCore, VulkanContext, alloc::VertexAlloc, pipelines::*};
+use fnv::FnvHashMap;
+use std::{slice, sync::Arc};
+use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
 use loomz_shared::api::{LoomzApi, GuiId};
+use loomz_shared::assets::{LoomzAssetsBundle, MsdfFontId};
 use loomz_shared::{CommonError, CommonErrorType};
-use loomz_shared::{backend_init_err, chain_err};
+use loomz_shared::{backend_init_err, assets_err, chain_err};
 use super::pipeline_compiler::PipelineCompiler;
 
 const BATCH_LAYOUT_INDEX: u32 = 0;
+const TEXTURE_BINDING: u32 = 0;
 
 const PUSH_STAGE_FLAGS: vk::ShaderStageFlags = vk::ShaderStageFlags::VERTEX;
 const PUSH_SIZE: u32 = size_of::<GuiPushConstant>() as u32;
@@ -29,12 +32,22 @@ pub struct GuiVertex {
     pub uv: [f32; 2],
 }
 
+#[derive(Default)]
+struct GuiModuleDescriptors {
+    alloc: DescriptorsAllocator,
+    updates: DescriptorWriteBuffer,
+    texture_params: DescriptorWriteImageParams,
+}
+
 struct GuiResources {
+    assets: Arc<LoomzAssetsBundle>,
     batch_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
-    vertex: VertexAlloc<GuiVertex>,
     text_pipeline: GraphicsPipeline,
     component_pipeline: GraphicsPipeline,
+    vertex: VertexAlloc<GuiVertex>,
+    textures: FnvHashMap<MsdfFontId, Texture>,
+    descriptors: GuiModuleDescriptors,
 }
 
 /// Data used on rendering
@@ -84,13 +97,16 @@ pub(crate) struct GuiModule {
 
 impl GuiModule {
 
-    pub fn init(core: &mut LoomzEngineCore) -> Result<Self, CommonError> {
+    pub fn init(core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<Self, CommonError> {
         let resources = GuiResources {
+            assets: api.assets(),
             batch_layout: vk::DescriptorSetLayout::null(),
             pipeline_layout: vk::PipelineLayout::null(),
             text_pipeline: GraphicsPipeline::new(),
             component_pipeline: GraphicsPipeline::new(),
             vertex: VertexAlloc::default(),
+            textures: FnvHashMap::default(),
+            descriptors: GuiModuleDescriptors::default(),
         };
         
         let render = GuiRender {
@@ -118,8 +134,9 @@ impl GuiModule {
 
         gui.setup_pipelines(core)?;
         gui.setup_vertex_buffers(core)?;
+        gui.setup_descriptors(core)?;
         gui.setup_render_data();
-        gui.setup_test_data(core);
+        gui.setup_test_data(core, api)?;
 
         Ok(gui)
     }
@@ -128,9 +145,14 @@ impl GuiModule {
         self.resources.text_pipeline.destroy(&core.ctx);
         self.resources.component_pipeline.destroy(&core.ctx);
         self.resources.vertex.free(core);
+        self.resources.descriptors.alloc.destroy(core);
 
         core.ctx.device.destroy_pipeline_layout(self.resources.pipeline_layout);
         core.ctx.device.destroy_descriptor_set_layout(self.resources.batch_layout);
+
+        for texture in self.resources.textures.values() {
+            core.destroy_texture(*texture);
+        }
     }
 
     pub fn set_output(&mut self, core: &LoomzEngineCore) {
@@ -184,9 +206,9 @@ impl GuiModule {
         device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push_values(&render.push_constants));
 
         for batch in self.batches.iter() {
-            // device.cmd_bind_pipeline(cmd, GRAPHICS, render.component_pipeline_handle);
-            // device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, BATCH_LAYOUT_INDEX, slice::from_ref(&batch.set), &[]);
-            // device.cmd_draw_indexed(cmd, batch.index_count, batch.first_index, 0, 0, 0);
+            device.cmd_bind_pipeline(cmd, GRAPHICS, render.text_pipeline_handle);
+            device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, BATCH_LAYOUT_INDEX, slice::from_ref(&batch.set), &[]);
+            device.cmd_draw_indexed(cmd, batch.index_count, 1, batch.first_index, 0, 0);
         }
     }
 
@@ -197,6 +219,27 @@ impl GuiModule {
     pub fn update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         Ok(())
     }
+
+    //
+    // Data
+    //
+
+    fn fetch_font_texture_view(&mut self, core: &mut LoomzEngineCore, id: MsdfFontId) -> Result<vk::ImageView, CommonError> {
+        if let Some(texture) = self.resources.textures.get(&id) {
+            return Ok(texture.view);
+        }
+
+        let texture_asset = self.resources.assets.font(id)
+            .ok_or_else(|| assets_err!("Unkown asset with ID {id:?}") )?;
+
+        let texture = core.create_texture_from_font_asset(&texture_asset)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
+
+        self.resources.textures.insert(id, texture);
+
+        Ok(texture.view)
+    }
+    
 
     //
     // Setup
@@ -311,6 +354,30 @@ impl GuiModule {
         Ok(())
     }
 
+    fn setup_descriptors(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        use loomz_engine_core::descriptors::DescriptorsAllocation;
+        
+        let allocations = [
+            DescriptorsAllocation {
+                layout: self.resources.batch_layout,
+                bindings: Self::pipeline_descriptor_bindings_batch(),
+                count: 1,
+            },
+        ];
+
+        self.resources.descriptors.alloc = DescriptorsAllocator::new(core, &allocations)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to prellocate descriptor sets") )?;
+
+        self.resources.descriptors.texture_params = DescriptorWriteImageParams {
+            sampler: core.resources.linear_sampler,
+            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            dst_binding: TEXTURE_BINDING,
+            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        };
+
+        Ok(())
+    }
+
     fn setup_render_data(&mut self) {
         let render = &mut self.render;
 
@@ -320,21 +387,25 @@ impl GuiModule {
         render.vertex_offset = self.resources.vertex.vertex_offset();
     }
 
-    fn setup_test_data(&mut self, core: &mut LoomzEngineCore) {
+    fn setup_test_data(&mut self, core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<(), CommonError> {
         let id = { let id = GuiId::new(); id.bind(0); id };
-
-        let text1 = TempText { x1: 1100.0, y1: 50.0, x2: 1150.0, y2: 100.0 };
-        let text2 = TempText { x1: 1100.0, y1: 150.0, x2: 1150.0, y2: 200.0 };
+        let text1 = TempText { x1: 200.0, y1: 200.0, x2: 200.0 + (232.0 * 4.0), y2: 200.0 + (232.0 * 4.0)};
         self.data.instances.push(GuiInstance {
             id,
-            text: vec![text1, text2],
+            text: vec![text1],
         });
+
+        let font_id = api.assets_ref().font_id_by_name("roboto").unwrap();
+        let image_view = self.fetch_font_texture_view(core, font_id)?;
+        let set = self.resources.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
+        self.resources.descriptors.updates.write_simple_image(set, image_view, &self.resources.descriptors.texture_params);
+        self.resources.descriptors.updates.submit(core);
 
         let indices = &mut self.data.indices;
         let vertex = &mut self.data.vertex;
 
         let mut vertex_count = 0;
-        let mut current_batch = GuiBatch::default();
+        let mut current_batch = GuiBatch { set, ..Default::default() };
         for instance in self.data.instances.iter() {
             for text in instance.text.iter() {
                 let i = vertex_count;
@@ -345,11 +416,10 @@ impl GuiModule {
                 indices.push(i+3);
                 indices.push(i+1);
 
-                let uv = [0.0, 0.0];
-                vertex.push(GuiVertex { pos: [text.x1, text.y1], uv });
-                vertex.push(GuiVertex { pos: [text.x2, text.y1], uv });
-                vertex.push(GuiVertex { pos: [text.x1, text.y2], uv });
-                vertex.push(GuiVertex { pos: [text.x2, text.y2], uv });
+                vertex.push(GuiVertex { pos: [text.x1, text.y1], uv: [0.0, 0.0] });
+                vertex.push(GuiVertex { pos: [text.x2, text.y1], uv: [232.0, 0.0] });
+                vertex.push(GuiVertex { pos: [text.x1, text.y2], uv: [0.0, 232.0] });
+                vertex.push(GuiVertex { pos: [text.x2, text.y2], uv: [232.0, 232.0] });
 
                 current_batch.index_count += 6;
                 vertex_count += 4;
@@ -358,6 +428,8 @@ impl GuiModule {
 
         self.batches.push(current_batch);
         self.resources.vertex.set_data(core, &self.data.indices, &self.data.vertex);
+
+        Ok(())
     }
 
 }

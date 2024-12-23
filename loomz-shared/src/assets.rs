@@ -98,6 +98,17 @@ impl LoomzAssetsBundle {
             .and_then(|id| self.json.get(&id) )
     }
 
+    pub fn font_id_by_name(&self, name: &str) -> Option<MsdfFontId> {
+        match self.assets_by_name.get(name) {
+            Some(AssetId::MsdfFont(id)) => Some(*id),
+            _ => None
+        }
+    }
+
+    pub fn font<'a>(&'a self, id: MsdfFontId) -> Option<&'a AssetsMsdfFontData> {
+        self.msdf_fonts.get(&id)
+    }
+
     fn split_csv<CB: FnMut(&[&str])>(csv: &str, mut cb: CB) {
         let mut start = 0;
         let mut end = 0;
@@ -170,6 +181,8 @@ impl LoomzAssetsBundle {
             let src = ::std::fs::File::open(&image_path)
                 .map_err(|err| assets_err!("Failed to open {:?} {:?}", image_path, err) )?;
 
+            // Maybe we could move the decoding on-use to save memory
+            // see `upload_font_image_memory`
             let decoder = png::Decoder::new(src);
             let mut reader = decoder.read_info().unwrap();
             let mut image_data = vec![0; reader.output_buffer_size()];
