@@ -1,7 +1,7 @@
 use fnv::FnvHashMap;
 use std::{slice, sync::Arc};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
-use loomz_shared::api::{LoomzApi, GuiTextId, GuiTextUpdate};
+use loomz_shared::api::{LoomzApi, GuiTextId, GuiTextUpdate, GuiComponentTextGlyph};
 use loomz_shared::assets::{LoomzAssetsBundle, MsdfFontId, msdf_font::ComputedGlyph};
 use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, assets_err, chain_err};
@@ -234,7 +234,7 @@ impl GuiModule {
         Ok(())
     }
 
-    fn update_text_glyphs(&mut self, text_index: usize, glyphs: &'static [ComputedGlyph]) {
+    fn update_text_glyphs(&mut self, text_index: usize, glyphs: &'static [GuiComponentTextGlyph]) {
         let text = &mut self.data.text[text_index];
         text.glyphs.clear();
 
@@ -243,7 +243,12 @@ impl GuiModule {
         }
 
         for g in glyphs {
-            text.glyphs.push(*g);
+            let mut glyph = g.glyph;
+            glyph.position.left += g.offset.x;
+            glyph.position.right += g.offset.x;
+            glyph.position.top += g.offset.y;
+            glyph.position.bottom += g.offset.y;
+            text.glyphs.push(glyph);
         }
 
         self.update_batches = true;
@@ -462,10 +467,10 @@ impl GuiModule {
 
 struct GuiBatcher<'a> {
     core: &'a mut LoomzEngineCore,
-    current_view: vk::ImageView,
     data: &'a mut GuiData,
     resources: &'a mut GuiResources,
     batches: &'a mut Vec<GuiBatch>,
+    current_view: vk::ImageView,
     text_index: usize,
     batch_index: usize,
     index_count: isize,

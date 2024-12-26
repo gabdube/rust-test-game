@@ -66,8 +66,9 @@ impl MsdfFontData {
         let atlas_height = self.info.height;
         let atlas_glyph = self.glyphs.get(chr as usize).copied().unwrap_or_default();
 
-        let top = self.info.line_height - atlas_glyph.plane_bound[1];
-        let bottom = self.info.line_height - atlas_glyph.plane_bound[3];
+        let line_height = self.info.line_height * 0.75;
+        let top = line_height - atlas_glyph.plane_bound[1];
+        let bottom = line_height - atlas_glyph.plane_bound[3];
 
         glyph.position.left = scale * atlas_glyph.plane_bound[0];
         glyph.position.top = scale * top;

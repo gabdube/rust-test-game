@@ -182,7 +182,7 @@ impl LoomzClient {
 
     fn init_main_menu(&mut self) {
         self.main_menu = Gui::build(&self.api, |gui| {
-            gui.font_style("default", "roboto", 150.0);
+            gui.font_style("default", "roboto", 50.0);
             gui.font("default");
             gui.label("Hello World!");
         });
