@@ -20,7 +20,7 @@ pub struct WorldAnimation {
     pub interval: f32,
 }
 
-pub enum WorldActor {
+pub enum WorldActorUpdate {
     Position(Position<f32>),
     Animation(WorldAnimationId),
     Flip(bool),
@@ -28,7 +28,7 @@ pub enum WorldActor {
 
 pub struct WorldApi {
     pub animations: MessageQueue<WorldAnimationId, WorldAnimation>,
-    pub actors: MessageQueue<WorldActorId, WorldActor>,
+    pub actors: MessageQueue<WorldActorId, WorldActorUpdate>,
 }
 
 impl WorldApi {
@@ -49,15 +49,23 @@ impl WorldApi {
     }
 
     pub fn create_actor(&self, id: &WorldActorId, position: Position<f32>, animation_id: &WorldAnimationId) {
-        self.actors.push(id, WorldActor::Position(position));
-        self.actors.push(id, WorldActor::Animation(animation_id.clone()));
+        self.actors.push(id, WorldActorUpdate::Position(position));
+        self.actors.push(id, WorldActorUpdate::Animation(animation_id.clone()));
     }
 
-    pub fn update_actor(&self, id: &WorldActorId, param: WorldActor) {
-        self.actors.push(id, param);
+    pub fn update_actor_position(&self, id: &WorldActorId, position: Position<f32>) {
+        self.actors.push(id, WorldActorUpdate::Position(position));
     }
 
-    pub fn read_actors<'a>(&'a self) -> Option<impl Iterator<Item = (WorldActorId, WorldActor)> + 'a> {
+    pub fn update_actor_animation(&self, id: &WorldActorId, anim: &WorldAnimationId) {
+        self.actors.push(id, WorldActorUpdate::Animation(anim.clone()));
+    }
+    
+    pub fn flip_actor(&self, id: &WorldActorId, flip: bool) {
+        self.actors.push(id, WorldActorUpdate::Flip(flip));
+    }
+
+    pub fn read_actors<'a>(&'a self) -> Option<impl Iterator<Item = (WorldActorId, WorldActorUpdate)> + 'a> {
         self.actors.read_values()
     }
 

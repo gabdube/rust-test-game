@@ -1,8 +1,8 @@
 use fnv::FnvHashMap;
 use std::{slice, sync::Arc};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
-use loomz_shared::api::{LoomzApi, GuiId};
-use loomz_shared::assets::{LoomzAssetsBundle, MsdfFontId};
+use loomz_shared::api::{LoomzApi, GuiTextId, GuiTextUpdate};
+use loomz_shared::assets::{LoomzAssetsBundle, MsdfFontId, msdf_font::ComputedGlyph};
 use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, assets_err, chain_err};
 use super::pipeline_compiler::PipelineCompiler;
@@ -62,21 +62,14 @@ struct GuiRender {
     push_constants: [GuiPushConstant; 1],
 }
 
-#[derive(Copy, Clone, Default)]
-struct TempText {
-    x1: f32,
-    y1: f32,
-    x2: f32,
-    y2: f32,
-}
-
-struct GuiInstance {
-    id: GuiId,
-    text: Vec<TempText>,
+struct GuiText {
+    font_id: Option<MsdfFontId>,
+    font_view: vk::ImageView,
+    glyphs: Vec<ComputedGlyph>,
 }
 
 struct GuiData {
-    instances: Vec<GuiInstance>,
+    text: Vec<GuiText>,
     indices: Vec<u32>,
     vertex: Vec<GuiVertex>,
 }
@@ -93,6 +86,7 @@ pub(crate) struct GuiModule {
     render: Box<GuiRender>,
     data: Box<GuiData>,
     batches: Vec<GuiBatch>,
+    update_batches: bool,
 }
 
 impl GuiModule {
@@ -120,9 +114,9 @@ impl GuiModule {
         };
 
         let data = GuiData {
-            instances: Vec::with_capacity(4),
-            vertex: Vec::with_capacity(500),
-            indices: Vec::with_capacity(1000)
+            text: Vec::with_capacity(16),
+            vertex: vec![GuiVertex::default(); 500],
+            indices: vec![0; 1000]
         };
         
         let mut gui = GuiModule {
@@ -130,13 +124,13 @@ impl GuiModule {
             render: Box::new(render),
             data: Box::new(data),
             batches: Vec::with_capacity(16),
+            update_batches: false,
         };
 
         gui.setup_pipelines(core)?;
         gui.setup_vertex_buffers(core)?;
         gui.setup_descriptors(core)?;
         gui.setup_render_data();
-        gui.setup_test_data(core, api)?;
 
         Ok(gui)
     }
@@ -216,7 +210,85 @@ impl GuiModule {
     // Updates
     //
 
+    fn create_text(&mut self, text_id: GuiTextId) -> usize {
+        let id = self.data.text.len();
+        self.data.text.push(GuiText {
+            font_id: None,
+            font_view: vk::ImageView::null(),
+            glyphs: Vec::new(),
+        });
+
+        text_id.bind(id as u32);
+
+        id
+    }
+
+    fn update_text_font(&mut self, core: &mut LoomzEngineCore, text_index: usize, font: MsdfFontId) -> Result<(), CommonError> {
+        let old_font_id = self.data.text[text_index].font_id;
+        if old_font_id != Some(font) {
+            let font_view = self.fetch_font_texture_view(core, font)?;
+            self.data.text[text_index].font_id = Some(font);
+            self.data.text[text_index].font_view = font_view;
+            self.update_batches = true;
+        }
+        Ok(())
+    }
+
+    fn update_text_glyphs(&mut self, text_index: usize, glyphs: &'static [ComputedGlyph]) {
+        let text = &mut self.data.text[text_index];
+        text.glyphs.clear();
+
+        if text.glyphs.capacity() < glyphs.len() {
+            text.glyphs.reserve(glyphs.len());
+        }
+
+        for g in glyphs {
+            text.glyphs.push(*g);
+        }
+
+        self.update_batches = true;
+    }
+
+    fn update_text(&mut self, core: &mut LoomzEngineCore, text_index: usize, update: GuiTextUpdate) -> Result<(), CommonError> {
+        match update {
+            GuiTextUpdate::Font(font) => {
+                self.update_text_font(core, text_index, font)?;
+            },
+            GuiTextUpdate::Glyphs(glyphs) => {
+                self.update_text_glyphs(text_index, glyphs);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn api_update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        if let Some(updates) = api.gui().text_updates() {
+            for (id, update) in updates {
+                let index = match id.bound_value() {
+                    Some(index) => index,
+                    None => self.create_text(id),
+                };
+
+                self.update_text(core, index, update)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn batches_update(&mut self, core: &mut LoomzEngineCore) {
+        GuiBatcher::build(self, core);
+        self.update_batches = false;
+    }
+
     pub fn update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        self.api_update(api, core)?;
+
+        if self.update_batches {
+            self.batches_update(core);
+        }
+
         Ok(())
     }
 
@@ -239,7 +311,6 @@ impl GuiModule {
 
         Ok(texture.view)
     }
-    
 
     //
     // Setup
@@ -387,49 +458,161 @@ impl GuiModule {
         render.vertex_offset = self.resources.vertex.vertex_offset();
     }
 
-    fn setup_test_data(&mut self, core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<(), CommonError> {
-        let id = { let id = GuiId::new(); id.bind(0); id };
-        let text1 = TempText { x1: 200.0, y1: 200.0, x2: 200.0 + (232.0 * 4.0), y2: 200.0 + (232.0 * 4.0)};
-        self.data.instances.push(GuiInstance {
-            id,
-            text: vec![text1],
-        });
+}
 
-        let font_id = api.assets_ref().font_id_by_name("roboto").unwrap();
-        let image_view = self.fetch_font_texture_view(core, font_id)?;
+struct GuiBatcher<'a> {
+    core: &'a mut LoomzEngineCore,
+    current_view: vk::ImageView,
+    data: &'a mut GuiData,
+    resources: &'a mut GuiResources,
+    batches: &'a mut Vec<GuiBatch>,
+    text_index: usize,
+    batch_index: usize,
+    index_count: isize,
+    vertex_count: u32,
+}
+
+impl<'a> GuiBatcher<'a> {
+
+    fn build(gui: &mut GuiModule, core: &mut LoomzEngineCore) {
+        let mut batcher = GuiBatcher {
+            core,
+            current_view: vk::ImageView::null(),
+            data: &mut gui.data,
+            resources: &mut gui.resources,
+            batches: &mut gui.batches,
+            text_index: 0,
+            batch_index: 0,
+            index_count: 0,
+            vertex_count: 0,
+        };
+        batcher.resources.descriptors.alloc.clear_sets(BATCH_LAYOUT_INDEX);
+        batcher.batches.clear();
+
+        batcher.first_batch();
+        batcher.remaining_batches();
+        batcher.upload_vertex();
+
+        gui.resources.descriptors.updates.submit(core);
+    }
+
+    fn first_batch(&mut self) {
+        let mut found = false;
+        let max_instance = self.data.text.len();
+        while !found && self.text_index != max_instance {
+            let text = &self.data.text[self.text_index];
+            let font_view = text.font_view;
+            let index_count = (text.glyphs.len() * 6) as u32;
+            if index_count == 0 || font_view.is_null() {
+                self.text_index += 1;
+                continue;
+            }
+
+            self.next_batch(font_view);
+            self.write_text_indices();
+            self.write_text_vertex();
+
+            self.text_index += 1;
+            found = true;
+        }
+    }
+
+    fn remaining_batches(&mut self) {
+        let max_instance = self.data.text.len();
+        while self.text_index != max_instance {
+            let text = &self.data.text[self.text_index];
+            let font_view = text.font_view;
+            let index_count = (text.glyphs.len() * 6) as u32;
+            if index_count == 0 || font_view.is_null() {
+                self.text_index += 1;
+                continue;
+            }
+
+            if self.current_view != font_view {
+                self.next_batch(font_view);
+                self.batch_index += 1;
+            }
+
+            self.write_text_indices();
+            self.write_text_vertex();
+
+            self.text_index += 1;
+        }
+    }
+
+    fn next_batch(&mut self, font_view: vk::ImageView) {
         let set = self.resources.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
-        self.resources.descriptors.updates.write_simple_image(set, image_view, &self.resources.descriptors.texture_params);
-        self.resources.descriptors.updates.submit(core);
+        self.resources.descriptors.updates.write_simple_image(set, font_view, &self.resources.descriptors.texture_params);
+    
+        self.current_view = font_view;
 
-        let indices = &mut self.data.indices;
-        let vertex = &mut self.data.vertex;
+        self.batches.push(GuiBatch {
+            set,
+            first_index: self.index_count as u32,
+            index_count: 0,
+        });
+    }
 
-        let mut vertex_count = 0;
-        let mut current_batch = GuiBatch { set, ..Default::default() };
-        for instance in self.data.instances.iter() {
-            for text in instance.text.iter() {
-                let i = vertex_count;
-                indices.push(i+0);
-                indices.push(i+1);
-                indices.push(i+2);
-                indices.push(i+2);
-                indices.push(i+3);
-                indices.push(i+1);
+    fn write_text_indices(&mut self) {
+        let glyph_count = self.data.text[self.text_index].glyphs.len() as isize;
+        let index_count = glyph_count * 6;
 
-                vertex.push(GuiVertex { pos: [text.x1, text.y1], uv: [0.0, 0.0] });
-                vertex.push(GuiVertex { pos: [text.x2, text.y1], uv: [232.0, 0.0] });
-                vertex.push(GuiVertex { pos: [text.x1, text.y2], uv: [0.0, 232.0] });
-                vertex.push(GuiVertex { pos: [text.x2, text.y2], uv: [232.0, 232.0] });
+        // Safety, indices capacity will be greater than written range
+        let mut i = self.index_count;
+        let mut v = self.vertex_count;
+        assert!(i + index_count < self.data.indices.len() as isize);
 
-                current_batch.index_count += 6;
-                vertex_count += 4;
+        unsafe {
+            for _ in 0..glyph_count {
+                let indices = self.data.indices.as_mut_ptr();
+                indices.offset(i+0).write(v+0);
+                indices.offset(i+1).write(v+1);
+                indices.offset(i+2).write(v+2);
+                indices.offset(i+3).write(v+2);
+                indices.offset(i+4).write(v+3);
+                indices.offset(i+5).write(v+1);
+
+                i += 6;
+                v += 4;
             }
         }
 
-        self.batches.push(current_batch);
-        self.resources.vertex.set_data(core, &self.data.indices, &self.data.vertex);
-
-        Ok(())
+        self.index_count += index_count;
+        self.batches[self.batch_index].index_count += index_count as u32;
     }
 
+    fn write_text_vertex(&mut self) {
+        let glyphs = &self.data.text[self.text_index].glyphs;
+        let glyph_count = glyphs.len() as isize;
+        let vertex_count = glyph_count * 4;
+
+        // Safety, vertex capacity will be greater than written range
+        let mut v = self.vertex_count as isize;
+        assert!(v + vertex_count < self.data.vertex.len() as isize);
+
+        unsafe {
+            let vertex = self.data.vertex.as_mut_ptr();            
+            for glyph in glyphs {
+                let [x1, y1, x2, y2] = glyph.position.splat();
+                let [x3, y3, x4, y4] = glyph.texcoord.splat();
+                vertex.offset(v+0).write(GuiVertex { pos: [x1, y1], uv: [x3, y3] });
+                vertex.offset(v+1).write(GuiVertex { pos: [x2, y1], uv: [x4, y3] });
+                vertex.offset(v+2).write(GuiVertex { pos: [x1, y2], uv: [x3, y4] });
+                vertex.offset(v+3).write(GuiVertex { pos: [x2, y2], uv: [x4, y4] });
+                v += 4;
+            }
+        }
+
+        self.vertex_count += vertex_count as u32;
+    }
+
+    fn upload_vertex(&mut self) {
+        let i = self.index_count as usize;
+        let v = self.vertex_count as usize;
+        self.resources.vertex.set_data(
+            self.core,
+            &self.data.indices[0..i],
+            &self.data.vertex[0..v],
+        );
+    }
 }

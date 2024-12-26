@@ -1,4 +1,4 @@
-use std::sync::{Arc, atomic::{AtomicU32, AtomicUsize, Ordering}};
+use std::sync::{Arc, atomic::{AtomicU32, Ordering}};
 use std::marker::PhantomData;
 use parking_lot::Mutex;
 use crate::store::{StoreAndLoad, SaveFileReaderBase, SaveFileWriterBase};
@@ -70,9 +70,14 @@ impl<T> Clone for Id<T> {
     }
 }
 
+struct InnerBuffer<ID, T> {
+    length: usize,
+    buffer: Box<[Option<(ID, T)>]>,
+}
+
+// TODO: replace this by a ringbuffer (ringbuf crate?)
 pub struct MessageQueue<ID, T> {
-    length: AtomicUsize,
-    buffer: Mutex<Box<[Option<(ID, T)>]>>,
+    inner: Mutex<InnerBuffer<ID, T>>,
 }
 
 impl<ID: Clone, T> MessageQueue<ID, T> {
@@ -84,35 +89,40 @@ impl<ID: Clone, T> MessageQueue<ID, T> {
         }
 
         MessageQueue {
-            length: AtomicUsize::new(0),
-            buffer: Mutex::new(buffer.into_boxed_slice()),
+            inner: Mutex::new(InnerBuffer {
+                length: 0,
+                buffer: buffer.into_boxed_slice()
+            }),
         }
     }
 
     pub fn push(&self, id: &ID, data: T) {
-        let mut buffer = self.buffer.lock();
-        let index = self.length.fetch_add(1, Ordering::SeqCst);
-        if index >= buffer.len() {
-            println!("ERROR: Not enough capacity to hold more than {} messages. Increase the message queue capacity", buffer.len());
+        let mut inner = self.inner.lock();
+        let next_index = inner.length;
+        let max_index = inner.buffer.len();
+        if next_index >= max_index {
+            println!("ERROR: Not enough capacity to hold more than {} messages. Increase the message queue capacity", max_index);
         } else {
-            buffer[index] = Some((id.clone(), data));
+            inner.length += 1;
+            inner.buffer[next_index] = Some((id.clone(), data));
         }
     }
 
     pub fn read_values<'a>(&'a self) -> Option<impl Iterator<Item = (ID, T)> + 'a> {
-        match self.length.load(Ordering::SeqCst) {
+        let mut inner = self.inner.lock();
+        match inner.length {
             0 => None,
             _ => {
+                inner.length = 0;
+
                 let mut index = 0;
-                let mut guard = self.buffer.lock();
-                self.length.store(0, Ordering::SeqCst);
                 Some(::std::iter::from_fn(move || {
-                    if index < guard.len() {
-                        index += 1;
-                        guard[index - 1].take()
-                    } else {
-                        None
-                    }
+                    let next_value = match inner.buffer.get_mut(index) {
+                        Some(op) => op.take(),
+                        None => None,
+                    };
+                    index += 1;
+                    next_value
                 }))
             }
         }

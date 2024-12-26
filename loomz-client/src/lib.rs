@@ -5,7 +5,7 @@ use animations::{Animations, PawnAnimationType};
 
 use std::time::Instant;
 use loomz_shared::{_2d::Position, base_types::_2d::pos};
-use loomz_shared::api::{WorldActorId, WorldActor, GuiId, Gui};
+use loomz_shared::api::{WorldActorId, Gui};
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
 
@@ -15,11 +15,6 @@ pub struct Player {
     position: Position<f32>,
     animation: PawnAnimationType,
     flip: bool,
-}
-
-pub struct MainMenu {
-    id: GuiId,
-    gui: Gui
 }
 
 #[derive(Copy, Clone)]
@@ -43,7 +38,7 @@ pub struct LoomzClient {
     player: Player,
     target_position: Position<f32>,
 
-    main_menu: MainMenu,
+    main_menu: Gui,
 
     state: GameState,
 }
@@ -55,11 +50,6 @@ impl LoomzClient {
             last: Instant::now(),
             delta_ms: 0.0,
         };
-
-        let main_menu = MainMenu {
-            id: GuiId::new(),
-            gui: Gui::default(),
-        };
         
         let client = LoomzClient {
             api: api.clone(),
@@ -69,7 +59,7 @@ impl LoomzClient {
             player: Player::default(),
             target_position: Position::default(),
 
-            main_menu,
+            main_menu: Gui::default(),
 
             state: GameState::Uninitialized,
         };
@@ -116,15 +106,13 @@ impl LoomzClient {
     }
 
     fn uninitialized(&mut self) -> Result<(), CommonError> {
-        self.init_player()?;
+        self.init_player();
         self.init_main_menu();
         self.state = GameState::MainMenu;
         Ok(())
     }
 
     fn main_menu(&mut self) {
-        self.main_menu.gui.update();
-        self.api.gui().update_gui(&self.main_menu.id, &self.main_menu.gui);
     }
 
     fn gameplay(&mut self) -> Result<(), CommonError> {
@@ -145,23 +133,23 @@ impl LoomzClient {
             let speed_y = speed * f64::sin(angle);
 
             self.player.position += pos(speed_x, speed_y);
-            world.update_actor(&self.player.id, WorldActor::Position(self.player.position));
+            world.update_actor_position(&self.player.id, self.player.position);
 
             if self.player.animation != PawnAnimationType::Walk {
-                world.update_actor(&self.player.id, WorldActor::Animation(self.animations.warrior.walk.clone()));
+                world.update_actor_animation(&self.player.id, &self.animations.warrior.walk);
                 self.player.animation = PawnAnimationType::Walk;
             }
 
             if speed_x < 0.0 && !self.player.flip {
                 self.player.flip = true;
-                world.update_actor(&self.player.id, WorldActor::Flip(true));
+                world.flip_actor(&self.player.id, true);
             } else if speed_x > 0.0 && self.player.flip {
                 self.player.flip = false;
-                world.update_actor(&self.player.id, WorldActor::Flip(false));
+                world.flip_actor(&self.player.id, false);
             }
         } else {
             if self.player.animation != PawnAnimationType::Idle {
-                world.update_actor(&self.player.id, WorldActor::Animation(self.animations.warrior.strike_t2.clone()));
+                world.update_actor_animation(&self.player.id, &self.animations.warrior.strike_t2);
                 self.player.animation = PawnAnimationType::Idle;
             }
         }
@@ -173,8 +161,8 @@ impl LoomzClient {
         self.target_position = position.as_f32();
     }
 
-    fn init_player(&mut self) -> Result<(), CommonError> {
-        let start_position = pos(100.0, 100.0);
+    fn init_player(&mut self) {
+        let start_position = pos(100.0, 500.0);
         let player = Player {
             id: WorldActorId::new(),
             position: start_position,
@@ -190,19 +178,14 @@ impl LoomzClient {
 
         self.player = player;
         self.target_position = start_position;
-
-        Ok(())
     }
 
     fn init_main_menu(&mut self) {
-        self.main_menu.gui = Gui::build(&self.api, |gui| {
-            gui.font_style("default", "roboto", 50.0);
+        self.main_menu = Gui::build(&self.api, |gui| {
+            gui.font_style("default", "roboto", 150.0);
             gui.font("default");
-            gui.text("Hello World!");
+            gui.label("Hello World!");
         });
-
-        self.main_menu.gui.update();
-        self.api.gui().update_gui(&self.main_menu.id, &self.main_menu.gui);
     }
 
 }

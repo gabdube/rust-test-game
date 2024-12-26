@@ -1,7 +1,7 @@
 use std::{slice, sync::Arc, time::Instant, u32, usize};
 use fnv::FnvHashMap;
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
-use loomz_shared::api::{LoomzApi, WorldAnimationId, WorldAnimation, WorldActorId, WorldActor};
+use loomz_shared::api::{LoomzApi, WorldAnimationId, WorldAnimation, WorldActorId, WorldActorUpdate};
 use loomz_shared::{assets::{LoomzAssetsBundle, TextureId}, _2d::Position, CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, assets_err, backend_err, chain_err};
 use super::pipeline_compiler::PipelineCompiler;
@@ -259,15 +259,15 @@ impl WorldModule {
 
     }
     
-    fn update_world_actor(&mut self, core: &mut LoomzEngineCore, actor_index: usize, param: WorldActor) -> Result<(), CommonError> {
-        match param {
-            WorldActor::Position(position) => {
+    fn update_world_actor(&mut self, core: &mut LoomzEngineCore, actor_index: usize, update: WorldActorUpdate) -> Result<(), CommonError> {
+        match update {
+            WorldActorUpdate::Position(position) => {
                 self.data.instances[actor_index].position = position;
             },
-            WorldActor::Flip(flipped) => {
+            WorldActorUpdate::Flip(flipped) => {
                 self.data.instances[actor_index].flipped = flipped;
             },
-            WorldActor::Animation(animation_id) => {
+            WorldActorUpdate::Animation(animation_id) => {
                 let animation_index = animation_id.bound_value();
                 let animation = animation_index.and_then(|index| self.data.animations.get(index).copied() );
                 match animation {
@@ -282,7 +282,7 @@ impl WorldModule {
         Ok(())
     }
 
-    fn create_world_actor(&mut self, id: WorldActorId) -> Result<usize, CommonError> {
+    fn create_world_actor(&mut self, id: WorldActorId) -> usize {
         let instances = &mut self.data.instances;
         let new_id = instances.len();
         
@@ -297,7 +297,7 @@ impl WorldModule {
 
         id.bind(new_id as u32);
 
-        Ok(new_id)
+        new_id
     }
 
     fn create_world_animation(&mut self, id: WorldAnimationId, animation: WorldAnimation) {
@@ -319,13 +319,12 @@ impl WorldModule {
 
         if let Some(actors) = api.world().read_actors() {
             for (id, actor) in actors {
-                match id.bound_value() {
-                    Some(index) => self.update_world_actor(core, index, actor)?,
-                    None => {
-                        let index = self.create_world_actor(id)?;
-                        self.update_world_actor(core, index, actor)?;
-                    }
-                }
+                let index = match id.bound_value() {
+                    Some(index) => index,
+                    None => self.create_world_actor(id),
+                };
+
+                self.update_world_actor(core, index, actor)?;
             }
         }
 
@@ -362,7 +361,6 @@ impl WorldModule {
 
     fn batches_update(&mut self, core: &mut LoomzEngineCore) {
         self.resources.descriptors.alloc.clear_sets(BATCH_LAYOUT_INDEX);
-        self.batches.clear();
 
         WorldBatcher::build(self);
 
@@ -598,7 +596,7 @@ impl<'a> WorldBatcher<'a> {
             instance_index: 0,
             batch_index: 0,
         };
-
+        batcher.batches.clear();
         batcher.first_batch();
         batcher.remaining_batches();
     }
@@ -615,16 +613,8 @@ impl<'a> WorldBatcher<'a> {
                 continue;
             }
 
-            let set = self.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
-            self.descriptors.updates.write_simple_image(set, instance.image_view, &self.descriptors.texture_params);
-    
-            self.batches.push(WorldBatch {
-                set,
-                instances_count: 1,
-                instances_offset: 0,
-            });
-    
-            self.current_view = instance.image_view;
+            self.next_batch(instance.image_view);
+            self.batches[self.batch_index].instances_count += 1;
             self.instance_index += 1;
             found = true;
         }
@@ -641,12 +631,12 @@ impl<'a> WorldBatcher<'a> {
             }
 
             let image_view = instance.image_view;
-            if self.current_view == image_view {
-                self.batches[self.batch_index].instances_count += 1;
-            } else {
-                self.next_batch(image_view)
+            if self.current_view != image_view {
+                self.next_batch(image_view);
+                self.batch_index += 1;
             }
 
+            self.batches[self.batch_index].instances_count += 1;
             self.instance_index += 1;
         }
     }
@@ -655,14 +645,13 @@ impl<'a> WorldBatcher<'a> {
         let set = self.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
         self.descriptors.updates.write_simple_image(set, image_view, &self.descriptors.texture_params);
 
+        self.current_view = image_view;
+
         self.batches.push(WorldBatch {
             set,
-            instances_count: 1,
+            instances_count: 0,
             instances_offset: self.instance_index as u32,
         });
-
-        self.current_view = image_view;
-        self.batch_index += 1;
     }
 
 }
