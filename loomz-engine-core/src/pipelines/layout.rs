@@ -2,26 +2,17 @@
 #[derive(Copy, Clone)]
 pub struct PipelineLayoutSetBinding {
     pub descriptor_type: vk::DescriptorType,
-    pub descriptor_count: u32,
     pub stage_flags: vk::ShaderStageFlags,
 }
 
 impl PipelineLayoutSetBinding {
-    pub fn new(descriptor_type: vk::DescriptorType, descriptor_count: u32, stage_flags: vk::ShaderStageFlags) -> Self {
-        PipelineLayoutSetBinding {
-            descriptor_type,
-            descriptor_count,
-            stage_flags
-        }
-    }
-
     pub fn build_descriptor_set_layout<const C: usize>(device: &vk::wrapper::Device, bindings_info: &[Self; C]) -> Result<vk::DescriptorSetLayout, vk::VkResult> {
         let mut bindings: [vk::DescriptorSetLayoutBinding; C] = [vk::DescriptorSetLayoutBinding::default(); C];
         for i in 0..C {
             bindings[i] = vk::DescriptorSetLayoutBinding {
                 binding: i as u32,
                 descriptor_type: bindings_info[i].descriptor_type,
-                descriptor_count: bindings_info[i].descriptor_count,
+                descriptor_count: 1,
                 stage_flags: bindings_info[i].stage_flags,
                 p_immutable_samplers: ::std::ptr::null(),
             };

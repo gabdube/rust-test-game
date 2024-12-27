@@ -2,7 +2,7 @@ use std::{slice, sync::Arc, time::Instant, u32, usize};
 use fnv::FnvHashMap;
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
 use loomz_shared::api::{LoomzApi, WorldAnimationId, WorldAnimation, WorldActorId, WorldActorUpdate};
-use loomz_shared::{assets::{LoomzAssetsBundle, TextureId}, _2d::Position, CommonError, CommonErrorType};
+use loomz_shared::{_2d::Position, CommonError, CommonErrorType, assets::{LoomzAssetsBundle, TextureId}};
 use loomz_shared::{backend_init_err, assets_err, backend_err, chain_err};
 use super::pipeline_compiler::PipelineCompiler;
 
@@ -12,11 +12,9 @@ const WORLD_FRAG_SRC: &[u8] = include_bytes!("../../assets/shaders/world.frag.sp
 const PUSH_STAGE_FLAGS: vk::ShaderStageFlags = vk::ShaderStageFlags::VERTEX;
 const PUSH_SIZE: u32 = size_of::<WorldPushConstant>() as u32;
 
+const LAYOUT_COUNT: usize = 2;
 const GLOBAL_LAYOUT_INDEX: u32 = 0;
-const SPRITES_BUFFER_DATA_BINDING: usize = 0;
-
 const BATCH_LAYOUT_INDEX: u32 = 1;
-const TEXTURE_BINDING: usize = 0;
 
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
@@ -48,20 +46,39 @@ pub struct WorldBatch {
     pub instances_offset: u32,
 }
 
-#[derive(Default)]
-struct WorldModuleDescriptors {
-    alloc: DescriptorsAllocator,
-    updates: DescriptorWriteBuffer,
-    texture_params: DescriptorWriteImageParams,
-}
-
 /// Graphics resources that are not accessed often
 struct WorldResources {
     assets: Arc<LoomzAssetsBundle>,
     pipeline: GraphicsPipeline,
     vertex: VertexAlloc<WorldVertex>,
     textures: FnvHashMap<TextureId, Texture>,
-    descriptors: WorldModuleDescriptors,
+    global_layout: vk::DescriptorSetLayout,
+    batch_layout: vk::DescriptorSetLayout,
+    pipeline_layout: vk::PipelineLayout,
+}
+
+#[derive(Default)]
+struct WorldDescriptors {
+    default_sampler: vk::Sampler,
+    allocator: DescriptorsAllocator<LAYOUT_COUNT>
+}
+
+impl WorldDescriptors {
+    pub fn write_sprite_buffer(&mut self, sprites: &StorageAlloc<SpriteData>) -> Result<vk::DescriptorSet, CommonError> {
+        self.allocator.write_set::<GLOBAL_LAYOUT_INDEX>(&[
+            DescriptorWriteBinding::from_storage_buffer(sprites)
+        ])
+    }
+
+    pub fn write_batch_texture(&mut self, image_view: vk::ImageView) -> Result<vk::DescriptorSet, CommonError> {
+        self.allocator.write_set::<BATCH_LAYOUT_INDEX>(&[
+            DescriptorWriteBinding::from_image_and_sampler(image_view, self.default_sampler, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+        ])
+    }
+
+    pub fn reset_batch_layout(&mut self) {
+        self.allocator.reset_layout::<BATCH_LAYOUT_INDEX>();
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -81,6 +98,14 @@ struct WorldInstanceAnimation {
     current_frame: u32,
 }
 
+/// World data to be rendered on screen
+struct WorldData {
+    sprites: StorageAlloc<SpriteData>,
+    animations: Vec<WorldAnimation>,
+    instance_animations: Vec<WorldInstanceAnimation>,
+    instances: Vec<WorldInstance>,
+}
+
 /// Data used on rendering
 #[derive(Copy, Clone)]
 struct WorldRender {
@@ -93,16 +118,9 @@ struct WorldRender {
     push_constants: [WorldPushConstant; 1],
 }
 
-/// World data to be rendered on screen
-struct WorldData {
-    sprites: StorageAlloc<SpriteData>,
-    animations: Vec<WorldAnimation>,
-    instance_animations: Vec<WorldInstanceAnimation>,
-    instances: Vec<WorldInstance>,
-}
-
 pub(crate) struct WorldModule {
     resources: Box<WorldResources>,
+    descriptors: Box<WorldDescriptors>,
     data: Box<WorldData>,
     render: Box<WorldRender>,
     batches: Vec<WorldBatch>,
@@ -117,7 +135,9 @@ impl WorldModule {
             pipeline: GraphicsPipeline::new(),
             vertex: VertexAlloc::default(),
             textures: FnvHashMap::default(),
-            descriptors: WorldModuleDescriptors::default(),
+            global_layout: vk::DescriptorSetLayout::null(),
+            batch_layout: vk::DescriptorSetLayout::null(),
+            pipeline_layout: vk::PipelineLayout::null(),
         };
 
         let data = WorldData {
@@ -142,6 +162,7 @@ impl WorldModule {
             resources: Box::new(resources),
             render: Box::new(render),
             batches: Vec::with_capacity(16),
+            descriptors: Box::default(),
             update_batches: false,
         };
 
@@ -149,13 +170,13 @@ impl WorldModule {
         world.setup_descriptors(core)?;
         world.setup_vertex_buffers(core)?;
         world.setup_sprites_buffers(core)?;
-        world.setup_render_data(core);
+        world.setup_render_data();
 
         Ok(world)
     }
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
-        self.resources.descriptors.alloc.destroy(core);
+        self.descriptors.allocator.destroy(core);
         self.resources.pipeline.destroy(&core.ctx);
         self.resources.vertex.free(core);
         self.data.sprites.free(core);
@@ -163,6 +184,11 @@ impl WorldModule {
         for texture in self.resources.textures.values() {
             core.destroy_texture(*texture);
         }
+
+        let device = &core.ctx.device;
+        device.destroy_pipeline_layout(self.resources.pipeline_layout);
+        device.destroy_descriptor_set_layout(self.resources.global_layout);
+        device.destroy_descriptor_set_layout(self.resources.batch_layout);
     }
 
     pub fn set_output(&mut self, core: &LoomzEngineCore) {
@@ -358,22 +384,14 @@ impl WorldModule {
             }
         }
     }
-
-    fn batches_update(&mut self, core: &mut LoomzEngineCore) {
-        self.resources.descriptors.alloc.clear_sets(BATCH_LAYOUT_INDEX);
-
-        WorldBatcher::build(self);
-
-        self.resources.descriptors.updates.submit(core);
-        self.update_batches = false;
-    }
     
     pub fn update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         self.api_update(api, core)?;
         self.animation_update();
 
         if self.update_batches {
-            self.batches_update(core);
+            WorldBatcher::build(self)?;
+            self.update_batches = false;
         }
 
         Ok(())
@@ -403,46 +421,38 @@ impl WorldModule {
     // Setup
     //
 
-    fn pipeline_descriptor_bindings_batch() -> &'static [PipelineLayoutSetBinding; 1] {
-        &[
-            PipelineLayoutSetBinding {
-                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                stage_flags: vk::ShaderStageFlags::FRAGMENT,
-                descriptor_count: 1,
-            },
-        ]
-    }
-
-    fn pipeline_descriptor_bindings_global() -> &'static [PipelineLayoutSetBinding; 1] {
-        &[
-            PipelineLayoutSetBinding {
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                stage_flags: vk::ShaderStageFlags::VERTEX,
-                descriptor_count: 1,
-            },
-        ]
-    }
-
     fn setup_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let ctx = &core.ctx;
 
         // Descriptor set layouts
-        let bindings_global = Self::pipeline_descriptor_bindings_global();
-        let layout_global = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, bindings_global)
+        let bindings_global = [
+            PipelineLayoutSetBinding {
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                stage_flags: vk::ShaderStageFlags::VERTEX,
+            },
+        ];
+        
+        let layout_global = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
             .map_err(|err| backend_init_err!("Failed to create global descriptor set layout: {}", err) )?;
 
-        let bindings_batch = Self::pipeline_descriptor_bindings_batch();
-        let layout_batch = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, bindings_batch)
+        let bindings_batch = [
+            PipelineLayoutSetBinding {
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                stage_flags: vk::ShaderStageFlags::FRAGMENT,
+            },
+        ];
+        let layout_batch = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_batch)
             .map_err(|err| backend_init_err!("Failed to create batch descriptor set layout: {}", err) )?;
 
+        // Pipeline layout
         let layouts = [layout_global, layout_batch];
 
-        // Pipeline layout
         let constant_range = vk::PushConstantRange {
             offset: 0,
             size: ::std::mem::size_of::<WorldPushConstant>() as u32,
             stage_flags: vk::ShaderStageFlags::VERTEX,
         };
+
         let pipeline_create_info = vk::PipelineLayoutCreateInfo {
             set_layout_count: layouts.len() as u32,
             p_set_layouts: layouts.as_ptr(),
@@ -450,6 +460,7 @@ impl WorldModule {
             p_push_constant_ranges: &constant_range,
             ..Default::default()
         };
+
         let pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
             .map_err(|err| backend_init_err!("Failed to create pipeline layout: {}", err) )?;
         
@@ -467,12 +478,14 @@ impl WorldModule {
             },
         ];
 
+        self.resources.global_layout = layout_global;
+        self.resources.batch_layout = layout_batch;
+        self.resources.pipeline_layout = pipeline_layout;
+
         let pipeline = &mut self.resources.pipeline;
         pipeline.set_shader_modules(modules);
         pipeline.set_vertex_format::<WorldVertex>(&vertex_fields);
-        pipeline.set_pipeline_layout(pipeline_layout, false);
-        pipeline.set_descriptor_set_layout(GLOBAL_LAYOUT_INDEX as usize, layout_global);
-        pipeline.set_descriptor_set_layout(BATCH_LAYOUT_INDEX as usize, layout_batch);
+        pipeline.set_pipeline_layout(pipeline_layout);
         pipeline.set_depth_testing(false);
         pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
             polygon_mode: vk::PolygonMode::FILL,
@@ -500,35 +513,27 @@ impl WorldModule {
         pipeline.set_sample_count(info.sample_count);
         pipeline.set_color_attachment_format(info.color_format);
         pipeline.set_depth_attachment_format(info.depth_format);
-
+     
         Ok(())
     }
 
     fn setup_descriptors(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        use loomz_engine_core::descriptors::DescriptorsAllocation;
-        
         let allocations = [
             DescriptorsAllocation {
-                layout: self.resources.pipeline.descriptor_set_layout(GLOBAL_LAYOUT_INDEX),
-                bindings: Self::pipeline_descriptor_bindings_global(),
+                layout: self.resources.global_layout,
+                binding_types: &[vk::DescriptorType::STORAGE_BUFFER],
                 count: 1,
             },
             DescriptorsAllocation {
-                layout: self.resources.pipeline.descriptor_set_layout(BATCH_LAYOUT_INDEX),
-                bindings: Self::pipeline_descriptor_bindings_batch(),
+                layout: self.resources.batch_layout,
+                binding_types: &[vk::DescriptorType::COMBINED_IMAGE_SAMPLER],
                 count: 10,
             },
         ];
 
-        self.resources.descriptors.alloc = DescriptorsAllocator::new(core, &allocations)
+        self.descriptors.default_sampler = core.resources.linear_sampler;
+        self.descriptors.allocator = DescriptorsAllocator::new(core, &allocations)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to prellocate descriptor sets") )?;
-
-        self.resources.descriptors.texture_params = DescriptorWriteImageParams {
-            sampler: core.resources.linear_sampler,
-            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            dst_binding: TEXTURE_BINDING as u32,
-            image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        };
 
         Ok(())
     }
@@ -552,26 +557,23 @@ impl WorldModule {
         Ok(())
     }
 
-    fn setup_sprites_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+    fn setup_sprites_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {  
         let sprites_capacity = 100;
         self.data.sprites = StorageAlloc::new(core, sprites_capacity)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create storage alloc: {err}") )?;
 
+        self.render.sprites = self.descriptors.write_sprite_buffer(&self.data.sprites)?;
+
         Ok(())
     }
 
-    fn setup_render_data(&mut self, core: &mut LoomzEngineCore) {
+    fn setup_render_data(&mut self) {
         let render = &mut self.render;
-        let descriptors = &mut self.resources.descriptors;
 
-        render.pipeline_layout = self.resources.pipeline.pipeline_layout();
+        render.pipeline_layout = self.resources.pipeline_layout;
         render.vertex_buffer = self.resources.vertex.buffer;
         render.index_offset = self.resources.vertex.index_offset();
         render.vertex_offset = self.resources.vertex.vertex_offset();
-
-        render.sprites = descriptors.alloc.next_set(GLOBAL_LAYOUT_INDEX);
-        descriptors.updates.write_storage_buffer(render.sprites, &self.data.sprites, SPRITES_BUFFER_DATA_BINDING as u32);
-        descriptors.updates.submit(core);
     }
 
 }
@@ -580,28 +582,33 @@ struct WorldBatcher<'a> {
     current_view: vk::ImageView,
     batches: &'a mut Vec<WorldBatch>,
     instances: &'a mut [WorldInstance],
-    descriptors: &'a mut WorldModuleDescriptors,
+    descriptors: &'a mut WorldDescriptors,
     instance_index: usize,
     batch_index: usize,
 }
 
 impl<'a> WorldBatcher<'a> {
 
-    fn build(world: &'a mut WorldModule) {
+    fn build(world: &'a mut WorldModule) -> Result<(), CommonError> {
         let mut batcher = WorldBatcher {
             current_view: vk::ImageView::null(),
             batches: &mut world.batches,
             instances: &mut world.data.instances,
-            descriptors: &mut world.resources.descriptors,
+            descriptors: &mut world.descriptors,
             instance_index: 0,
             batch_index: 0,
         };
+
+        batcher.descriptors.reset_batch_layout();
         batcher.batches.clear();
-        batcher.first_batch();
-        batcher.remaining_batches();
+
+        batcher.first_batch()?;
+        batcher.remaining_batches()?;
+
+        Ok(())
     }
 
-    fn first_batch(&mut self) {
+    fn first_batch(&mut self) -> Result<(), CommonError> {
         let mut found = false;
         let max_instance = self.instances.len();
 
@@ -613,14 +620,16 @@ impl<'a> WorldBatcher<'a> {
                 continue;
             }
 
-            self.next_batch(instance.image_view);
+            self.next_batch(instance.image_view)?;
             self.batches[self.batch_index].instances_count += 1;
             self.instance_index += 1;
             found = true;
         }
+
+        Ok(())
     }
 
-    fn remaining_batches(&mut self) {
+    fn remaining_batches(&mut self) -> Result<(), CommonError> {
         let max_instance = self.instances.len();
         while self.instance_index != max_instance {
             let instance = self.instances[self.instance_index];
@@ -632,26 +641,28 @@ impl<'a> WorldBatcher<'a> {
 
             let image_view = instance.image_view;
             if self.current_view != image_view {
-                self.next_batch(image_view);
+                self.next_batch(image_view)?;
                 self.batch_index += 1;
             }
 
             self.batches[self.batch_index].instances_count += 1;
             self.instance_index += 1;
         }
+
+        Ok(())
     }
 
-    fn next_batch(&mut self, image_view: vk::ImageView) {
-        let set = self.descriptors.alloc.next_set(BATCH_LAYOUT_INDEX);
-        self.descriptors.updates.write_simple_image(set, image_view, &self.descriptors.texture_params);
+    fn next_batch(&mut self, image_view: vk::ImageView) -> Result<(), CommonError> {
+        let set = self.descriptors.write_batch_texture(image_view)?;
 
         self.current_view = image_view;
-
         self.batches.push(WorldBatch {
             set,
             instances_count: 0,
             instances_offset: self.instance_index as u32,
         });
+
+        Ok(())
     }
 
 }

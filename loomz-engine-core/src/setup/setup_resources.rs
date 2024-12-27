@@ -1,5 +1,5 @@
-use std::u32;
-
+use std::sync::Arc;
+use parking_lot::Mutex;
 use loomz_shared::{backend_init_err, CommonError};
 use vk::CommandBufferSubmitInfo;
 use crate::{context::VulkanContext, helpers, VulkanDescriptorSubmit, VulkanEngineInfo, VulkanGlobalResources, VulkanOutputInfo, VulkanRecordingInfo, VulkanStaging, VulkanSubmitInfo};
@@ -386,13 +386,19 @@ fn init_staging(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanStaging>, Com
 // Descriptors
 //
 
-fn init_descriptors() -> Box<VulkanDescriptorSubmit> {
-    Box::new(VulkanDescriptorSubmit {
-        images: Vec::with_capacity(16),
-        buffers: Vec::with_capacity(16),
-        writes: Vec::with_capacity(16),
-        updates: Vec::with_capacity(16),
+fn init_descriptors() -> Arc<Mutex<VulkanDescriptorSubmit>> {
+    let images = vec![vk::DescriptorImageInfo::default(); 16];
+    let buffers = vec![vk::DescriptorBufferInfo::default(); 8];
+    let writes = vec![vk::WriteDescriptorSet::default(); 24];
+
+    let submit = VulkanDescriptorSubmit {
+        images: images.into_boxed_slice(),
+        buffers: buffers.into_boxed_slice(),
+        writes: writes.into_boxed_slice(),
         images_count: 0,
         buffers_count: 0,
-    })
+        writes_count: 0,
+    };
+
+    Arc::new(Mutex::new(submit))
 }

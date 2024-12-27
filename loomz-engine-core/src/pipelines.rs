@@ -11,8 +11,6 @@ static DEFAULT_BLEND_ATTACHMENTS: [vk::PipelineColorBlendAttachmentState; 1] = [
 ];
 static DEFAULT_DYNAMIC_STATES: [vk::DynamicState; 2] = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
 
-const MAX_PIPELINE_SET_LAYOUT: usize = 3;
-
 /// Vertex format to use when setting up a pipeline
 pub struct PipelineVertexFormat {
     pub location: u32,
@@ -52,15 +50,12 @@ struct GraphicsPipelineBuildInfo {
 
     render_info: vk::PipelineRenderingCreateInfo,
 
-    descriptor_set_layouts: [vk::DescriptorSetLayout; MAX_PIPELINE_SET_LAYOUT],
-
-    shared_layout: bool,
+    pipeline_layout: vk::PipelineLayout,
 }
 
 pub struct GraphicsPipeline {
     build: Box<GraphicsPipelineBuildInfo>,
     handle: vk::Pipeline,
-    pipeline_layout: vk::PipelineLayout,
 }
 
 impl GraphicsPipeline {
@@ -69,21 +64,12 @@ impl GraphicsPipeline {
         GraphicsPipeline {
             build: Box::default(),
             handle: vk::Pipeline::null(),
-            pipeline_layout: vk::PipelineLayout::null(),
         }
     }
 
     pub fn destroy(self, ctx: &VulkanContext) {
         let device = &ctx.device;
         device.destroy_pipeline(self.handle);
-
-        if !self.build.shared_layout {
-            device.destroy_pipeline_layout(self.pipeline_layout);
-            device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[0]);
-            device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[1]);
-            device.destroy_descriptor_set_layout(self.build.descriptor_set_layouts[2]);
-        }
-
         self.build.modules.destroy(ctx);
     }
 
@@ -91,28 +77,12 @@ impl GraphicsPipeline {
         self.handle
     }
 
-    pub fn pipeline_layout(&self) -> vk::PipelineLayout {
-        self.pipeline_layout
-    }
-
-    pub fn descriptor_set_layout(&self, index: u32) -> vk::DescriptorSetLayout {
-        let index = index as usize;
-        assert!(index < MAX_PIPELINE_SET_LAYOUT, "Max index of descriptor set layout allowed is {} (got {})", MAX_PIPELINE_SET_LAYOUT, index);
-        self.build.descriptor_set_layouts[index]
-    }
-
     pub fn set_handle(&mut self, pipeline: vk::Pipeline) {
         self.handle = pipeline;
     }
 
-    pub fn set_pipeline_layout(&mut self, pipeline_layout: vk::PipelineLayout, shared: bool) {
-        self.pipeline_layout = pipeline_layout;
-        self.build.shared_layout = shared;
-    }
-
-    pub fn set_descriptor_set_layout(&mut self, index: usize, layout: vk::DescriptorSetLayout) {
-        assert!(index < MAX_PIPELINE_SET_LAYOUT, "Max index of descriptor set layout allowed is {} (got {})", MAX_PIPELINE_SET_LAYOUT, index);
-        self.build.descriptor_set_layouts[index] = layout;
+    pub fn set_pipeline_layout(&mut self, pipeline_layout: vk::PipelineLayout) {
+        self.build.pipeline_layout = pipeline_layout;
     }
 
     pub fn modules(&self) -> GraphicsShaderModules {
@@ -237,7 +207,7 @@ impl GraphicsPipeline {
             p_color_blend_state: &build.color_blend,
             p_dynamic_state: &build.dynamic,
 
-            layout: self.pipeline_layout,
+            layout: build.pipeline_layout,
             render_pass: vk::RenderPass::null(),  // Renderer use dynamic rendering, which ignore the render pass
 
             ..Default::default()
@@ -311,9 +281,7 @@ impl Default for GraphicsPipelineBuildInfo {
             color_attachments_formats: [vk::Format::UNDEFINED],
             render_info: vk::PipelineRenderingCreateInfo::default(),
 
-            descriptor_set_layouts: [vk::DescriptorSetLayout::null(); 3],
-
-            shared_layout: false
+            pipeline_layout: vk::PipelineLayout::null(),
         }
     }
 }

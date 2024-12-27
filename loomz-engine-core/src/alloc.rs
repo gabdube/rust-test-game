@@ -279,7 +279,7 @@ impl<V: Copy> Default for VertexAlloc<V> {
 /// A buffer holding data used for gpu storage buffer
 /// Backed by host visible memory
 pub struct StorageAlloc<V: Copy> {
-    pub(crate) buffer: vk::Buffer,
+    buffer: vk::Buffer,
     offset: vk::DeviceSize,
     mapped_data: Option<*mut V>,
     capacity: usize,
@@ -336,6 +336,14 @@ impl<V: Copy> StorageAlloc<V> {
         unsafe {
             mapped_data_ptr.add(index).write(data);
         }
+    }
+
+    pub fn handle(&self) -> vk::Buffer {
+        self.buffer
+    }
+
+    pub fn offset(&self) -> vk::DeviceSize {
+        self.offset
     }
 
     pub fn bytes_range(&self) -> vk::DeviceSize {
