@@ -79,10 +79,13 @@ impl InnerInputBuffer {
         }
     }
 
+    fn screen_size_value(&self) -> Size<f32> {
+        self.screen_size
+    }
+
     fn update_screen_size(&mut self, width: f32, height: f32) {
         self.update_flags |= InputUpdateFlags::SCREEN_RESIZED;
         self.screen_size = size(width, height);
-
     }
 
 }
@@ -118,6 +121,10 @@ impl InputBuffer {
 
     pub fn screen_size(&self) -> Option<Size<f32>> {
         self.inputs().screen_size()
+    }
+
+    pub fn screen_size_value(&self) -> Size<f32> {
+        self.inputs().screen_size_value()
     }
 
     pub fn update_screen_size(&self, width: f32, height: f32) {

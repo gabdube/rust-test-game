@@ -113,6 +113,7 @@ impl LoomzClient {
     }
 
     fn main_menu(&mut self) {
+        //self.state = GameState::Gameplay;
     }
 
     fn gameplay(&mut self) -> Result<(), CommonError> {
@@ -149,7 +150,7 @@ impl LoomzClient {
             }
         } else {
             if self.player.animation != PawnAnimationType::Idle {
-                world.update_actor_animation(&self.player.id, &self.animations.warrior.strike_t2);
+                world.update_actor_animation(&self.player.id, &self.animations.warrior.idle);
                 self.player.animation = PawnAnimationType::Idle;
             }
         }
@@ -181,7 +182,13 @@ impl LoomzClient {
     }
 
     fn init_main_menu(&mut self) {
-        self.main_menu = Gui::build(&self.api, |gui| {
+        let screen_size = self.api.inputs().screen_size_value();
+        let view = loomz_shared::RectF32{ 
+            left: 0.0, right: screen_size.width,
+            top: 0.0, bottom: screen_size.height,
+        };
+
+        self.main_menu.build(&self.api, &view, |gui| {
             gui.font_style("default", "roboto", 50.0);
             gui.font("default");
             gui.label("Hello World!");

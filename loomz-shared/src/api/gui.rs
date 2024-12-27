@@ -1,15 +1,7 @@
-mod component;
-use component::*;
-pub use component::GuiComponentTextGlyph;
+mod data;
+pub use data::Gui;
 
-mod gui_data;
-pub use gui_data::Gui;
-use gui_data::GuiFontStyle;
-
-mod builder;
-pub use builder::GuiBuilder;
-
-use crate::assets::MsdfFontId;
+use crate::assets::{MsdfFontId, msdf_font::ComputedGlyph};
 use super::{Id, MessageQueueEx};
 
 pub struct GuiTextTag;
@@ -17,7 +9,7 @@ pub type GuiTextId = Id<GuiTextTag>;
 
 pub enum GuiTextUpdate {
     Font(MsdfFontId),
-    Glyphs(&'static [GuiComponentTextGlyph]),
+    Glyphs(&'static [ComputedGlyph]),
 }
 
 pub struct GuiApi {
@@ -35,7 +27,7 @@ impl GuiApi {
         self.text.push(id, GuiTextUpdate::Font(font));
     }
 
-    pub fn update_text_glyphs(&self, id: &GuiTextId, glyphs: &[GuiComponentTextGlyph]) {        
+    pub fn update_text_glyphs(&self, id: &GuiTextId, glyphs: &[ComputedGlyph]) {        
         self.text.push_with_data(id, glyphs, |glyphs| GuiTextUpdate::Glyphs(glyphs) );
     }
 

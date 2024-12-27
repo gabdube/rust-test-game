@@ -76,6 +76,10 @@ impl LoomzApi {
         }
     }
 
+    pub fn inputs(&self) -> &InputBuffer {
+        &self.inner.inputs.buffer
+    }
+
     pub fn world(&self) -> &WorldApi {
         &self.inner.world
     }

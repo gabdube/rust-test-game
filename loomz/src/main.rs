@@ -55,6 +55,7 @@ impl LoomzApplication {
         self.engine.set_output(display_handle, window_handle, [size.width, size.height])?;
 
         window.set_visible(true);
+
         self.window = Some(Box::new(window));
 
         Ok(())

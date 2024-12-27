@@ -29,6 +29,7 @@ impl<'a> GuiBatcher<'a> {
             index_count: 0,
             vertex_count: 0,
         };
+
         batcher.descriptors.reset_batch_layout();
         batcher.batches.clear();
 

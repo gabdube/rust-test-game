@@ -3,11 +3,11 @@ mod batch;
 
 use fnv::FnvHashMap;
 use std::{slice, sync::Arc};
-use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
-use loomz_shared::api::{LoomzApi, GuiTextId, GuiTextUpdate, GuiComponentTextGlyph};
+use loomz_shared::api::{LoomzApi, GuiTextId, GuiTextUpdate};
 use loomz_shared::assets::{LoomzAssetsBundle, MsdfFontId, msdf_font::ComputedGlyph};
 use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{assets_err, chain_err};
+use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
 use super::pipeline_compiler::PipelineCompiler;
 
 const LAYOUT_COUNT: usize = 1;
@@ -232,7 +232,7 @@ impl GuiModule {
         Ok(())
     }
 
-    fn update_text_glyphs(&mut self, text_index: usize, glyphs: &'static [GuiComponentTextGlyph]) {
+    fn update_text_glyphs(&mut self, text_index: usize, glyphs: &'static [ComputedGlyph]) {
         let text = &mut self.data.text[text_index];
         text.glyphs.clear();
 
@@ -240,12 +240,7 @@ impl GuiModule {
             text.glyphs.reserve(glyphs.len());
         }
 
-        for g in glyphs {
-            let mut glyph = g.glyph;
-            glyph.position.left += g.offset.x;
-            glyph.position.right += g.offset.x;
-            glyph.position.top += g.offset.y;
-            glyph.position.bottom += g.offset.y;
+        for &glyph in glyphs {
             text.glyphs.push(glyph);
         }
 
