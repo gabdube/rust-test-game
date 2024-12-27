@@ -1,4 +1,4 @@
-use crate::base_types::_2d::{Position, Size};
+use crate::base_types::{PositionF32, SizeF32};
 
 #[derive(Copy, Clone, Default)]
 pub struct GuiLayout {
@@ -6,6 +6,6 @@ pub struct GuiLayout {
 
 #[derive(Copy, Clone, Default)]
 pub struct GuiLayoutView {
-    pub position: Position<f32>,
-    pub size: Size<f32>,
+    pub position: PositionF32,
+    pub size: SizeF32,
 }

@@ -4,7 +4,7 @@ mod animations;
 use animations::{Animations, PawnAnimationType};
 
 use std::time::Instant;
-use loomz_shared::{_2d::Position, base_types::_2d::pos};
+use loomz_shared::base_types::{PositionF32, PositionF64};
 use loomz_shared::api::{WorldActorId, Gui};
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
@@ -12,7 +12,7 @@ use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 #[derive(Default)]
 pub struct Player {
     id: WorldActorId,
-    position: Position<f32>,
+    position: PositionF32,
     animation: PawnAnimationType,
     flip: bool,
 }
@@ -36,7 +36,7 @@ pub struct LoomzClient {
     animations: Box<Animations>,
 
     player: Player,
-    target_position: Position<f32>,
+    target_position: PositionF32,
 
     main_menu: Gui,
 
@@ -57,7 +57,7 @@ impl LoomzClient {
             animations: Box::default(),
 
             player: Player::default(),
-            target_position: Position::default(),
+            target_position: PositionF32::default(),
 
             main_menu: Gui::default(),
 
@@ -133,7 +133,7 @@ impl LoomzClient {
             let speed_x = speed * f64::cos(angle);
             let speed_y = speed * f64::sin(angle);
 
-            self.player.position += pos(speed_x, speed_y);
+            self.player.position += PositionF64 { x: speed_x, y: speed_y };
             world.update_actor_position(&self.player.id, self.player.position);
 
             if self.player.animation != PawnAnimationType::Walk {
@@ -158,12 +158,12 @@ impl LoomzClient {
         Ok(())
     }
 
-    fn on_cursor_moved(&mut self, position: Position<f64>) {
+    fn on_cursor_moved(&mut self, position: PositionF64) {
         self.target_position = position.as_f32();
     }
 
     fn init_player(&mut self) {
-        let start_position = pos(100.0, 500.0);
+        let start_position = PositionF32 { x: 100.0, y: 500.0 };
         let player = Player {
             id: WorldActorId::new(),
             position: start_position,

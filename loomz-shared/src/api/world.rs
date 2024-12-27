@@ -1,4 +1,4 @@
-use crate::_2d::Position;
+use crate::PositionF32;
 use crate::assets::TextureId;
 use super::base::{Id, MessageQueue};
 
@@ -21,7 +21,7 @@ pub struct WorldAnimation {
 }
 
 pub enum WorldActorUpdate {
-    Position(Position<f32>),
+    Position(PositionF32),
     Animation(WorldAnimationId),
     Flip(bool),
 }
@@ -48,12 +48,12 @@ impl WorldApi {
         self.animations.read_values()
     }
 
-    pub fn create_actor(&self, id: &WorldActorId, position: Position<f32>, animation_id: &WorldAnimationId) {
+    pub fn create_actor(&self, id: &WorldActorId, position: PositionF32, animation_id: &WorldAnimationId) {
         self.actors.push(id, WorldActorUpdate::Position(position));
         self.actors.push(id, WorldActorUpdate::Animation(animation_id.clone()));
     }
 
-    pub fn update_actor_position(&self, id: &WorldActorId, position: Position<f32>) {
+    pub fn update_actor_position(&self, id: &WorldActorId, position: PositionF32) {
         self.actors.push(id, WorldActorUpdate::Position(position));
     }
 

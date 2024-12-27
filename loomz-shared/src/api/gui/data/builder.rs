@@ -1,5 +1,6 @@
 use fnv::FnvHashMap;
 
+use crate::base_types::PositionF32;
 use crate::assets::{MsdfFontId, msdf_font::ComputedGlyph};
 use crate::api::gui::GuiTextId;
 use crate::LoomzApi;
@@ -73,13 +74,14 @@ impl<'a> GuiBuilder<'a> {
     pub fn label(&mut self, text_value: &str) {
         let font = self.get_font();
         let font_size = self.get_font_size();
+
         let component = build_text_component(self.api, text_value, font, font_size);
-        self.api.gui().update_text_font(&component.id, component.font);
+        let view = super::GuiLayoutView { position: PositionF32::default(), size: component.size() };
 
         let compo = &mut self.gui.components;
         compo.nodes.push(super::GuiNode { });
         compo.layouts.push(super::GuiLayout::default());
-        compo.views.push(super::GuiLayoutView::default());
+        compo.views.push(view);
         compo.types.push(GuiComponentType::Text(component));
     }
 
@@ -104,7 +106,6 @@ fn build_text_component(
     let id = GuiTextId::new();
     let font_asset = api.assets_ref().font(font).unwrap();  // Font presence is validated by the builder
     let mut glyphs = Vec::with_capacity(text_value.len());
-    
 
     let mut advance = 0.0;
     let mut glyph = ComputedGlyph::default();

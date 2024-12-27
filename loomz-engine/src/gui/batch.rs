@@ -35,7 +35,10 @@ impl<'a> GuiBatcher<'a> {
 
         batcher.first_batch()?;
         batcher.remaining_batches()?;
-        batcher.upload_vertex();
+
+        if batcher.batches.len() > 0 {
+            batcher.upload_vertex();
+        }
 
         Ok(())
     }

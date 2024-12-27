@@ -41,16 +41,20 @@ impl Gui {
     fn compute_layout(&mut self) {
         let components = &mut self.components;
         let base = components.base_view;
-        for node in self.components.nodes.iter() {
-
+        for (i, _node) in components.nodes.iter().enumerate() {
+            let view = &mut components.views[i];
+            view.position.x = (base.width() - view.size.width) / 2.0;
+            view.position.y = (base.height() - view.size.height) / 2.0;
         }
     }
 
     fn sync_data(&mut self, api: &LoomzApi) {
+        let gui = api.gui();
         for data in self.components.types.iter() {
             match data {
                 GuiComponentType::Text(text) => {
-                    api.gui().update_text_glyphs(&text.id, &text.glyphs);
+                    gui.update_text_font(&text.id, text.font);
+                    gui.update_text_glyphs(&text.id, &text.glyphs);
                 }
             }
         }

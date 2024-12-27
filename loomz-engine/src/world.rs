@@ -3,8 +3,10 @@ mod batch;
 
 use fnv::FnvHashMap;
 use std::{slice, sync::Arc, time::Instant, u32, usize};
+use loomz_shared::base_types::PositionF32;
 use loomz_shared::api::{LoomzApi, WorldAnimationId, WorldAnimation, WorldActorId, WorldActorUpdate};
-use loomz_shared::{_2d::Position, CommonError, CommonErrorType, assets::{LoomzAssetsBundle, TextureId}};
+use loomz_shared::assets::{LoomzAssetsBundle, TextureId};
+use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{assets_err, backend_err, chain_err};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
 use super::pipeline_compiler::PipelineCompiler;
@@ -67,7 +69,7 @@ struct WorldDescriptors {
 struct WorldInstance {
     image_view: vk::ImageView,
     texture_id: Option<TextureId>,
-    position: Position<f32>,
+    position: PositionF32,
     uv_offset: [f32; 2],
     uv_size: [f32; 2],
     flipped: bool,
@@ -296,7 +298,7 @@ impl WorldModule {
         
         instances.push(WorldInstance {
             image_view: vk::ImageView::null(),
-            position: Position::default(),
+            position: PositionF32::default(),
             uv_offset: [0.0, 0.0],
             uv_size: [0.0, 0.0],
             texture_id: None,
