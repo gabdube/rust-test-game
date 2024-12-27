@@ -1,10 +1,13 @@
+mod setup;
+mod batch;
+
 use fnv::FnvHashMap;
 use std::{slice, sync::Arc};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
 use loomz_shared::api::{LoomzApi, GuiTextId, GuiTextUpdate, GuiComponentTextGlyph};
 use loomz_shared::assets::{LoomzAssetsBundle, MsdfFontId, msdf_font::ComputedGlyph};
 use loomz_shared::{CommonError, CommonErrorType};
-use loomz_shared::{backend_init_err, assets_err, chain_err};
+use loomz_shared::{assets_err, chain_err};
 use super::pipeline_compiler::PipelineCompiler;
 
 const LAYOUT_COUNT: usize = 1;
@@ -12,11 +15,6 @@ const BATCH_LAYOUT_INDEX: u32 = 0;
 
 const PUSH_STAGE_FLAGS: vk::ShaderStageFlags = vk::ShaderStageFlags::VERTEX;
 const PUSH_SIZE: u32 = size_of::<GuiPushConstant>() as u32;
-
-const GUI_VERT_SRC: &[u8] = include_bytes!("../../assets/shaders/gui.vert.spv");
-const GUI_COMPONENT_FRAG_SRC: &[u8] = include_bytes!("../../assets/shaders/gui_component.frag.spv");
-const GUI_TEXT_FRAG_SRC: &[u8] = include_bytes!("../../assets/shaders/gui_text.frag.spv");
-
 
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
@@ -45,18 +43,6 @@ struct GuiResources {
 struct GuiDescriptor {
     default_sampler: vk::Sampler,
     allocator: DescriptorsAllocator<LAYOUT_COUNT>
-}
-
-impl GuiDescriptor {
-    pub fn write_batch_texture(&mut self, image_view: vk::ImageView) -> Result<vk::DescriptorSet, CommonError> {
-        self.allocator.write_set::<BATCH_LAYOUT_INDEX>(&[
-            DescriptorWriteBinding::from_image_and_sampler(image_view, self.default_sampler, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-        ])
-    }
-
-    pub fn reset_batch_layout(&mut self) {
-        self.allocator.reset_layout::<BATCH_LAYOUT_INDEX>();
-    }
 }
 
 /// Data used on rendering
@@ -298,7 +284,7 @@ impl GuiModule {
         self.api_update(api, core)?;
 
         if self.update_batches {
-            GuiBatcher::build(self, core)?;
+            batch::GuiBatcher::build(self, core)?;
             self.update_batches = false;
         }
 
@@ -325,299 +311,16 @@ impl GuiModule {
         Ok(texture.view)
     }
 
-    //
-    // Setup
-    //
-
-    fn setup_pipelines(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let ctx = &core.ctx;
-
-        // Descriptor set layouts
-        let bindings_batch = [
-            PipelineLayoutSetBinding {
-                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                stage_flags: vk::ShaderStageFlags::FRAGMENT,
-            },
-        ];
-        let layout_batch = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_batch)
-            .map_err(|err| backend_init_err!("Failed to create batch descriptor set layout: {}", err) )?;
-
-        // Pipeline layout
-        let layouts = [layout_batch];
-        let constant_range = vk::PushConstantRange {
-            offset: 0,
-            size: ::std::mem::size_of::<GuiPushConstant>() as u32,
-            stage_flags: vk::ShaderStageFlags::VERTEX,
-        };
-        let pipeline_create_info = vk::PipelineLayoutCreateInfo {
-            set_layout_count: layouts.len() as u32,
-            p_set_layouts: layouts.as_ptr(),
-            push_constant_range_count: 1,
-            p_push_constant_ranges: &constant_range,
-            ..Default::default()
-        };
-        let pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
-            .map_err(|err| backend_init_err!("Failed to create pipeline layout: {}", err) )?;
-        
-
-        // Shader source
-        let component_modules = GraphicsShaderModules::new(ctx, GUI_VERT_SRC, GUI_COMPONENT_FRAG_SRC)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute gui component pipeline shader modules") )?;
-
-        let text_modules = GraphicsShaderModules::new(ctx, GUI_VERT_SRC, GUI_TEXT_FRAG_SRC)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute gui text pipeline shader modules") )?;
-
-        // Pipeline
-        let vertex_fields = [
-            PipelineVertexFormat {
-                location: 0,
-                offset: 0,
-                format: vk::Format::R32G32_SFLOAT,
-            },
-            PipelineVertexFormat {
-                location: 1,
-                offset: 8,
-                format: vk::Format::R32G32_SFLOAT,
-            },
-        ];
-
-        let res = &mut self.resources;
-        res.batch_layout = layout_batch;
-        res.pipeline_layout = pipeline_layout;
-        res.component_pipeline.set_shader_modules(component_modules);
-        res.text_pipeline.set_shader_modules(text_modules);
-        
-        for pipeline in [&mut res.component_pipeline, &mut res.text_pipeline] {
-            pipeline.set_vertex_format::<GuiVertex>(&vertex_fields);
-            pipeline.set_pipeline_layout(pipeline_layout);
-            pipeline.set_depth_testing(false);
-            pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
-                polygon_mode: vk::PolygonMode::FILL,
-                cull_mode: vk::CullModeFlags::NONE,
-                front_face: vk::FrontFace::COUNTER_CLOCKWISE,
-                line_width: 1.0,
-                ..Default::default()
-            });
-            pipeline.blending(
-                &vk::PipelineColorBlendAttachmentState {
-                    blend_enable: 1,
-                    src_color_blend_factor: vk::BlendFactor::SRC_ALPHA,
-                    dst_color_blend_factor: vk::BlendFactor::ONE_MINUS_SRC_ALPHA,
-                    src_alpha_blend_factor: vk::BlendFactor::ZERO,
-                    dst_alpha_blend_factor: vk::BlendFactor::ONE,
-                    ..Default::default()
-                },
-                &vk::PipelineColorBlendStateCreateInfo {
-                    attachment_count: 1,
-                    ..Default::default()
-                }
-            );
-    
-            let info = &core.info;
-            pipeline.set_sample_count(info.sample_count);
-            pipeline.set_color_attachment_format(info.color_format);
-            pipeline.set_depth_attachment_format(info.depth_format);
-        }
-
-        Ok(())
-    }
-
-    fn setup_vertex_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let vertex_capacity = 500;
-        let index_capacity = 1000;
-        self.data.vertex_alloc = VertexAlloc::new(core, index_capacity, vertex_capacity)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create vertex alloc: {err}") )?;
-
-        Ok(())
-    }
-
-    fn setup_descriptors(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        use loomz_engine_core::descriptors::DescriptorsAllocation;
-        
-        let allocations = [
-            DescriptorsAllocation {
-                layout: self.resources.batch_layout,
-                binding_types: &[vk::DescriptorType::COMBINED_IMAGE_SAMPLER],
-                count: 1,
-            },
-        ];
-
-        self.descriptors.default_sampler = core.resources.linear_sampler;
-        self.descriptors.allocator = DescriptorsAllocator::new(core, &allocations)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to prellocate descriptor sets") )?;
-
-        Ok(())
-    }
-
-    fn setup_render_data(&mut self) {
-        let render = &mut self.render;
-
-        render.pipeline_layout = self.resources.pipeline_layout;
-        render.vertex_buffer = self.data.vertex_alloc.buffer;
-        render.index_offset = self.data.vertex_alloc.index_offset();
-        render.vertex_offset = self.data.vertex_alloc.vertex_offset();
-    }
-
 }
 
-struct GuiBatcher<'a> {
-    core: &'a mut LoomzEngineCore,
-    data: &'a mut GuiData,
-    descriptors: &'a mut GuiDescriptor,
-    batches: &'a mut Vec<GuiBatch>,
-    current_view: vk::ImageView,
-    text_index: usize,
-    batch_index: usize,
-    index_count: isize,
-    vertex_count: u32,
-}
-
-impl<'a> GuiBatcher<'a> {
-
-    fn build(gui: &mut GuiModule, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let mut batcher = GuiBatcher {
-            core,
-            current_view: vk::ImageView::null(),
-            data: &mut gui.data,
-            descriptors: &mut gui.descriptors,
-            batches: &mut gui.batches,
-            text_index: 0,
-            batch_index: 0,
-            index_count: 0,
-            vertex_count: 0,
-        };
-        batcher.descriptors.reset_batch_layout();
-        batcher.batches.clear();
-
-        batcher.first_batch()?;
-        batcher.remaining_batches()?;
-        batcher.upload_vertex();
-
-        Ok(())
+impl GuiDescriptor {
+    pub fn write_batch_texture(&mut self, image_view: vk::ImageView) -> Result<vk::DescriptorSet, CommonError> {
+        self.allocator.write_set::<BATCH_LAYOUT_INDEX>(&[
+            DescriptorWriteBinding::from_image_and_sampler(image_view, self.default_sampler, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
+        ])
     }
 
-    fn first_batch(&mut self) -> Result<(), CommonError> {
-        let mut found = false;
-        let max_instance = self.data.text.len();
-        while !found && self.text_index != max_instance {
-            let text = &self.data.text[self.text_index];
-            let font_view = text.font_view;
-            let index_count = (text.glyphs.len() * 6) as u32;
-            if index_count == 0 || font_view.is_null() {
-                self.text_index += 1;
-                continue;
-            }
-
-            self.next_batch(font_view)?;
-            self.write_text_indices();
-            self.write_text_vertex();
-
-            self.text_index += 1;
-            found = true;
-        }
-
-        Ok(())
-    }
-
-    fn remaining_batches(&mut self) -> Result<(), CommonError> {
-        let max_instance = self.data.text.len();
-        while self.text_index != max_instance {
-            let text = &self.data.text[self.text_index];
-            let font_view = text.font_view;
-            let index_count = (text.glyphs.len() * 6) as u32;
-            if index_count == 0 || font_view.is_null() {
-                self.text_index += 1;
-                continue;
-            }
-
-            if self.current_view != font_view {
-                self.next_batch(font_view)?;
-                self.batch_index += 1;
-            }
-
-            self.write_text_indices();
-            self.write_text_vertex();
-
-            self.text_index += 1;
-        }
-
-        Ok(())
-    }
-
-    fn next_batch(&mut self, font_view: vk::ImageView) -> Result<(), CommonError> {
-        let set = self.descriptors.write_batch_texture(font_view)?;
-
-        self.current_view = font_view;
-
-        self.batches.push(GuiBatch {
-            set,
-            first_index: self.index_count as u32,
-            index_count: 0,
-        });
-
-        Ok(())
-    }
-
-    fn write_text_indices(&mut self) {
-        let glyph_count = self.data.text[self.text_index].glyphs.len() as isize;
-        let index_count = glyph_count * 6;
-
-        // Safety, indices capacity will be greater than written range
-        let mut i = self.index_count;
-        let mut v = self.vertex_count;
-        assert!(i + index_count < self.data.indices.len() as isize);
-
-        unsafe {
-            for _ in 0..glyph_count {
-                let indices = self.data.indices.as_mut_ptr();
-                indices.offset(i+0).write(v+0);
-                indices.offset(i+1).write(v+1);
-                indices.offset(i+2).write(v+2);
-                indices.offset(i+3).write(v+2);
-                indices.offset(i+4).write(v+3);
-                indices.offset(i+5).write(v+1);
-
-                i += 6;
-                v += 4;
-            }
-        }
-
-        self.index_count += index_count;
-        self.batches[self.batch_index].index_count += index_count as u32;
-    }
-
-    fn write_text_vertex(&mut self) {
-        let glyphs = &self.data.text[self.text_index].glyphs;
-        let glyph_count = glyphs.len() as isize;
-        let vertex_count = glyph_count * 4;
-
-        // Safety, vertex capacity will be greater than written range
-        let mut v = self.vertex_count as isize;
-        assert!(v + vertex_count < self.data.vertex.len() as isize);
-
-        unsafe {
-            let vertex = self.data.vertex.as_mut_ptr();            
-            for glyph in glyphs {
-                let [x1, y1, x2, y2] = glyph.position.splat();
-                let [x3, y3, x4, y4] = glyph.texcoord.splat();
-                vertex.offset(v+0).write(GuiVertex { pos: [x1, y1], uv: [x3, y3] });
-                vertex.offset(v+1).write(GuiVertex { pos: [x2, y1], uv: [x4, y3] });
-                vertex.offset(v+2).write(GuiVertex { pos: [x1, y2], uv: [x3, y4] });
-                vertex.offset(v+3).write(GuiVertex { pos: [x2, y2], uv: [x4, y4] });
-                v += 4;
-            }
-        }
-
-        self.vertex_count += vertex_count as u32;
-    }
-
-    fn upload_vertex(&mut self) {
-        let i = self.index_count as usize;
-        let v = self.vertex_count as usize;
-        self.data.vertex_alloc.set_data(
-            self.core,
-            &self.data.indices[0..i],
-            &self.data.vertex[0..v],
-        );
+    pub fn reset_batch_layout(&mut self) {
+        self.allocator.reset_layout::<BATCH_LAYOUT_INDEX>();
     }
 }
