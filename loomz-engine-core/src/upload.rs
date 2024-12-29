@@ -29,11 +29,10 @@ pub(crate) fn upload(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
 }
 
 fn clear_data(staging: &mut VulkanStaging) {
-    staging.vertex_buffer_copies.clear();
     staging.image_barrier_prepare.clear();
     staging.image_barrier_final.clear();
-    staging.image_copies.clear();
-    staging.upload_offset = 0;
+    staging.vertex_buffer_copies.clear();
+    staging.image_copies.clear();    
 }
 
 fn begin_record(device: &vk::wrapper::Device, cmd: vk::CommandBuffer) -> Result<(), CommonError> {

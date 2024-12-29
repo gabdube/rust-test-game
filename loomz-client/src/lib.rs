@@ -128,8 +128,6 @@ impl LoomzClient {
                 self.api.gui().update_gui(&self.main_menu);
             }
         }
-
-        //self.state = GameState::Gameplay;
     }
 
     fn gameplay(&mut self) -> Result<(), CommonError> {

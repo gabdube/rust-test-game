@@ -11,11 +11,14 @@ pub(crate) struct StagingImageCopy {
 pub struct VulkanStaging {
     pub(crate) memory: vk::DeviceMemory,
     pub(crate) buffer: vk::Buffer,
-    pub(crate) mapped_data: Option<*mut u8>,
-    pub(crate) upload_offset: vk::DeviceSize,
     pub(crate) buffer_capacity: vk::DeviceSize,
-    pub(crate) upload_command_buffer: vk::CommandBuffer,
 
+    pub(crate) write: vk::DeviceSize,      // Index to write new staging data
+    pub(crate) read: vk::DeviceSize,        // Data currently being copied to the GPU
+    pub(crate) start: vk::DeviceSize,       // Freed data
+    pub(crate) mapped_data: Option<*mut u8>,
+
+    pub(crate) upload_command_buffer: vk::CommandBuffer,
     pub(crate) vertex_buffer_copies: Vec<StagingBufferCopy>,
 
     pub(crate) image_barrier_prepare: Vec<vk::ImageMemoryBarrier2>,
@@ -42,10 +45,12 @@ impl VulkanStaging {
             None => unreachable!("mapped_data must always be mapped at runtime")
         };
 
-        let offset_bytes = crate::helpers::pad_device(self.upload_offset, align as _);
+        let offset_bytes = crate::helpers::pad_device(self.write, align as _);
         let size_bytes = (data.len() * size_of::<T>()) as vk::DeviceSize;
 
         if offset_bytes+size_bytes > self.buffer_capacity {
+            // TODO cycle buffer
+            // If not data is uploaded for two frame, the buffer offsets are reset in prepare_recording
             Self::not_enough_space_error();
             return 0;
         }
@@ -54,12 +59,12 @@ impl VulkanStaging {
             let dst_offset = data_ptr.offset(offset_bytes as _);
             let (_, data_aligned, _) = data.align_to::<u8>();
 
-            //println!("Copying {} bytes at {} with alignment {}. Next offset: {}", size_bytes, offset_bytes, align, offset_bytes + size_bytes);
+            // println!("Copying {} bytes at {} with alignment {}. Next offset: {}", size_bytes, offset_bytes, align, offset_bytes + size_bytes);
 
             ::std::ptr::copy_nonoverlapping::<u8>(data_aligned.as_ptr(), dst_offset, size_bytes as usize);
         }
 
-        self.upload_offset = offset_bytes + size_bytes;
+        self.write = offset_bytes + size_bytes;
 
         offset_bytes
     }
@@ -83,7 +88,9 @@ impl Default for VulkanStaging {
             memory: vk::DeviceMemory::null(),
             buffer: vk::Buffer::null(),
             mapped_data: None,
-            upload_offset: 0,
+            write: 0,
+            read: 0,
+            start: 0,
             buffer_capacity: 0,
             upload_command_buffer: vk::CommandBuffer::null(),
             vertex_buffer_copies: Vec::with_capacity(16),

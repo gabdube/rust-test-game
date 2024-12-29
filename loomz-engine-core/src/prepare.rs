@@ -77,6 +77,14 @@ fn prepare_recording(engine: &mut LoomzEngineCore, image_index: u32) {
     let staging = &mut engine.staging;
     staging.upload_command_buffer = resources.upload_command_buffers[0];
 
+    staging.start = staging.read;
+    staging.read = staging.write;
+    if staging.start == staging.write {
+        staging.start = 0;
+        staging.read = 0;
+        staging.write = 0;
+    }
+
     // Recording
     let recording = &mut engine.recording;
     recording.drawing_command_buffer = resources.drawing_command_buffers[0];
