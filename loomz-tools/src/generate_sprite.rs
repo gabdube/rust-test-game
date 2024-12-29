@@ -219,6 +219,17 @@ fn prepare_actor_dst<P>(actor: &mut Actor) {
         dst_height += animation.dst_sprite_size.height + PADDING_PX;
     }
 
+    let align = 16;
+    let mut rm = dst_width % 16;
+    if rm != 0 {
+        dst_width = (dst_width - rm) + align;
+    }
+
+    rm = dst_height % 16;
+    if rm != 0 {
+        dst_height = (dst_height - rm) + align;
+    }
+
     actor.dst_image_info = actor.src_image_info.clone();
     actor.dst_image_info.width = dst_width;
     actor.dst_image_info.height = dst_height;

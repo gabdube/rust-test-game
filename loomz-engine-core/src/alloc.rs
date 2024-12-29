@@ -228,7 +228,8 @@ impl<V: Copy> VertexAlloc<V> {
     }
 
     pub fn vertex_offset(&self) -> [vk::DeviceSize; 1] {
-       [(self.index_capacity as vk::DeviceSize) * (size_of::<u32>() as vk::DeviceSize)]
+        let index_size_bytes = (self.index_capacity as vk::DeviceSize) * (size_of::<u32>() as vk::DeviceSize);
+        [index_size_bytes]
     } 
 
     pub fn set_data(&self, core: &mut LoomzEngineCore, index: &[u32], vertex: &[V]) {

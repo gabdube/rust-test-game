@@ -113,6 +113,22 @@ impl LoomzClient {
     }
 
     fn main_menu(&mut self) {
+        if let Some(new_input) = self.api.read_inputs() {
+            if let Some(new_size) = new_input.screen_size() {
+                let view = loomz_shared::RectF32{ 
+                    left: 0.0, right: new_size.width,
+                    top: 0.0, bottom: new_size.height,
+                };
+                self.main_menu.build(&self.api, &view, |gui| {
+                    gui.font_style("default", "roboto", 50.0);
+                    gui.font("default");
+                    gui.label("Hello World!");
+                });
+
+                self.api.gui().update_gui(&self.main_menu);
+            }
+        }
+
         //self.state = GameState::Gameplay;
     }
 
@@ -193,6 +209,8 @@ impl LoomzClient {
             gui.font("default");
             gui.label("Hello World!");
         });
+
+        self.api.gui().update_gui(&self.main_menu);
     }
 
 }

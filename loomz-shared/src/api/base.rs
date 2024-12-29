@@ -145,13 +145,15 @@ pub struct MessageQueueEx<ID, T> {
 
 impl<ID: Clone, T> MessageQueueEx<ID, T> {
 
-    pub fn with_capacity(cap_message: usize, cap_data: usize) -> Self {
+    /// Creates a new extended queue with a capacity of `cap_message` size
+    /// and a capacity of `cap_data_bytes` of extra data
+    pub fn with_capacity(cap_message: usize, cap_data_bytes: usize) -> Self {
         let mut buffer = Vec::with_capacity(cap_message);
         for _ in 0..cap_message {
             buffer.push(None);
         }
 
-        let data = vec![0u8; cap_data];
+        let data = vec![0u8; cap_data_bytes];
 
         MessageQueueEx {
             inner: Mutex::new(InnerBufferEx {

@@ -69,7 +69,13 @@ pub const fn align_device(addr: vk::DeviceSize, align: vk::DeviceSize) -> vk::De
 /// align DOES NOT need to be a power of 2
 #[inline]
 pub const fn pad_device(addr: vk::DeviceSize, align: vk::DeviceSize) -> vk::DeviceSize {
-    (addr - (addr % align)) + align
+    let remainder = addr % align;
+    if remainder > 0 {
+        (addr - remainder) + align
+    } else {
+        addr
+    }
+    
 }
 
 

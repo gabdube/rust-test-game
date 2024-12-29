@@ -35,6 +35,16 @@ impl RectF32 {
         [self.right - self.left, self.bottom - self.top]
     }
 
+    #[inline]
+    pub const fn translate_into(&self, x: f32, y: f32) -> Self {
+        RectF32 {
+            left: self.left + x,
+            top: self.top + y,
+            right: self.right + x,
+            bottom: self.bottom + y,
+        }
+    }
+
 }
 
 #[derive(Copy, Clone, Default, Debug)]

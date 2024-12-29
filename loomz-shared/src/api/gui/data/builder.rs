@@ -2,7 +2,6 @@ use fnv::FnvHashMap;
 
 use crate::base_types::PositionF32;
 use crate::assets::{MsdfFontId, msdf_font::ComputedGlyph};
-use crate::api::gui::GuiTextId;
 use crate::LoomzApi;
 use super::{Gui, component::*};
 
@@ -79,7 +78,6 @@ impl<'a> GuiBuilder<'a> {
         let view = super::GuiLayoutView { position: PositionF32::default(), size: component.size() };
 
         let compo = &mut self.gui.components;
-        compo.nodes.push(super::GuiNode { });
         compo.layouts.push(super::GuiLayout::default());
         compo.views.push(view);
         compo.types.push(GuiComponentType::Text(component));
@@ -103,7 +101,6 @@ fn build_text_component(
 ) -> GuiComponentText {
     use unicode_segmentation::UnicodeSegmentation;
 
-    let id = GuiTextId::new();
     let font_asset = api.assets_ref().font(font).unwrap();  // Font presence is validated by the builder
     let mut glyphs = Vec::with_capacity(text_value.len());
 
@@ -121,7 +118,6 @@ fn build_text_component(
 
     GuiComponentText {
         glyphs,
-        id,
         font,
     }
 }

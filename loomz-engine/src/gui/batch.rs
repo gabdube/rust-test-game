@@ -1,122 +1,41 @@
 use loomz_shared::CommonError;
-use loomz_engine_core::LoomzEngineCore;
-use super::{GuiModule, GuiBatch, GuiDescriptor, GuiData, GuiVertex};
+use loomz_engine_core::{alloc::VertexAlloc, LoomzEngineCore};
+use super::{GuiModule, GuiBatch, GuiDescriptor, GuiView, GuiViewSprite, GuiVertex};
 
-
-pub(super) struct GuiBatcher<'a> {
-    core: &'a mut LoomzEngineCore,
-    data: &'a mut GuiData,
+struct NextBatch<'a> {
     descriptors: &'a mut GuiDescriptor,
     batches: &'a mut Vec<GuiBatch>,
-    current_view: vk::ImageView,
-    text_index: usize,
-    batch_index: usize,
+    indices: &'a mut Vec<u32>,
+    vertex: &'a mut Vec<GuiVertex>,
     index_count: isize,
     vertex_count: u32,
 }
 
-impl<'a> GuiBatcher<'a> {
-
-    pub(super) fn build(gui: &mut GuiModule, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let mut batcher = GuiBatcher {
-            core,
-            current_view: vk::ImageView::null(),
-            data: &mut gui.data,
-            descriptors: &mut gui.descriptors,
-            batches: &mut gui.batches,
-            text_index: 0,
-            batch_index: 0,
-            index_count: 0,
-            vertex_count: 0,
-        };
-
-        batcher.descriptors.reset_batch_layout();
-        batcher.batches.clear();
-
-        batcher.first_batch()?;
-        batcher.remaining_batches()?;
-
-        if batcher.batches.len() > 0 {
-            batcher.upload_vertex();
-        }
-
-        Ok(())
-    }
-
-    fn first_batch(&mut self) -> Result<(), CommonError> {
-        let mut found = false;
-        let max_instance = self.data.text.len();
-        while !found && self.text_index != max_instance {
-            let text = &self.data.text[self.text_index];
-            let font_view = text.font_view;
-            let index_count = (text.glyphs.len() * 6) as u32;
-            if index_count == 0 || font_view.is_null() {
-                self.text_index += 1;
-                continue;
-            }
-
-            self.next_batch(font_view)?;
-            self.write_text_indices();
-            self.write_text_vertex();
-
-            self.text_index += 1;
-            found = true;
-        }
-
-        Ok(())
-    }
-
-    fn remaining_batches(&mut self) -> Result<(), CommonError> {
-        let max_instance = self.data.text.len();
-        while self.text_index != max_instance {
-            let text = &self.data.text[self.text_index];
-            let font_view = text.font_view;
-            let index_count = (text.glyphs.len() * 6) as u32;
-            if index_count == 0 || font_view.is_null() {
-                self.text_index += 1;
-                continue;
-            }
-
-            if self.current_view != font_view {
-                self.next_batch(font_view)?;
-                self.batch_index += 1;
-            }
-
-            self.write_text_indices();
-            self.write_text_vertex();
-
-            self.text_index += 1;
-        }
-
-        Ok(())
-    }
-
-    fn next_batch(&mut self, font_view: vk::ImageView) -> Result<(), CommonError> {
-        let set = self.descriptors.write_batch_texture(font_view)?;
-
-        self.current_view = font_view;
+impl<'a> NextBatch<'a> {
+    fn build_batch(&mut self, view: vk::ImageView, sprites_count: usize) -> Result<(), CommonError> {
+        let set = self.descriptors.write_batch_texture(view)?;
 
         self.batches.push(GuiBatch {
             set,
             first_index: self.index_count as u32,
-            index_count: 0,
+            index_count: (sprites_count * 6) as u32,
         });
 
         Ok(())
     }
 
-    fn write_text_indices(&mut self) {
-        let glyph_count = self.data.text[self.text_index].glyphs.len() as isize;
-        let index_count = glyph_count * 6;
-
-        // Safety, indices capacity will be greater than written range
+    fn generate_indices(&mut self, sprites: &[GuiViewSprite]) {
+        let sprite_count = sprites.len();
+        let index_count = (sprite_count * 6) as isize;
+        
+        // Safety, index buffer capacity will be greater than written range
         let mut i = self.index_count;
         let mut v = self.vertex_count;
-        assert!(i + index_count < self.data.indices.len() as isize);
+        assert!(i + index_count < self.indices.len() as isize);
 
         unsafe {
-            for _ in 0..glyph_count {
-                let indices = self.data.indices.as_mut_ptr();
+            for _ in 0..sprite_count {
+                let indices = self.indices.as_mut_ptr();
                 indices.offset(i+0).write(v+0);
                 indices.offset(i+1).write(v+1);
                 indices.offset(i+2).write(v+2);
@@ -128,25 +47,23 @@ impl<'a> GuiBatcher<'a> {
                 v += 4;
             }
         }
-
+    
         self.index_count += index_count;
-        self.batches[self.batch_index].index_count += index_count as u32;
     }
 
-    fn write_text_vertex(&mut self) {
-        let glyphs = &self.data.text[self.text_index].glyphs;
-        let glyph_count = glyphs.len() as isize;
-        let vertex_count = glyph_count * 4;
+    fn generate_vertex(&mut self, sprites: &[GuiViewSprite]) {
+        let sprite_count = sprites.len();
+        let vertex_count = (sprite_count * 4) as isize;
 
         // Safety, vertex capacity will be greater than written range
         let mut v = self.vertex_count as isize;
-        assert!(v + vertex_count < self.data.vertex.len() as isize);
+        assert!(v + vertex_count < self.vertex.len() as isize);
 
         unsafe {
-            let vertex = self.data.vertex.as_mut_ptr();            
-            for glyph in glyphs {
-                let [x1, y1, x2, y2] = glyph.position.splat();
-                let [x3, y3, x4, y4] = glyph.texcoord.splat();
+            let vertex = self.vertex.as_mut_ptr();            
+            for sprite_view in sprites {
+                let [x1, y1, x2, y2] = sprite_view.sprite.position.splat();
+                let [x3, y3, x4, y4] = sprite_view.sprite.texcoord.splat();
                 vertex.offset(v+0).write(GuiVertex { pos: [x1, y1], uv: [x3, y3] });
                 vertex.offset(v+1).write(GuiVertex { pos: [x2, y1], uv: [x4, y3] });
                 vertex.offset(v+2).write(GuiVertex { pos: [x1, y2], uv: [x3, y4] });
@@ -158,13 +75,73 @@ impl<'a> GuiBatcher<'a> {
         self.vertex_count += vertex_count as u32;
     }
 
-    fn upload_vertex(&mut self) {
+    fn upload_vertex(&mut self, core: &mut LoomzEngineCore, alloc: &mut VertexAlloc<GuiVertex>) {
         let i = self.index_count as usize;
         let v = self.vertex_count as usize;
-        self.data.vertex_alloc.set_data(
-            self.core,
-            &self.data.indices[0..i],
-            &self.data.vertex[0..v],
-        );
+        alloc.set_data(core, &self.indices[0..i], &self.vertex[0..v]);
     }
+}
+
+fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(vk::ImageView, &'a [GuiViewSprite])> {
+    let mut gui_index = 0;
+    let mut sprites_start = 0;
+    let mut sprites_stop = 0;
+
+    let mut current_view = gui.first()
+        .and_then(|gui| gui.sprites.first() )
+        .map(|sprite| sprite.image_view )
+        .unwrap_or(vk::ImageView::null());
+    
+    ::std::iter::from_fn(move || {
+        let gui = gui.get(gui_index)?;
+        let mut next_view = current_view;
+        loop {
+            if sprites_stop == gui.sprites.len() {
+                break;
+            }
+            
+            next_view = gui.sprites[sprites_stop].image_view;
+            if next_view != current_view {
+                break;
+            }
+
+            sprites_stop += 1;
+        }
+
+        let sprites = &gui.sprites[sprites_start..sprites_stop];
+        current_view = next_view;
+        sprites_start = sprites_stop;
+
+        if sprites_start == gui.sprites.len() {
+            gui_index += 1;
+            sprites_start = 0;
+            sprites_stop = 0;
+        }
+
+        Some((current_view, sprites))
+    })
+}
+
+pub(super) fn build(core: &mut LoomzEngineCore, gui_module: &mut GuiModule, ) -> Result<(), CommonError> {
+    gui_module.batches.clear();
+    gui_module.descriptors.reset_batch_layout();
+
+    let mut batcher = NextBatch {
+        descriptors: &mut gui_module.descriptors,
+        batches: &mut gui_module.batches,
+        indices: &mut gui_module.data.indices,
+        vertex: &mut gui_module.data.vertex,
+        index_count: 0,
+        vertex_count: 0,
+    };
+
+    for (image_view, sprites) in groups(&gui_module.data.gui) {
+        batcher.build_batch(image_view, sprites.len())?;
+        batcher.generate_indices(sprites);
+        batcher.generate_vertex(sprites);
+    }
+
+    batcher.upload_vertex(core, &mut gui_module.data.vertex_alloc);
+
+    Ok(())
 }

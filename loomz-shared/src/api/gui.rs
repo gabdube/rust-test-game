@@ -1,37 +1,46 @@
 mod data;
 pub use data::Gui;
 
-use crate::assets::{MsdfFontId, msdf_font::ComputedGlyph};
+use crate::base_types::RectF32;
+use crate::assets::MsdfFontId;
 use super::{Id, MessageQueueEx};
 
-pub struct GuiTextTag;
-pub type GuiTextId = Id<GuiTextTag>;
+pub struct GuiTag;
+pub type GuiId = Id<GuiTag>;
 
-pub enum GuiTextUpdate {
-    Font(MsdfFontId),
-    Glyphs(&'static [ComputedGlyph]),
+
+#[derive(Copy, Clone, Debug)]
+pub enum GuiSpriteType {
+    Font(MsdfFontId)
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct GuiSprite {
+    pub ty: GuiSpriteType,
+    pub position: RectF32,
+    pub texcoord: RectF32,
 }
 
 pub struct GuiApi {
-    text: MessageQueueEx<GuiTextId, GuiTextUpdate>
+    gui: MessageQueueEx<GuiId, &'static [GuiSprite]>
 }
 
 impl GuiApi {
     pub fn init() -> Self {
         GuiApi {
-            text: MessageQueueEx::with_capacity(16, 1024),
+            gui: MessageQueueEx::with_capacity(8, 5120),
         }
     }
 
-    pub fn update_text_font(&self, id: &GuiTextId, font: MsdfFontId) {
-        self.text.push(id, GuiTextUpdate::Font(font));
+    pub fn update_gui(&self, gui: &Gui) {
+        let id = gui.id();
+        let sprites = gui.sprites();
+        if sprites.len() > 0 {
+            self.gui.push_with_data(id, sprites, |sprites| sprites );
+        }
     }
 
-    pub fn update_text_glyphs(&self, id: &GuiTextId, glyphs: &[ComputedGlyph]) {        
-        self.text.push_with_data(id, glyphs, |glyphs| GuiTextUpdate::Glyphs(glyphs) );
-    }
-
-    pub fn text_updates<'a>(&'a self) -> Option<impl Iterator<Item = (GuiTextId, GuiTextUpdate)> + 'a> {
-        self.text.read_values()
+    pub fn gui_updates<'a>(&'a self) -> Option<impl Iterator<Item = (GuiId, &'static [GuiSprite])> + 'a> {
+        self.gui.read_values()
     }
 }

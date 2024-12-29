@@ -42,22 +42,26 @@ impl VulkanStaging {
             None => unreachable!("mapped_data must always be mapped at runtime")
         };
 
-        let offset = crate::helpers::pad_device(self.upload_offset, align as _);
+        let offset_bytes = crate::helpers::pad_device(self.upload_offset, align as _);
         let size_bytes = (data.len() * size_of::<T>()) as vk::DeviceSize;
 
-        if offset+size_bytes > self.buffer_capacity {
+        if offset_bytes+size_bytes > self.buffer_capacity {
             Self::not_enough_space_error();
             return 0;
         }
 
         unsafe {
-            let dst_offset = data_ptr.offset(offset as _);
-            ::std::ptr::copy_nonoverlapping(data.as_ptr(), dst_offset as *mut T, data.len());
+            let dst_offset = data_ptr.offset(offset_bytes as _);
+            let (_, data_aligned, _) = data.align_to::<u8>();
+
+            //println!("Copying {} bytes at {} with alignment {}. Next offset: {}", size_bytes, offset_bytes, align, offset_bytes + size_bytes);
+
+            ::std::ptr::copy_nonoverlapping::<u8>(data_aligned.as_ptr(), dst_offset, size_bytes as usize);
         }
 
-        self.upload_offset += size_bytes;
+        self.upload_offset = offset_bytes + size_bytes;
 
-        offset
+        offset_bytes
     }
 
     pub fn copy_data<T: Copy>(&mut self, data: &[T]) -> vk::DeviceSize {

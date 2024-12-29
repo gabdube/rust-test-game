@@ -3,8 +3,8 @@ mod batch;
 
 use fnv::FnvHashMap;
 use std::{slice, sync::Arc};
-use loomz_shared::api::{LoomzApi, GuiTextId, GuiTextUpdate};
-use loomz_shared::assets::{LoomzAssetsBundle, MsdfFontId, msdf_font::ComputedGlyph};
+use loomz_shared::api::{LoomzApi, GuiId, GuiSprite};
+use loomz_shared::assets::{LoomzAssetsBundle, MsdfFontId};
 use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{assets_err, chain_err};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
@@ -57,15 +57,19 @@ struct GuiRender {
     push_constants: [GuiPushConstant; 1],
 }
 
-struct GuiText {
-    font_id: Option<MsdfFontId>,
-    font_view: vk::ImageView,
-    glyphs: Vec<ComputedGlyph>,
+#[derive(Debug)]
+struct GuiViewSprite {
+    image_view: vk::ImageView,
+    sprite: GuiSprite
+}
+
+struct GuiView {
+    sprites: Vec<GuiViewSprite>,
 }
 
 struct GuiData {
     vertex_alloc: VertexAlloc<GuiVertex>,
-    text: Vec<GuiText>,
+    gui: Vec<GuiView>,
     indices: Vec<u32>,
     vertex: Vec<GuiVertex>,
 }
@@ -111,7 +115,7 @@ impl GuiModule {
 
         let data = GuiData {
             vertex_alloc: VertexAlloc::default(),
-            text: Vec::with_capacity(16),
+            gui: Vec::with_capacity(4),
             vertex: vec![GuiVertex::default(); 500],
             indices: vec![0; 1000]
         };
@@ -208,67 +212,51 @@ impl GuiModule {
     // Updates
     //
 
-    fn create_text(&mut self, text_id: GuiTextId) -> usize {
-        let id = self.data.text.len();
-        self.data.text.push(GuiText {
-            font_id: None,
-            font_view: vk::ImageView::null(),
-            glyphs: Vec::new(),
+    fn create_gui(&mut self, id: GuiId) -> usize {
+        let guis = &mut self.data.gui;
+        let next_id = guis.len();
+
+        guis.push(GuiView {
+            sprites: Vec::new(),
         });
 
-        text_id.bind(id as u32);
+        id.bind(next_id as u32);
 
-        id
+        next_id
     }
 
-    fn update_text_font(&mut self, core: &mut LoomzEngineCore, text_index: usize, font: MsdfFontId) -> Result<(), CommonError> {
-        let old_font_id = self.data.text[text_index].font_id;
-        if old_font_id != Some(font) {
-            let font_view = self.fetch_font_texture_view(core, font)?;
-            self.data.text[text_index].font_id = Some(font);
-            self.data.text[text_index].font_view = font_view;
-            self.update_batches = true;
-        }
-        Ok(())
-    }
+    fn update_gui<'a>(&mut self, core: &mut LoomzEngineCore, index: usize, sprites: &'a [GuiSprite]) -> Result<(), CommonError> {
+        let gui = &mut self.data.gui[index];
+        gui.sprites.clear();
 
-    fn update_text_glyphs(&mut self, text_index: usize, glyphs: &'static [ComputedGlyph]) {
-        let text = &mut self.data.text[text_index];
-        text.glyphs.clear();
-
-        if text.glyphs.capacity() < glyphs.len() {
-            text.glyphs.reserve(glyphs.len());
+        if gui.sprites.capacity() < sprites.len() {
+            gui.sprites.reserve(sprites.len());
         }
 
-        for &glyph in glyphs {
-            text.glyphs.push(glyph);
+        for &sprite in sprites.iter() {
+            let image_view = match sprite.ty {
+                loomz_shared::GuiSpriteType::Font(font_id) => Self::fetch_font_texture_view(core, &mut self.resources, font_id)?
+            };
+
+            gui.sprites.push(GuiViewSprite {
+                image_view,
+                sprite
+            });
         }
 
+        gui.sprites.sort_unstable();
         self.update_batches = true;
-    }
-
-    fn update_text(&mut self, core: &mut LoomzEngineCore, text_index: usize, update: GuiTextUpdate) -> Result<(), CommonError> {
-        match update {
-            GuiTextUpdate::Font(font) => {
-                self.update_text_font(core, text_index, font)?;
-            },
-            GuiTextUpdate::Glyphs(glyphs) => {
-                self.update_text_glyphs(text_index, glyphs);
-            }
-        }
 
         Ok(())
     }
 
     fn api_update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        if let Some(updates) = api.gui().text_updates() {
-            for (id, update) in updates {
-                let index = match id.bound_value() {
-                    Some(index) => index,
-                    None => self.create_text(id),
-                };
+        if let Some(updates) = api.gui().gui_updates() {
+            for (id, sprites) in updates {
+                let index = id.bound_value()
+                    .unwrap_or_else(|| self.create_gui(id) );
 
-                self.update_text(core, index, update)?;
+                self.update_gui(core, index, sprites)?;
             }
         }
 
@@ -279,7 +267,7 @@ impl GuiModule {
         self.api_update(api, core)?;
 
         if self.update_batches {
-            batch::GuiBatcher::build(self, core)?;
+            batch::build(core, self)?;
             self.update_batches = false;
         }
 
@@ -290,18 +278,18 @@ impl GuiModule {
     // Data
     //
 
-    fn fetch_font_texture_view(&mut self, core: &mut LoomzEngineCore, id: MsdfFontId) -> Result<vk::ImageView, CommonError> {
-        if let Some(texture) = self.resources.textures.get(&id) {
+    fn fetch_font_texture_view(core: &mut LoomzEngineCore, resources: &mut GuiResources, id: MsdfFontId) -> Result<vk::ImageView, CommonError> {
+        if let Some(texture) = resources.textures.get(&id) {
             return Ok(texture.view);
         }
 
-        let texture_asset = self.resources.assets.font(id)
+        let texture_asset = resources.assets.font(id)
             .ok_or_else(|| assets_err!("Unkown asset with ID {id:?}") )?;
 
         let texture = core.create_texture_from_font_asset(&texture_asset)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
 
-        self.resources.textures.insert(id, texture);
+        resources.textures.insert(id, texture);
 
         Ok(texture.view)
     }
@@ -317,5 +305,27 @@ impl GuiDescriptor {
 
     pub fn reset_batch_layout(&mut self) {
         self.allocator.reset_layout::<BATCH_LAYOUT_INDEX>();
+    }
+}
+
+impl PartialEq for GuiViewSprite {
+    fn eq(&self, other: &Self) -> bool {
+        self.image_view == other.image_view
+    }
+}
+
+impl Eq for GuiViewSprite {
+
+}
+
+impl PartialOrd for GuiViewSprite {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.image_view.partial_cmp(&other.image_view)
+    }
+}
+
+impl Ord for GuiViewSprite {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(&other).unwrap_or(std::cmp::Ordering::Equal)
     }
 }
