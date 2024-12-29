@@ -7,10 +7,9 @@ use layout::{GuiLayout, GuiLayoutView};
 mod builder;
 use builder::{GuiBuilder, GuiBuilderData};
 
-use crate::base_types::RectF32;
-use crate::{LoomzApi, api_err};
-use super::{GuiSprite, GuiSpriteType};
-
+use loomz_shared::base_types::RectF32;
+use loomz_shared::api::{LoomzApi, GuiId, GuiSprite, GuiSpriteType};
+use loomz_shared::{CommonError, client_err};
 
 struct GuiComponents {
     base_view: RectF32,
@@ -21,13 +20,13 @@ struct GuiComponents {
 }
 
 pub struct Gui {
-    id: super::GuiId,
+    id: GuiId,
     builder_data: Box<GuiBuilderData>,
     components: Box<GuiComponents>,
 }
 
 impl Gui {
-    pub fn build<F: FnOnce(&mut GuiBuilder)>(&mut self, api: &LoomzApi, view: &RectF32, cb: F) -> Result<(), crate::CommonError> {
+    pub fn build<F: FnOnce(&mut GuiBuilder)>(&mut self, api: &LoomzApi, view: &RectF32, cb: F) -> Result<(), CommonError> {
         self.components.base_view = *view;
         self.clear();
         
@@ -35,7 +34,7 @@ impl Gui {
         cb(&mut builder);
         
         if self.builder_data.errors.len() > 0 {
-            let mut error_base = api_err!("Failed to build Gui");
+            let mut error_base = client_err!("Failed to build Gui");
             for error in self.builder_data.errors.drain(..) {
                 error_base.merge(error);
             }
@@ -53,12 +52,8 @@ impl Gui {
         self.compute_layout();
     }
 
-    pub(super) fn id(&self) -> &super::GuiId {
-        &self.id
-    }
-
-    pub(super) fn sprites(&self) -> &[GuiSprite] {
-        &self.components.sprites
+    pub fn sync_with_engine(&self, api: &LoomzApi) {
+        api.gui().update_gui(&self.id, &self.components.sprites);
     }
 
     fn compute_layout(&mut self) {
@@ -88,7 +83,7 @@ impl Gui {
 impl Default for Gui {
     fn default() -> Self {
         Gui {
-            id: super::GuiId::default(),
+            id: GuiId::default(),
             builder_data: Box::default(),
             components: Box::new(GuiComponents {
                 base_view: RectF32::default(),

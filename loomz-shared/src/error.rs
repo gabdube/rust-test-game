@@ -13,6 +13,7 @@ pub enum CommonErrorType {
     RenderRecord,
     RenderPresent,
     SaveLoad,
+    Client,
 }
 
 impl ::std::fmt::Display for CommonErrorType {
@@ -29,6 +30,7 @@ impl ::std::fmt::Display for CommonErrorType {
             CommonErrorType::RenderRecord => "Rendering command recording",
             CommonErrorType::RenderPresent => "Rendering presentation",
             CommonErrorType::SaveLoad => "Save & Load",
+            CommonErrorType::Client => "Client",
         })
     }
 }
@@ -153,3 +155,6 @@ macro_rules! present_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorTy
 
 #[macro_export]
 macro_rules! save_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::SaveLoad, $($arg)*) }; }
+
+#[macro_export]
+macro_rules! client_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::Client, $($arg)*) }; }

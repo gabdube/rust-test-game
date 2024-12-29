@@ -1,4 +1,4 @@
-use crate::base_types::{PositionF32, SizeF32};
+use loomz_shared::base_types::{PositionF32, SizeF32};
 
 #[derive(Copy, Clone, Default)]
 pub struct GuiLayout {

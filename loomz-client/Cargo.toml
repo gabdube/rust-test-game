@@ -11,5 +11,8 @@ default = []
 hot-reload = []
 
 [dependencies]
-loomz-shared = { path = "../loomz-shared" }
+unicode-segmentation = "1.12"
 serde_json = "1.0"
+fnv = "1.0.3"
+
+loomz-shared = { path = "../loomz-shared" }

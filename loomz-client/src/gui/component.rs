@@ -1,6 +1,6 @@
-use crate::assets::MsdfFontId;
-use crate::assets::msdf_font::ComputedGlyph;
-use crate::base_types::SizeF32;
+use loomz_shared::base_types::SizeF32;
+use loomz_shared::assets::MsdfFontId;
+use loomz_shared::assets::msdf_font::ComputedGlyph;
 use super::{GuiLayoutView, GuiSprite, GuiSpriteType};
 
 pub struct GuiComponentText {

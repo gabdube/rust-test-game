@@ -1,8 +1,8 @@
 use fnv::FnvHashMap;
 
-use crate::base_types::PositionF32;
-use crate::assets::{MsdfFontId, msdf_font::ComputedGlyph};
-use crate::{LoomzApi, assets_err};
+use loomz_shared::base_types::PositionF32;
+use loomz_shared::assets::{MsdfFontId, msdf_font::ComputedGlyph};
+use loomz_shared::{LoomzApi, assets_err};
 use super::{Gui, component::*};
 
 pub(super) struct GuiFontStyle {

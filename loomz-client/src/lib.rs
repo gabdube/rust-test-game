@@ -1,11 +1,12 @@
 mod store;
+mod gui;
 
 mod animations;
 use animations::{Animations, PawnAnimationType};
 
 use std::time::Instant;
 use loomz_shared::base_types::{PositionF32, PositionF64};
-use loomz_shared::api::{WorldActorId, Gui};
+use loomz_shared::api::{WorldActorId};
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
 
@@ -38,7 +39,7 @@ pub struct LoomzClient {
     player: Player,
     target_position: PositionF32,
 
-    main_menu: Gui,
+    main_menu: gui::Gui,
 
     state: GameState,
 }
@@ -59,7 +60,7 @@ impl LoomzClient {
             player: Player::default(),
             target_position: PositionF32::default(),
 
-            main_menu: Gui::default(),
+            main_menu: gui::Gui::default(),
 
             state: GameState::Uninitialized,
         };
@@ -178,7 +179,7 @@ impl LoomzClient {
             top: 0.0, bottom: new_size.height,
         };
         self.main_menu.resize(&view);
-        self.api.gui().update_gui(&self.main_menu);
+        self.main_menu.sync_with_engine(&self.api);
     }
 
     fn init_player(&mut self) {
@@ -215,7 +216,7 @@ impl LoomzClient {
             gui.label("Exit");
         })?;
 
-        self.api.gui().update_gui(&self.main_menu);
+        self.main_menu.sync_with_engine(&self.api);
 
         Ok(())
     }

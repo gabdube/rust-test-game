@@ -1,6 +1,3 @@
-mod data;
-pub use data::Gui;
-
 use crate::base_types::RectF32;
 use crate::assets::MsdfFontId;
 use super::{Id, MessageQueueEx};
@@ -32,9 +29,7 @@ impl GuiApi {
         }
     }
 
-    pub fn update_gui(&self, gui: &Gui) {
-        let id = gui.id();
-        let sprites = gui.sprites();
+    pub fn update_gui(&self, id: &GuiId, sprites: &[GuiSprite]) {
         if sprites.len() > 0 {
             self.gui.push_with_data(id, sprites, |sprites| sprites );
         }
