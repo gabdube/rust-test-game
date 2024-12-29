@@ -107,7 +107,7 @@ impl LoomzClient {
 
     fn uninitialized(&mut self) -> Result<(), CommonError> {
         self.init_player();
-        self.init_main_menu();
+        self.init_main_menu()?;
         self.state = GameState::MainMenu;
         Ok(())
     }
@@ -115,25 +115,21 @@ impl LoomzClient {
     fn main_menu(&mut self) {
         if let Some(new_input) = self.api.read_inputs() {
             if let Some(new_size) = new_input.screen_size() {
-                let view = loomz_shared::RectF32{ 
-                    left: 0.0, right: new_size.width,
-                    top: 0.0, bottom: new_size.height,
-                };
-                self.main_menu.build(&self.api, &view, |gui| {
-                    gui.font_style("default", "roboto", 50.0);
-                    gui.font("default");
-                    gui.label("Hello World!");
-                });
-
-                self.api.gui().update_gui(&self.main_menu);
+                self.resize_gui(new_size);
             }
         }
+
+        //self.state = GameState::Gameplay;
     }
 
     fn gameplay(&mut self) -> Result<(), CommonError> {
         if let Some(new_input) = self.api.read_inputs() {
             if let Some(cursor_position) = new_input.cursor_position() {
                 self.on_cursor_moved(cursor_position);
+            }
+
+            if let Some(new_size) = new_input.screen_size() {
+                self.resize_gui(new_size);
             }
         }
 
@@ -176,6 +172,15 @@ impl LoomzClient {
         self.target_position = position.as_f32();
     }
 
+    fn resize_gui(&mut self, new_size: ::loomz_shared::SizeF32) {
+        let view = loomz_shared::RectF32{ 
+            left: 0.0, right: new_size.width,
+            top: 0.0, bottom: new_size.height,
+        };
+        self.main_menu.resize(&view);
+        self.api.gui().update_gui(&self.main_menu);
+    }
+
     fn init_player(&mut self) {
         let start_position = PositionF32 { x: 100.0, y: 500.0 };
         let player = Player {
@@ -195,7 +200,7 @@ impl LoomzClient {
         self.target_position = start_position;
     }
 
-    fn init_main_menu(&mut self) {
+    fn init_main_menu(&mut self) -> Result<(), CommonError> {
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32{ 
             left: 0.0, right: screen_size.width,
@@ -203,12 +208,16 @@ impl LoomzClient {
         };
 
         self.main_menu.build(&self.api, &view, |gui| {
-            gui.font_style("default", "roboto", 50.0);
+            gui.font_style("default", "bubblegum", 100.0);
             gui.font("default");
-            gui.label("Hello World!");
-        });
+            gui.label("Start");
+            gui.label("Debug");
+            gui.label("Exit");
+        })?;
 
         self.api.gui().update_gui(&self.main_menu);
+
+        Ok(())
     }
 
 }

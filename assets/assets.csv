@@ -3,4 +3,4 @@ TEXTURE;101;pawn_blue;Pawn_Blue.ktx2;
 TEXTURE;102;warrior_blue;Warrior_Blue.ktx2;
 JSON;103;pawn_sprites;Pawn_Blue.json;
 JSON;104;warrior_sprites;Warrior_Blue.json;
-MSDF_FONT;105;roboto;roboto.png;roboto.bin;
+MSDF_FONT;105;bubblegum;BubblegumSans.png;BubblegumSans.bin;

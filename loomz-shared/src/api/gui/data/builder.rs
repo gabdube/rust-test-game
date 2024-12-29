@@ -2,7 +2,7 @@ use fnv::FnvHashMap;
 
 use crate::base_types::PositionF32;
 use crate::assets::{MsdfFontId, msdf_font::ComputedGlyph};
-use crate::LoomzApi;
+use crate::{LoomzApi, assets_err};
 use super::{Gui, component::*};
 
 pub(super) struct GuiFontStyle {
@@ -12,6 +12,7 @@ pub(super) struct GuiFontStyle {
 
 #[derive(Default)]
 pub(super) struct GuiBuilderData {
+    pub errors: Vec<crate::CommonError>,
     pub font_styles: FnvHashMap<String, GuiFontStyle>,
     pub default_font: Option<MsdfFontId>,
     pub default_font_size: f32,
@@ -33,8 +34,8 @@ impl<'a> GuiBuilder<'a> {
 
         if gui.builder_data.default_font.is_none() {
             gui.builder_data.default_font = api.assets_ref()
-                .font_id_by_name("roboto")
-                .expect("Default font \"roboto\" not found")
+                .default_font_id()
+                .expect("No font found in application")
                 .into();
         }
 
@@ -47,14 +48,14 @@ impl<'a> GuiBuilder<'a> {
     }
 
     pub fn font_style(&mut self, style_key: &str, font_key: &str, font_size: f32) {
-        let font = self.api.assets_ref()
-            .font_id_by_name(font_key)
-            .expect("Font not found in assets");
-
-        self.gui.builder_data.font_styles.insert(style_key.to_string(), GuiFontStyle {
-            font,
-            font_size: font_size,
-        });
+        if let Some(font) = self.api.assets_ref().font_id_by_name(font_key) {
+            self.gui.builder_data.font_styles.insert(style_key.to_string(), GuiFontStyle {
+                font,
+                font_size: font_size,
+            });
+        } else {
+            self.gui.builder_data.errors.push(assets_err!("No font named {:?} in app", font_key));
+        }
     }
 
     pub fn font(&mut self, style_key: &str) {
@@ -64,6 +65,7 @@ impl<'a> GuiBuilder<'a> {
                 self.font_size = Some(style.font_size);
             },
             None => {
+                self.gui.builder_data.errors.push(assets_err!("No font style with key {:?} in builder", style_key));
                 self.font = None;
                 self.font_size = None;
             }
@@ -84,7 +86,10 @@ impl<'a> GuiBuilder<'a> {
     }
 
     fn get_font(&self) -> MsdfFontId {
-        self.font.or_else(|| self.gui.builder_data.default_font ).expect("Default for was not set")
+        match self.font.or_else(|| self.gui.builder_data.default_font ) {
+            Some(font) => font,
+            None => unreachable!("Default font must always be set")
+        }
     }
 
     fn get_font_size(&self) -> f32 {

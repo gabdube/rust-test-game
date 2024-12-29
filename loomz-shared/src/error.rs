@@ -6,6 +6,7 @@ pub enum CommonErrorType {
     Unimplemented,
     System,
     Assets,
+    Api,
     BackendInit,
     BackendGeneric,
     Synchronize,
@@ -21,6 +22,7 @@ impl ::std::fmt::Display for CommonErrorType {
             CommonErrorType::Unimplemented => "Unimplemented",
             CommonErrorType::System => "System",
             CommonErrorType::Assets => "Assets",
+            CommonErrorType::Api => "Api",
             CommonErrorType::BackendInit => "Backend initialization",
             CommonErrorType::BackendGeneric => "Backend generic error",
             CommonErrorType::Synchronize => "Gpu synchronisation",
@@ -127,6 +129,9 @@ macro_rules! unimplemented_err { ($($arg:tt)*) => { $crate::err!($crate::CommonE
 
 #[macro_export]
 macro_rules! system_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::System, $($arg)*) }; }
+
+#[macro_export]
+macro_rules! api_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::Api, $($arg)*) }; }
 
 #[macro_export]
 macro_rules! assets_err { ($($arg:tt)*) => { $crate::err!($crate::CommonErrorType::Assets, $($arg)*) }; }

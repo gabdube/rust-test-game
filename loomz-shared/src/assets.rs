@@ -109,6 +109,10 @@ impl LoomzAssetsBundle {
         self.msdf_fonts.get(&id)
     }
 
+    pub fn default_font_id(&self) -> Option<MsdfFontId> {
+        self.msdf_fonts.keys().next().copied()
+    }
+
     fn split_csv<CB: FnMut(&[&str])>(csv: &str, mut cb: CB) {
         let mut start = 0;
         let mut end = 0;

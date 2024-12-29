@@ -8,7 +8,7 @@ mod builder;
 use builder::{GuiBuilder, GuiBuilderData};
 
 use crate::base_types::RectF32;
-use crate::LoomzApi;
+use crate::{LoomzApi, api_err};
 use super::{GuiSprite, GuiSpriteType};
 
 
@@ -27,17 +27,33 @@ pub struct Gui {
 }
 
 impl Gui {
-    pub fn build<F: FnOnce(&mut GuiBuilder)>(&mut self, api: &LoomzApi, view: &RectF32, cb: F) {
+    pub fn build<F: FnOnce(&mut GuiBuilder)>(&mut self, api: &LoomzApi, view: &RectF32, cb: F) -> Result<(), crate::CommonError> {
         self.components.base_view = *view;
         self.clear();
         
         let mut builder = GuiBuilder::new(api, self);
         cb(&mut builder);
         
+        if self.builder_data.errors.len() > 0 {
+            let mut error_base = api_err!("Failed to build Gui");
+            for error in self.builder_data.errors.drain(..) {
+                error_base.merge(error);
+            }
+
+            return Err(error_base);
+        }
+
+        self.compute_layout();
+
+        Ok(())
+    }
+
+    pub fn resize(&mut self, view: &RectF32) {
+        self.components.base_view = *view;
         self.compute_layout();
     }
 
-    pub fn id(&self) -> &super::GuiId {
+    pub(super) fn id(&self) -> &super::GuiId {
         &self.id
     }
 

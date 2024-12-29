@@ -26,7 +26,7 @@ void main() {
     vec4 texcoord = data.texture_coordinates;
     outUv = vec2(
         texcoord.x + (inPos.x * texcoord.z),  
-        max(texcoord.y + (inPos.y * texcoord.w), 1.0) // Intel drivers cause artifacts if uv.y is < 1.0
+        texcoord.y + (inPos.y * texcoord.w)
     );
 
     vec4 positions = (data.position / vec4(screen_width, screen_height, screen_width, screen_height)) * 2.0;

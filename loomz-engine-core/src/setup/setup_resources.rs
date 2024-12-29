@@ -49,9 +49,9 @@ fn max_sample(ctx: &VulkanContext) -> vk::SampleCountFlags {
     let samples = [
         vk::SampleCountFlags::TYPE_1,
         vk::SampleCountFlags::TYPE_2,
-        vk::SampleCountFlags::TYPE_4,
-        vk::SampleCountFlags::TYPE_8,
-        vk::SampleCountFlags::TYPE_16,
+        // vk::SampleCountFlags::TYPE_4,
+        // vk::SampleCountFlags::TYPE_8,
+        // vk::SampleCountFlags::TYPE_16,
     ];
 
     let limits = ctx.instance.instance.get_physical_device_properties(ctx.device.physical_device).limits;
