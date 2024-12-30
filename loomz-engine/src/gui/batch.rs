@@ -1,4 +1,5 @@
 use loomz_shared::CommonError;
+use loomz_shared::api::GuiSpriteType;
 use loomz_engine_core::{alloc::VertexAlloc, LoomzEngineCore};
 use super::{GuiModule, GuiBatch, GuiDescriptor, GuiView, GuiViewSprite, GuiVertex};
 
@@ -7,15 +8,22 @@ struct NextBatch<'a> {
     batches: &'a mut Vec<GuiBatch>,
     indices: &'a mut Vec<u32>,
     vertex: &'a mut Vec<GuiVertex>,
+    text_pipeline: vk::Pipeline,
+    image_pipeline: vk::Pipeline,
     index_count: isize,
     vertex_count: u32,
 }
 
 impl<'a> NextBatch<'a> {
-    fn build_batch(&mut self, view: vk::ImageView, sprites_count: usize) -> Result<(), CommonError> {
+    fn build_batch(&mut self, sprite_type: GuiSpriteType, view: vk::ImageView, sprites_count: usize) -> Result<(), CommonError> {
         let set = self.descriptors.write_batch_texture(view)?;
+        let pipeline = match sprite_type {
+            GuiSpriteType::Font(_) => self.text_pipeline,
+            GuiSpriteType::Image(_) => self.image_pipeline,
+        };
 
         self.batches.push(GuiBatch {
+            pipeline,
             set,
             first_index: self.index_count as u32,
             index_count: (sprites_count * 6) as u32,
@@ -27,7 +35,7 @@ impl<'a> NextBatch<'a> {
     fn generate_indices(&mut self, sprites: &[GuiViewSprite]) {
         let sprite_count = sprites.len();
         let index_count = (sprite_count * 6) as isize;
-        
+
         // Safety, index buffer capacity will be greater than written range
         let mut i = self.index_count;
         let mut v = self.vertex_count;
@@ -82,34 +90,35 @@ impl<'a> NextBatch<'a> {
     }
 }
 
-fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(vk::ImageView, &'a [GuiViewSprite])> {
+fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(GuiSpriteType, vk::ImageView, &'a [GuiViewSprite])> {
     let mut gui_index = 0;
     let mut sprites_start = 0;
     let mut sprites_stop = 0;
 
-    let mut current_view = gui.first()
-        .and_then(|gui| gui.sprites.first() )
-        .map(|sprite| sprite.image_view )
-        .unwrap_or(vk::ImageView::null());
+    let first_sprite = gui.first().and_then(|gui| gui.sprites.first() );
+    let mut current_sprite_type = first_sprite.map(|sprite| sprite.sprite.ty );
     
     ::std::iter::from_fn(move || {
         let gui = gui.get(gui_index)?;
-        let mut next_view = current_view;
         loop {
             if sprites_stop == gui.sprites.len() {
                 break;
             }
-            
-            next_view = gui.sprites[sprites_stop].image_view;
-            if next_view != current_view {
+
+            let sprite_view = &gui.sprites[sprites_stop];
+            if Some(sprite_view.sprite.ty) != current_sprite_type {
                 break;
             }
 
             sprites_stop += 1;
         }
 
+        let view = gui.sprites[sprites_start].image_view;
+        let sprite_type = gui.sprites[sprites_start].sprite.ty;
         let sprites = &gui.sprites[sprites_start..sprites_stop];
-        current_view = next_view;
+        let value = (sprite_type, view, sprites);
+
+        current_sprite_type = Some(sprite_type);
         sprites_start = sprites_stop;
 
         if sprites_start == gui.sprites.len() {
@@ -118,7 +127,7 @@ fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(vk::ImageView, &'a [Gui
             sprites_stop = 0;
         }
 
-        Some((current_view, sprites))
+        Some(value)
     })
 }
 
@@ -131,12 +140,14 @@ pub(super) fn build(core: &mut LoomzEngineCore, gui_module: &mut GuiModule, ) ->
         batches: &mut gui_module.batches,
         indices: &mut gui_module.data.indices,
         vertex: &mut gui_module.data.vertex,
+        text_pipeline: gui_module.resources.text_pipeline.handle(),
+        image_pipeline: gui_module.resources.image_pipeline.handle(),
         index_count: 0,
         vertex_count: 0,
     };
 
-    for (image_view, sprites) in groups(&gui_module.data.gui) {
-        batcher.build_batch(image_view, sprites.len())?;
+    for (sprite_type, image_view, sprites) in groups(&gui_module.data.gui) {
+        batcher.build_batch(sprite_type, image_view, sprites.len())?;
         batcher.generate_indices(sprites);
         batcher.generate_vertex(sprites);
     }

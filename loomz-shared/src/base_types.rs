@@ -133,3 +133,11 @@ impl SizeF32 {
         [self.width, self.height]
     }
 }
+
+pub const fn rect(left: f32, top: f32, right: f32, bottom: f32) -> RectF32 {
+    RectF32 { left, top, right, bottom }
+}
+
+pub const fn size(width: f32, height: f32) -> SizeF32 {
+    SizeF32 { width, height }
+}

@@ -8,17 +8,17 @@ use crate::{assets_err, CommonError};
 
 const ASSET_METADATA_PATH: &'static str = "./assets/assets.csv";
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct TextureId(pub NonZeroU32);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct JsonId(pub NonZeroU32);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct MsdfFontId(pub NonZeroU32);
 
-#[derive(Copy, Clone)]
-enum AssetId {
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum AssetId {
     Texture(TextureId),
     Json(JsonId),
     MsdfFont(MsdfFontId),

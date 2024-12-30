@@ -1,19 +1,25 @@
 use fnv::FnvHashMap;
 
-use loomz_shared::base_types::PositionF32;
+use loomz_shared::base_types::{PositionF32, SizeF32, RectF32};
 use loomz_shared::assets::{MsdfFontId, msdf_font::ComputedGlyph};
-use loomz_shared::{LoomzApi, assets_err};
-use super::{Gui, component::*};
+use loomz_shared::{assets_err, LoomzApi, TextureId};
+use super::{Gui, component::*, layout::*};
 
 pub(super) struct GuiFontStyle {
     pub font: MsdfFontId,
     pub font_size: f32,
 }
 
+pub(super) struct GuiFrameStyle {
+    pub texture: TextureId,
+    pub region: RectF32,
+}
+
 #[derive(Default)]
 pub(super) struct GuiBuilderData {
     pub errors: Vec<crate::CommonError>,
-    pub font_styles: FnvHashMap<String, GuiFontStyle>,
+    pub font_styles: FnvHashMap<&'static str, GuiFontStyle>,
+    pub frame_styles: FnvHashMap<&'static str, GuiFrameStyle>,
     pub default_font: Option<MsdfFontId>,
     pub default_font_size: f32,
 }
@@ -21,8 +27,9 @@ pub(super) struct GuiBuilderData {
 pub struct GuiBuilder<'a> {
     api: &'a LoomzApi,
     gui: &'a mut Gui,
+    layout_index: usize,
     font: Option<MsdfFontId>,
-    font_size: Option<f32>,
+    font_size: f32,
 }
 
 impl<'a> GuiBuilder<'a> {
@@ -42,47 +49,120 @@ impl<'a> GuiBuilder<'a> {
         GuiBuilder {
             api,
             gui,
+            layout_index: 0,
             font: None,
-            font_size: None,
+            font_size: 0.0,
         }
     }
 
-    pub fn font_style(&mut self, style_key: &str, font_key: &str, font_size: f32) {
-        if let Some(font) = self.api.assets_ref().font_id_by_name(font_key) {
-            self.gui.builder_data.font_styles.insert(style_key.to_string(), GuiFontStyle {
-                font,
-                font_size: font_size,
-            });
-        } else {
-            self.gui.builder_data.errors.push(assets_err!("No font named {:?} in app", font_key));
+    pub fn frame_style(&mut self, style_key: &'static str, texture_key: &str, region: RectF32) {
+        let texture = match self.api.assets_ref().texture_id_by_name(texture_key) {
+            Some(texture) => texture,
+            None => {
+                self.gui.builder_data.errors.push(assets_err!("No texture named {:?} in app", texture_key));
+                return;
+            }
+        };
+
+        self.gui.builder_data.frame_styles.insert(style_key, GuiFrameStyle {
+            texture,
+            region,
+        });
+    }
+
+    pub fn font_style(&mut self, style_key: &'static str, font_key: &str, font_size: f32) {
+        let font = match self.api.assets_ref().font_id_by_name(font_key) {
+            Some(font) => font,
+            None => {
+                self.gui.builder_data.errors.push(assets_err!("No font named {:?} in app", font_key));
+                return;
+            }
+        };
+
+        self.gui.builder_data.font_styles.insert(style_key, GuiFontStyle {
+            font,
+            font_size,
+        });
+
+        if self.font.is_none() {
+            self.font = Some(font);
+            self.font_size = font_size;
         }
     }
 
+    #[allow(dead_code)]
     pub fn font(&mut self, style_key: &str) {
         match self.gui.builder_data.font_styles.get(style_key) {
             Some(style) => {
                 self.font = Some(style.font);
-                self.font_size = Some(style.font_size);
+                self.font_size = style.font_size;
             },
             None => {
                 self.gui.builder_data.errors.push(assets_err!("No font style with key {:?} in builder", style_key));
                 self.font = None;
-                self.font_size = None;
+                self.font_size = 0.0;
             }
         }
     }
 
+    pub fn vbox_layout(&mut self, width: f32, height: f32) {
+        self.layout_index = self.gui.components.layouts.len();
+        self.gui.components.layouts.push(GuiLayout {
+            ty: GuiLayoutType::VBox,
+            width,
+            height,
+            first_component: self.gui.components.views.len() as u32,
+            component_count: 0,
+        });
+    }
+
     pub fn label(&mut self, text_value: &str) {
+        self.update_layout();
+
         let font = self.get_font();
         let font_size = self.get_font_size();
 
         let component = build_text_component(self.api, text_value, font, font_size);
-        let view = super::GuiLayoutView { position: PositionF32::default(), size: component.size() };
+        let view = super::GuiLayoutView {
+            position: PositionF32::default(),
+            size: component.size()
+        };
 
         let compo = &mut self.gui.components;
-        compo.layouts.push(super::GuiLayout::default());
         compo.views.push(view);
         compo.types.push(GuiComponentType::Text(component));
+        
+    }
+
+    pub fn frame<F: FnOnce(&mut GuiBuilder)>(&mut self, style_key: &'static str, size: SizeF32, callback: F) {
+        self.update_layout();
+        
+        let style = match self.gui.builder_data.frame_styles.get(style_key) {
+            Some(s) => s,
+            None => {
+                self.gui.builder_data.errors.push(assets_err!("No frame style with key {:?} in builder", style_key));
+                return;
+            }
+        };
+
+        let frame = GuiComponentFrame {
+            texture: style.texture,
+            size,
+            texcoord: style.region,
+        };
+
+        let view = super::GuiLayoutView {
+            position: PositionF32::default(),
+            size
+        };
+
+        let compo = &mut self.gui.components;
+        compo.views.push(view);
+        compo.types.push(GuiComponentType::Frame(frame));
+
+        self.layout_index += 1;
+
+        callback(self);
     }
 
     fn get_font(&self) -> MsdfFontId {
@@ -93,9 +173,27 @@ impl<'a> GuiBuilder<'a> {
     }
 
     fn get_font_size(&self) -> f32 {
-        self.font_size.unwrap_or_else(|| { self.gui.builder_data.default_font_size } )
+        if self.font_size > 0.0 {
+            self.font_size
+        } else {
+            self.gui.builder_data.default_font_size
+        }
     }
 
+    fn update_layout(&mut self) {
+        match self.gui.components.layouts.get_mut(self.layout_index) {
+            Some(layout) => { layout.component_count += 1; },
+            None => {
+                self.gui.components.layouts.push(GuiLayout {
+                    ty: GuiLayoutType::VBox,
+                    width: 0.0,
+                    height: 0.0,
+                    first_component: self.gui.components.views.len() as u32,
+                    component_count: 1,
+                })
+            }
+        }
+    }
 }
 
 fn build_text_component(
@@ -106,7 +204,11 @@ fn build_text_component(
 ) -> GuiComponentText {
     use unicode_segmentation::UnicodeSegmentation;
 
-    let font_asset = api.assets_ref().font(font).unwrap();  // Font presence is validated by the builder
+    let font_asset = match api.assets_ref().font(font) {
+        Some(font) => font,
+        None => unreachable!("Font presence is validated by the builder")
+    };
+
     let mut glyphs = Vec::with_capacity(text_value.len());
 
     let mut advance = 0.0;

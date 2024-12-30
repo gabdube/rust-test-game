@@ -4,7 +4,7 @@ mod batch;
 use fnv::FnvHashMap;
 use std::{slice, sync::Arc};
 use loomz_shared::api::{LoomzApi, GuiId, GuiSprite};
-use loomz_shared::assets::{LoomzAssetsBundle, MsdfFontId};
+use loomz_shared::assets::{LoomzAssetsBundle, AssetId, MsdfFontId, TextureId};
 use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{assets_err, chain_err};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
@@ -32,9 +32,9 @@ pub struct GuiVertex {
 
 struct GuiResources {
     assets: Arc<LoomzAssetsBundle>,
-    textures: FnvHashMap<MsdfFontId, Texture>,
+    textures: FnvHashMap<AssetId, Texture>,
     text_pipeline: GraphicsPipeline,
-    component_pipeline: GraphicsPipeline,
+    image_pipeline: GraphicsPipeline,
     batch_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
 }
@@ -48,8 +48,6 @@ struct GuiDescriptor {
 /// Data used on rendering
 #[derive(Copy, Clone)]
 struct GuiRender {
-    component_pipeline_handle: vk::Pipeline,
-    text_pipeline_handle: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
     vertex_buffer: vk::Buffer,
     index_offset: vk::DeviceSize,
@@ -57,7 +55,7 @@ struct GuiRender {
     push_constants: [GuiPushConstant; 1],
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone)]
 struct GuiViewSprite {
     image_view: vk::ImageView,
     sprite: GuiSprite
@@ -76,6 +74,7 @@ struct GuiData {
 
 #[derive(Copy, Clone, Default)]
 pub struct GuiBatch {
+    pipeline: vk::Pipeline,
     set: vk::DescriptorSet,
     index_count: u32,
     first_index: u32,
@@ -98,14 +97,11 @@ impl GuiModule {
             batch_layout: vk::DescriptorSetLayout::null(),
             pipeline_layout: vk::PipelineLayout::null(),
             text_pipeline: GraphicsPipeline::new(),
-            component_pipeline: GraphicsPipeline::new(),
-            
+            image_pipeline: GraphicsPipeline::new(),
             textures: FnvHashMap::default(),
         };
         
         let render = GuiRender {
-            component_pipeline_handle: vk::Pipeline::null(),
-            text_pipeline_handle: vk::Pipeline::null(),
             pipeline_layout: vk::PipelineLayout::null(),
             vertex_buffer: vk::Buffer::null(),
             index_offset: 0,
@@ -140,7 +136,7 @@ impl GuiModule {
     pub fn destroy(self, core: &mut LoomzEngineCore) {
         self.descriptors.allocator.destroy(core);
         self.resources.text_pipeline.destroy(&core.ctx);
-        self.resources.component_pipeline.destroy(&core.ctx);
+        self.resources.image_pipeline.destroy(&core.ctx);
         self.data.vertex_alloc.free(core);
 
         core.ctx.device.destroy_pipeline_layout(self.resources.pipeline_layout);
@@ -168,18 +164,16 @@ impl GuiModule {
     //
 
     pub fn write_pipeline_create_infos(&mut self, compiler: &mut PipelineCompiler) {
-        compiler.add_pipeline_info("gui_component", &mut self.resources.component_pipeline);
+        compiler.add_pipeline_info("gui_component", &mut self.resources.image_pipeline);
         compiler.add_pipeline_info("gui_text", &mut self.resources.text_pipeline);
     }
 
     pub fn set_pipeline_handle(&mut self, compiler: &PipelineCompiler) {
         let mut handle = compiler.get_pipeline("gui_component");
-        self.resources.component_pipeline.set_handle(handle);
-        self.render.component_pipeline_handle = handle;
+        self.resources.image_pipeline.set_handle(handle);
 
         handle = compiler.get_pipeline("gui_text");
         self.resources.text_pipeline.set_handle(handle);
-        self.render.text_pipeline_handle = handle;
     }
 
     //
@@ -201,8 +195,15 @@ impl GuiModule {
         device.cmd_bind_vertex_buffers(cmd, 0, slice::from_ref(&render.vertex_buffer), &render.vertex_offset);
         device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push_values(&render.push_constants));
 
+        let mut last_pipeline = vk::Pipeline::null();
+
         for batch in self.batches.iter() {
-            device.cmd_bind_pipeline(cmd, GRAPHICS, render.text_pipeline_handle);
+            // improvement: Try to use one pipeline for all of the GUI rendering
+            if last_pipeline != batch.pipeline {
+                device.cmd_bind_pipeline(cmd, GRAPHICS, batch.pipeline);
+                last_pipeline = batch.pipeline;
+            }
+            
             device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, BATCH_LAYOUT_INDEX, slice::from_ref(&batch.set), &[]);
             device.cmd_draw_indexed(cmd, batch.index_count, 1, batch.first_index, 0, 0);
         }
@@ -235,6 +236,7 @@ impl GuiModule {
 
         for &sprite in sprites.iter() {
             let image_view = match sprite.ty {
+                loomz_shared::GuiSpriteType::Image(texture_id) => Self::fetch_texture_id(core, &mut self.resources, texture_id)?,
                 loomz_shared::GuiSpriteType::Font(font_id) => Self::fetch_font_texture_view(core, &mut self.resources, font_id)?
             };
 
@@ -244,7 +246,6 @@ impl GuiModule {
             });
         }
 
-        gui.sprites.sort_unstable();
         self.update_batches = true;
 
         Ok(())
@@ -278,18 +279,36 @@ impl GuiModule {
     // Data
     //
 
-    fn fetch_font_texture_view(core: &mut LoomzEngineCore, resources: &mut GuiResources, id: MsdfFontId) -> Result<vk::ImageView, CommonError> {
-        if let Some(texture) = resources.textures.get(&id) {
+    fn fetch_font_texture_view(core: &mut LoomzEngineCore, resources: &mut GuiResources, font_id: MsdfFontId) -> Result<vk::ImageView, CommonError> {
+        let asset_id = AssetId::MsdfFont(font_id);
+        if let Some(texture) = resources.textures.get(&asset_id) {
             return Ok(texture.view);
         }
 
-        let texture_asset = resources.assets.font(id)
-            .ok_or_else(|| assets_err!("Unkown asset with ID {id:?}") )?;
+        let texture_asset = resources.assets.font(font_id)
+            .ok_or_else(|| assets_err!("Unkown asset with ID {font_id:?}") )?;
 
         let texture = core.create_texture_from_font_asset(&texture_asset)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
 
-        resources.textures.insert(id, texture);
+        resources.textures.insert(asset_id, texture);
+
+        Ok(texture.view)
+    }
+
+    fn fetch_texture_id(core: &mut LoomzEngineCore, resources: &mut GuiResources, texture_id: TextureId) -> Result<vk::ImageView, CommonError> {
+        let asset_id = AssetId::Texture(texture_id);
+        if let Some(texture) = resources.textures.get(&asset_id) {
+            return Ok(texture.view);
+        }
+        
+        let texture_asset = resources.assets.texture(texture_id)
+            .ok_or_else(|| assets_err!("Unkown asset with ID {texture_id:?}") )?;
+
+        let texture = core.create_texture_from_asset(&texture_asset)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
+
+        resources.textures.insert(asset_id, texture);
 
         Ok(texture.view)
     }

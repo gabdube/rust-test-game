@@ -1,13 +1,14 @@
 use crate::base_types::RectF32;
-use crate::assets::MsdfFontId;
+use crate::assets::{MsdfFontId, TextureId};
 use super::{Id, MessageQueueEx};
 
 pub struct GuiTag;
 pub type GuiId = Id<GuiTag>;
 
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum GuiSpriteType {
+    Image(TextureId),
     Font(MsdfFontId)
 }
 

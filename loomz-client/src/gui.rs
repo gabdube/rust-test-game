@@ -42,38 +42,36 @@ impl Gui {
             return Err(error_base);
         }
 
-        self.compute_layout();
+        layout::compute(self);
+        self.generate_sprites();
 
         Ok(())
     }
 
     pub fn resize(&mut self, view: &RectF32) {
         self.components.base_view = *view;
-        self.compute_layout();
+        layout::compute(self);
+        self.generate_sprites();
     }
 
     pub fn sync_with_engine(&self, api: &LoomzApi) {
         api.gui().update_gui(&self.id, &self.components.sprites);
     }
 
-    fn compute_layout(&mut self) {
-        let components = &mut self.components;
+    fn generate_sprites(&mut self) {
+        let sprites = &mut self.components.sprites;
+        sprites.clear();
 
-        components.sprites.clear();
-        
-        let base = components.base_view;
-        for (i, view) in components.views.iter_mut().enumerate() {
-            view.position.x = (base.width() - view.size.width) / 2.0;
-            view.position.y = (base.height() - view.size.height) / 2.0;
-
-            let component_type = &mut components.types[i];
-            component_type.generate_sprites(view, &mut components.sprites);
+        let component_count = self.components.views.len();
+        for i in 0..component_count {
+            let view = &self.components.views[i];
+            let component_type = &self.components.types[i];
+            component_type.generate_sprites(view, sprites);
         }
     }
 
     fn clear(&mut self) {
         let c = &mut self.components;
-        c.layouts.clear();
         c.views.clear();
         c.types.clear();
         c.sprites.clear();
@@ -87,7 +85,7 @@ impl Default for Gui {
             builder_data: Box::default(),
             components: Box::new(GuiComponents {
                 base_view: RectF32::default(),
-                layouts: Vec::with_capacity(16),
+                layouts: Vec::with_capacity(8),
                 views: Vec::with_capacity(16),
                 types: Vec::with_capacity(16),
                 sprites: Vec::with_capacity(64),

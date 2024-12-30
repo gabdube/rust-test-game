@@ -64,10 +64,10 @@ impl super::GuiModule {
         let res = &mut self.resources;
         res.batch_layout = layout_batch;
         res.pipeline_layout = pipeline_layout;
-        res.component_pipeline.set_shader_modules(component_modules);
+        res.image_pipeline.set_shader_modules(component_modules);
         res.text_pipeline.set_shader_modules(text_modules);
         
-        for pipeline in [&mut res.component_pipeline, &mut res.text_pipeline] {
+        for pipeline in [&mut res.image_pipeline, &mut res.text_pipeline] {
             pipeline.set_vertex_format::<GuiVertex>(&vertex_fields);
             pipeline.set_pipeline_layout(pipeline_layout);
             pipeline.set_depth_testing(false);
@@ -118,7 +118,7 @@ impl super::GuiModule {
             DescriptorsAllocation {
                 layout: self.resources.batch_layout,
                 binding_types: &[vk::DescriptorType::COMBINED_IMAGE_SAMPLER],
-                count: 1,
+                count: 8,
             },
         ];
 

@@ -1,5 +1,5 @@
-use loomz_shared::base_types::SizeF32;
-use loomz_shared::assets::MsdfFontId;
+use loomz_shared::base_types::{SizeF32, RectF32};
+use loomz_shared::assets::{MsdfFontId, TextureId};
 use loomz_shared::assets::msdf_font::ComputedGlyph;
 use super::{GuiLayoutView, GuiSprite, GuiSpriteType};
 
@@ -39,7 +39,27 @@ impl GuiComponentText {
     }
 }
 
+pub struct GuiComponentFrame {
+    pub texture: TextureId,
+    pub size: SizeF32,
+    pub texcoord: RectF32
+}
+
+impl GuiComponentFrame {
+    fn generate_sprites(&self, view: &GuiLayoutView, sprites: &mut Vec<GuiSprite>) {
+        sprites.push(GuiSprite {
+            ty: GuiSpriteType::Image(self.texture),
+            position: RectF32 {
+                left: view.position.x, right: view.position.x + self.size.width,
+                top: view.position.y, bottom: view.position.y + self.size.height,
+            },
+            texcoord: self.texcoord
+        });
+    }
+}
+
 pub enum GuiComponentType {
+    Frame(GuiComponentFrame),
     Text(GuiComponentText),
 }
 
@@ -47,6 +67,7 @@ impl GuiComponentType {
 
     pub fn generate_sprites(&self, view: &GuiLayoutView, sprites: &mut Vec<GuiSprite>) {
         match self {
+            GuiComponentType::Frame(frame) => frame.generate_sprites(view, sprites),
             GuiComponentType::Text(text) => text.generate_sprites(view, sprites),
         }
     }
