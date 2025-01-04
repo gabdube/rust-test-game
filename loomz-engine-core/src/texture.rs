@@ -43,7 +43,7 @@ impl LoomzEngineCore {
     pub fn create_texture_from_font_asset(&mut self, asset: &AssetsMsdfFontData) -> Result<Texture, CommonError> {
         let raw_format = (asset.image_info.color_type, asset.image_info.bit_depth);
         let format = match raw_format {
-            (png::ColorType::Rgb, png::BitDepth::Eight) => vk::Format::R8G8B8_UNORM,
+            (png::ColorType::Rgba, png::BitDepth::Eight) => vk::Format::R8G8B8A8_UNORM,
             _ => { return Err(unimplemented_err!("Image format {raw_format:?} not supported")); }
         };
 

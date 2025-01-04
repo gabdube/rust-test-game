@@ -28,6 +28,37 @@ fn font_output(file_name: &str, ext: &str) -> PathBuf {
     path
 }
 
+fn save_msdf_atlas_rgba(out_path: &Path, image_info: &png::OutputInfo, image_data_rgb: &Vec<u8>) -> Result<(), Box<dyn Error>> {
+    use std::io::BufWriter;
+    
+    ::std::fs::remove_file(out_path)?; // Remove old file
+
+    let file = ::std::fs::File::create_new(out_path)?;
+    let ref mut w = BufWriter::new(file);
+
+    let mut encoder = png::Encoder::new(w, image_info.width, image_info.height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_source_gamma(png::ScaledFloat::from_scaled(45455));
+    encoder.set_source_chromaticities(png::SourceChromaticities::new(
+        (0.31270, 0.32900),
+        (0.64000, 0.33000),
+        (0.30000, 0.60000),
+        (0.15000, 0.06000)
+    ));
+    let mut writer = encoder.write_header()?;
+
+    let mut image_data_rgba: Vec<[u8; 4]> = vec![[0, 0, 0, 0]; (image_info.width * image_info.height) as usize];
+    for (i, chunk) in image_data_rgb.chunks(3).enumerate() {
+        image_data_rgba[i] = [chunk[0], chunk[1], chunk[2], 255];
+    }
+
+    let (_, bytes, _) = unsafe { image_data_rgba.align_to::<u8>() };
+    writer.write_image_data(bytes)?;
+
+    Ok(())
+}
+
 fn generate_msdf_atlas(msdf_gen_path: &str, input_font: &Path, output_image: &Path, output_json: &Path) -> Result<(), Box<dyn Error>> {
     Command::new(msdf_gen_path)
         .arg("-font")
@@ -41,6 +72,18 @@ fn generate_msdf_atlas(msdf_gen_path: &str, input_font: &Path, output_image: &Pa
         .arg("-size")
         .arg("35")
         .output()?;
+
+
+    // Need to convert the RBG png into a RGBA to make sure we use an optimized format on all platform
+    let src = ::std::fs::File::open(&output_image)
+        .map_err(|err| StringError(format!("Failed to open {:?} {:?}", output_image, err)) )?;
+
+    let decoder = png::Decoder::new(src);
+    let mut reader = decoder.read_info().unwrap();
+    let mut image_data_rgb: Vec<u8> = vec![0; reader.output_buffer_size()];
+    let image_info = reader.next_frame(&mut image_data_rgb).unwrap();
+
+    save_msdf_atlas_rgba(&output_image, &image_info, &image_data_rgb)?;
 
     Ok(())
 }

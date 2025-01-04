@@ -67,15 +67,18 @@ impl<'a> NextBatch<'a> {
         let mut v = self.vertex_count as isize;
         assert!(v + vertex_count < self.vertex.len() as isize);
 
+        
+
         unsafe {
             let vertex = self.vertex.as_mut_ptr();            
             for sprite_view in sprites {
                 let [x1, y1, x2, y2] = sprite_view.sprite.position.splat();
                 let [x3, y3, x4, y4] = sprite_view.sprite.texcoord.splat();
-                vertex.offset(v+0).write(GuiVertex { pos: [x1, y1], uv: [x3, y3] });
-                vertex.offset(v+1).write(GuiVertex { pos: [x2, y1], uv: [x4, y3] });
-                vertex.offset(v+2).write(GuiVertex { pos: [x1, y2], uv: [x3, y4] });
-                vertex.offset(v+3).write(GuiVertex { pos: [x2, y2], uv: [x4, y4] });
+                let color = sprite_view.sprite.color.splat();
+                vertex.offset(v+0).write(GuiVertex { pos: [x1, y1], uv: [x3, y3], color });
+                vertex.offset(v+1).write(GuiVertex { pos: [x2, y1], uv: [x4, y3], color });
+                vertex.offset(v+2).write(GuiVertex { pos: [x1, y2], uv: [x3, y4], color });
+                vertex.offset(v+3).write(GuiVertex { pos: [x2, y2], uv: [x4, y4], color });
                 v += 4;
             }
         }

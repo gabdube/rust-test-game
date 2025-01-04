@@ -28,6 +28,7 @@ pub struct GuiPushConstant {
 pub struct GuiVertex {
     pub pos: [f32; 2],
     pub uv: [f32; 2],
+    pub color: [u8; 4],
 }
 
 struct GuiResources {

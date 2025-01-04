@@ -5,7 +5,7 @@ mod animations;
 use animations::{Animations, PawnAnimationType};
 
 use std::time::Instant;
-use loomz_shared::base_types::{PositionF32, PositionF64, size, rect};
+use loomz_shared::base_types::{PositionF32, PositionF64, size, rect, rgb};
 use loomz_shared::api::{WorldActorId};
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
@@ -107,7 +107,7 @@ impl LoomzClient {
     }
 
     fn uninitialized(&mut self) -> Result<(), CommonError> {
-        // self.init_player();
+        //self.init_player();
         self.init_main_menu()?;
         self.state = GameState::MainMenu;
         Ok(())
@@ -209,14 +209,14 @@ impl LoomzClient {
         };
 
         self.main_menu.build(&self.api, &view, |gui| {
-            gui.font_style("default", "bubblegum", 100.0);
-            gui.frame_style("main", "gui", rect(0.0, 0.0, 3.0, 3.0));
+            gui.font_style("item1", "bubblegum", 100.0, rgb(100, 50, 50));
+            gui.frame_style("main", "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(140, 100, 70));
 
-            gui.frame("main", size(300.0, 250.0), |gui| {
-                gui.vbox_layout(0.0, 0.0);
-                gui.label("Start");
-                gui.label("Debug");
-                gui.label("Exit");
+            gui.vbox_layout(0.0, 300.0);
+            gui.frame("main", size(300.0, 300.0), |gui| {
+                gui.label("Start", "item1");
+                gui.label("Debug", "item1");
+                gui.label("Exit", "item1");
             })
         })?;
 

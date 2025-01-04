@@ -1,10 +1,11 @@
-use loomz_shared::base_types::{SizeF32, RectF32};
+use loomz_shared::base_types::{SizeF32, RectF32, RgbaU8};
 use loomz_shared::assets::{MsdfFontId, TextureId};
 use loomz_shared::assets::msdf_font::ComputedGlyph;
 use super::{GuiLayoutView, GuiSprite, GuiSpriteType};
 
 pub struct GuiComponentText {
     pub glyphs: Vec<ComputedGlyph>,
+    pub color: RgbaU8,
     pub font: MsdfFontId,
 }
 
@@ -28,12 +29,14 @@ impl GuiComponentText {
 
     fn generate_sprites(&self, view: &GuiLayoutView, sprites: &mut Vec<GuiSprite>) {
         let font = self.font;
+        let color = self.color;
         let [x, y] = view.position.splat();
         for glyph in self.glyphs.iter() {
             sprites.push(GuiSprite {
                 ty: GuiSpriteType::Font(font),
                 position: glyph.position.translate_into(x, y),
-                texcoord: glyph.texcoord
+                texcoord: glyph.texcoord,
+                color,
             });
         }
     }
@@ -42,7 +45,8 @@ impl GuiComponentText {
 pub struct GuiComponentFrame {
     pub texture: TextureId,
     pub size: SizeF32,
-    pub texcoord: RectF32
+    pub texcoord: RectF32,
+    pub color: RgbaU8,
 }
 
 impl GuiComponentFrame {
@@ -53,7 +57,8 @@ impl GuiComponentFrame {
                 left: view.position.x, right: view.position.x + self.size.width,
                 top: view.position.y, bottom: view.position.y + self.size.height,
             },
-            texcoord: self.texcoord
+            texcoord: self.texcoord,
+            color: self.color,
         });
     }
 }

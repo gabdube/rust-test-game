@@ -1,4 +1,4 @@
-use crate::base_types::RectF32;
+use crate::base_types::{RectF32, RgbaU8};
 use crate::assets::{MsdfFontId, TextureId};
 use super::{Id, MessageQueueEx};
 
@@ -17,6 +17,7 @@ pub struct GuiSprite {
     pub ty: GuiSpriteType,
     pub position: RectF32,
     pub texcoord: RectF32,
+    pub color: RgbaU8
 }
 
 pub struct GuiApi {

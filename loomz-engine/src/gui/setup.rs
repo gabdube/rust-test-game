@@ -59,6 +59,11 @@ impl super::GuiModule {
                 offset: 8,
                 format: vk::Format::R32G32_SFLOAT,
             },
+            PipelineVertexFormat {
+                location: 2,
+                offset: 16,
+                format: vk::Format::R8G8B8A8_UNORM,
+            },
         ];
 
         let res = &mut self.resources;

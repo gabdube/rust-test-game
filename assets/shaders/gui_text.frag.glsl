@@ -4,6 +4,8 @@
 #extension GL_ARB_shading_language_420pack : enable
 
 layout (location = 0) in vec2 inUv;
+layout (location = 1) in vec4 inColor;
+
 layout (location = 0) out vec4 outFragColor;
 
 layout (set=0, binding=0) uniform sampler2D color;
@@ -23,5 +25,5 @@ void main() {
     float w = fwidth(dist) / 1.5;
     float opacity = smoothstep(0.5 - w, 0.5 + w, dist);
 
-    outFragColor = vec4(1.0, 1.0, 1.0, opacity);
+    outFragColor = vec4(1.0, 1.0, 1.0, opacity) * vec4(inColor.rbg, 1.0);
 }

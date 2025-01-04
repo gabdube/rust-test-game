@@ -141,3 +141,7 @@ pub const fn rect(left: f32, top: f32, right: f32, bottom: f32) -> RectF32 {
 pub const fn size(width: f32, height: f32) -> SizeF32 {
     SizeF32 { width, height }
 }
+
+pub const fn rgb(r: u8, g: u8, b: u8) -> RgbaU8 {
+    RgbaU8 { r, g, b, a: 255 }
+}
