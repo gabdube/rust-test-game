@@ -3,7 +3,7 @@ pub use compute::compute;
 
 use loomz_shared::base_types::{PositionF32, SizeF32};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(super) enum GuiLayoutType {
     VBox
 }
@@ -18,7 +18,7 @@ pub(super) struct GuiLayout {
 }
 
 #[derive(Copy, Clone, Default, Debug)]
-pub(super) struct GuiLayoutView {
+pub(super) struct GuiLayoutItem {
     pub position: PositionF32,
     pub size: SizeF32,
 }

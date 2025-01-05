@@ -2,7 +2,7 @@ mod component;
 use component::GuiComponentType;
 
 mod layout;
-use layout::{GuiLayout, GuiLayoutView};
+use layout::{GuiLayout, GuiLayoutItem};
 
 mod builder;
 use builder::{GuiBuilder, GuiBuilderData};
@@ -14,7 +14,7 @@ use loomz_shared::{CommonError, client_err};
 struct GuiComponents {
     base_view: RectF32,
     layouts: Vec<GuiLayout>,
-    views: Vec<GuiLayoutView>,
+    layout_items: Vec<GuiLayoutItem>,
     types: Vec<GuiComponentType>,
     sprites: Vec<GuiSprite>,
 }
@@ -62,9 +62,9 @@ impl Gui {
         let sprites = &mut self.components.sprites;
         sprites.clear();
 
-        let component_count = self.components.views.len();
+        let component_count = self.components.layout_items.len();
         for i in 0..component_count {
-            let view = &self.components.views[i];
+            let view = &self.components.layout_items[i];
             let component_type = &self.components.types[i];
             component_type.generate_sprites(view, sprites);
         }
@@ -72,7 +72,8 @@ impl Gui {
 
     fn clear(&mut self) {
         let c = &mut self.components;
-        c.views.clear();
+        c.layouts.clear();
+        c.layout_items.clear();
         c.types.clear();
         c.sprites.clear();
     }
@@ -86,7 +87,7 @@ impl Default for Gui {
             components: Box::new(GuiComponents {
                 base_view: RectF32::default(),
                 layouts: Vec::with_capacity(8),
-                views: Vec::with_capacity(16),
+                layout_items: Vec::with_capacity(16),
                 types: Vec::with_capacity(16),
                 sprites: Vec::with_capacity(64),
             }),

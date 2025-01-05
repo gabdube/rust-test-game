@@ -276,7 +276,7 @@ impl LoomzEngineCore {
 
     fn update_descriptor_sets(&mut self) {
         let mut descriptors = self.descriptors.lock();
-        if descriptors.writes.len() == 0 {
+        if descriptors.writes_count == 0 {
             return;
         }
 

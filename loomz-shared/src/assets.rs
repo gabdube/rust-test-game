@@ -47,10 +47,7 @@ impl LoomzAssetsBundle {
 
     pub fn load() -> Result<Arc<Self>, CommonError> {
         let mut bundle = LoomzAssetsBundle::default();
-        let meta_csv = match ::std::fs::read_to_string(ASSET_METADATA_PATH) {
-            Ok(v) => v,
-            Err(e) => { return Err(assets_err!("Failed to load assets metadata: {e}")); }
-        };
+        let meta_csv = Self::load_asset_metadata()?;
 
         let mut error: Option<CommonError> = None;
 
@@ -212,6 +209,11 @@ impl LoomzAssetsBundle {
         });
 
         Ok(())
+    }
+
+    fn load_asset_metadata() -> Result<String, CommonError> {
+        return ::std::fs::read_to_string(ASSET_METADATA_PATH)
+            .map_err(|err| assets_err!("Failed to load assets metadata: {err}") );
     }
 
 }

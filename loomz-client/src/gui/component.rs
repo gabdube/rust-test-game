@@ -1,7 +1,7 @@
 use loomz_shared::base_types::{SizeF32, RectF32, RgbaU8};
 use loomz_shared::assets::{MsdfFontId, TextureId};
 use loomz_shared::assets::msdf_font::ComputedGlyph;
-use super::{GuiLayoutView, GuiSprite, GuiSpriteType};
+use super::{GuiLayoutItem, GuiSprite, GuiSpriteType};
 
 pub struct GuiComponentText {
     pub glyphs: Vec<ComputedGlyph>,
@@ -27,10 +27,10 @@ impl GuiComponentText {
         size
     }
 
-    fn generate_sprites(&self, view: &GuiLayoutView, sprites: &mut Vec<GuiSprite>) {
+    fn generate_sprites(&self, item: &GuiLayoutItem, sprites: &mut Vec<GuiSprite>) {
         let font = self.font;
         let color = self.color;
-        let [x, y] = view.position.splat();
+        let [x, y] = item.position.splat();
         for glyph in self.glyphs.iter() {
             sprites.push(GuiSprite {
                 ty: GuiSpriteType::Font(font),
@@ -50,12 +50,12 @@ pub struct GuiComponentFrame {
 }
 
 impl GuiComponentFrame {
-    fn generate_sprites(&self, view: &GuiLayoutView, sprites: &mut Vec<GuiSprite>) {
+    fn generate_sprites(&self, item: &GuiLayoutItem, sprites: &mut Vec<GuiSprite>) {
         sprites.push(GuiSprite {
             ty: GuiSpriteType::Image(self.texture),
             position: RectF32 {
-                left: view.position.x, right: view.position.x + self.size.width,
-                top: view.position.y, bottom: view.position.y + self.size.height,
+                left: item.position.x, right: item.position.x + self.size.width,
+                top: item.position.y, bottom: item.position.y + self.size.height,
             },
             texcoord: self.texcoord,
             color: self.color,
@@ -70,10 +70,10 @@ pub enum GuiComponentType {
 
 impl GuiComponentType {
 
-    pub fn generate_sprites(&self, view: &GuiLayoutView, sprites: &mut Vec<GuiSprite>) {
+    pub fn generate_sprites(&self, item: &GuiLayoutItem, sprites: &mut Vec<GuiSprite>) {
         match self {
-            GuiComponentType::Frame(frame) => frame.generate_sprites(view, sprites),
-            GuiComponentType::Text(text) => text.generate_sprites(view, sprites),
+            GuiComponentType::Frame(frame) => frame.generate_sprites(item, sprites),
+            GuiComponentType::Text(text) => text.generate_sprites(item, sprites),
         }
     }
 

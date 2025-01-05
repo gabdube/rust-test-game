@@ -91,7 +91,7 @@ impl<'a> GuiBuilder<'a> {
             ty: GuiLayoutType::VBox,
             width,
             height,
-            first_component: self.gui.components.views.len() as u32,
+            first_component: self.gui.components.layout_items.len() as u32,
             component_count: 0,
         });
     }
@@ -108,13 +108,13 @@ impl<'a> GuiBuilder<'a> {
         };
 
         let component = build_text_component(self.api, text_value, &style);
-        let view = super::GuiLayoutView {
+        let item = super::GuiLayoutItem {
             position: PositionF32::default(),
             size: component.size()
         };
 
         let compo = &mut self.gui.components;
-        compo.views.push(view);
+        compo.layout_items.push(item);
         compo.types.push(GuiComponentType::Text(component));
         
     }
@@ -137,13 +137,13 @@ impl<'a> GuiBuilder<'a> {
             color: style.color,
         };
 
-        let view = super::GuiLayoutView {
+        let item = super::GuiLayoutItem {
             position: PositionF32::default(),
             size
         };
 
         let compo = &mut self.gui.components;
-        compo.views.push(view);
+        compo.layout_items.push(item);
         compo.types.push(GuiComponentType::Frame(frame));
 
         self.layout_index += 1;
@@ -159,7 +159,7 @@ impl<'a> GuiBuilder<'a> {
                     ty: GuiLayoutType::VBox,
                     width: 0.0,
                     height: 0.0,
-                    first_component: self.gui.components.views.len() as u32,
+                    first_component: self.gui.components.layout_items.len() as u32,
                     component_count: 1,
                 })
             }

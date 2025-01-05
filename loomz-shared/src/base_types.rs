@@ -121,7 +121,7 @@ impl Mul<f64> for PositionF64 {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub struct SizeF32 {
     pub width: f32,
     pub height: f32,

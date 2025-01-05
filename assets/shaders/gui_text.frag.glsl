@@ -25,5 +25,5 @@ void main() {
     float w = fwidth(dist) / 1.5;
     float opacity = smoothstep(0.5 - w, 0.5 + w, dist);
 
-    outFragColor = vec4(1.0, 1.0, 1.0, opacity) * vec4(inColor.rbg, 1.0);
+    outFragColor = vec4(1.0, 1.0, 1.0, opacity) * vec4(inColor.rgb, 1.0);
 }

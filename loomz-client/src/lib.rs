@@ -209,8 +209,8 @@ impl LoomzClient {
         };
 
         self.main_menu.build(&self.api, &view, |gui| {
-            gui.font_style("item1", "bubblegum", 100.0, rgb(100, 50, 50));
-            gui.frame_style("main", "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(140, 100, 70));
+            gui.font_style("item1", "bubblegum", 100.0, rgb(204, 142, 100));
+            gui.frame_style("main", "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
 
             gui.vbox_layout(0.0, 300.0);
             gui.frame("main", size(300.0, 300.0), |gui| {

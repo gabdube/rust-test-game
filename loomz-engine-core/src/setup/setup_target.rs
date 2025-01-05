@@ -14,6 +14,7 @@ pub fn setup_target(engine: &mut LoomzEngineCore, params: &SetupTargetParams) ->
     setup_swapchain_images(engine)?;
     setup_attachments(engine)?;
     setup_sync(engine)?;
+    transfer_image_layout(engine)?;
     Ok(())
 }
 
@@ -23,6 +24,7 @@ pub fn rebuild_target(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
     setup_swapchain_images(engine)?;
     setup_attachments(engine)?;
     setup_sync(engine)?;
+    transfer_image_layout(engine)?;
 
     engine.output.rebuild = false;
 
@@ -392,6 +394,78 @@ fn setup_sync(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
 
     output.output_attachment_ready = create_semaphore()?;
     output.output_present_ready = create_semaphore()?;
+
+    Ok(())
+}
+
+//
+// Initial image transfer
+//
+
+fn output_image_layout_transfer(ctx: &crate::VulkanContext, resources: &crate::VulkanGlobalResources, cmd: vk::CommandBuffer) {
+    let subresource_range_color = vk::ImageSubresourceRange::base_color();
+    let subresource_range_depth = vk::ImageSubresourceRange::base_depth();
+    
+    let barriers = [
+        vk::ImageMemoryBarrier2 {
+            image: resources.attachments.color.image,
+            old_layout: vk::ImageLayout::UNDEFINED,
+            new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            src_access_mask: vk::AccessFlags2::NONE,
+            src_stage_mask: vk::PipelineStageFlags2::NONE,
+            dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+            dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+            subresource_range: subresource_range_color,
+            ..Default::default()
+        },
+        vk::ImageMemoryBarrier2 {
+            image: resources.attachments.depth.image,
+            old_layout: vk::ImageLayout::UNDEFINED,
+            new_layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            src_access_mask: vk::AccessFlags2::NONE,
+            src_stage_mask: vk::PipelineStageFlags2::NONE,
+            dst_access_mask: vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE,
+            dst_stage_mask: vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS,
+            subresource_range: subresource_range_depth,
+            ..Default::default()
+        },
+    ];
+
+    let dependency = vk::DependencyInfo {
+        image_memory_barrier_count: barriers.len() as u32,
+        image_memory_barrier: barriers.as_ptr(),
+        ..Default::default()
+    };
+
+    ctx.extensions.synchronization2.cmd_pipeline_barrier2(cmd, &dependency);
+}
+
+fn transfer_image_layout(engine: &mut LoomzEngineCore) -> Result<(), CommonError> {
+    let device = &engine.ctx.device;
+    let cmd = engine.resources.drawing_command_buffers[0];
+
+    // Record
+    let begin = vk::CommandBufferBeginInfo { flags: vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT, ..Default::default() };
+    device.begin_command_buffer(cmd, &begin)
+        .map_err(|err| backend_init_err!("Failed to begin recording on command buffer: {err}"))?;
+
+    output_image_layout_transfer(&engine.ctx, &engine.resources, cmd);
+
+    device.end_command_buffer(cmd)
+        .map_err(|err| backend_init_err!("Failed to end recording on command buffer: {err}"))?;
+   
+    // Submit
+    let submit_info = vk::SubmitInfo {
+        p_command_buffers: &cmd,
+        command_buffer_count: 1,
+        ..Default::default()
+    };
+
+    device.queue_submit(engine.output.queue, ::std::slice::from_ref(&submit_info), vk::Fence::null())
+        .map_err(|err| backend_init_err!("Failed to submit image layout transfer commands: {err}"))?;
+
+    device.queue_wait_idle(engine.output.queue)
+        .map_err(|err| backend_init_err!("Failed to wait for queue: {err}"))?;
 
     Ok(())
 }
