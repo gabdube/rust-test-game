@@ -6,7 +6,7 @@ use animations::{Animations, PawnAnimationType};
 
 use std::time::Instant;
 use loomz_shared::base_types::{PositionF32, PositionF64, size, rect, rgb};
-use loomz_shared::api::{WorldActorId};
+use loomz_shared::api::WorldActorId;
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
 
@@ -202,6 +202,8 @@ impl LoomzClient {
     }
 
     fn init_main_menu(&mut self) -> Result<(), CommonError> {
+        use crate::gui::GuiLayoutType::VBox;
+
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32{ 
             left: 0.0, right: screen_size.width,
@@ -210,14 +212,22 @@ impl LoomzClient {
 
         self.main_menu.build(&self.api, &view, |gui| {
             gui.font_style("item1", "bubblegum", 100.0, rgb(204, 142, 100));
-            gui.frame_style("main", "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
+            gui.root_layout(VBox);
 
-            gui.vbox_layout(0.0, 300.0);
-            gui.frame("main", size(300.0, 300.0), |gui| {
-                gui.label("Start", "item1");
-                gui.label("Debug", "item1");
-                gui.label("Exit", "item1");
-            })
+            gui.layout(VBox);
+            gui.layout_item(300.0, 300.0);
+            gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
+            gui.frame(size(300.0, 300.0), |gui| {
+                // gui.label("Start", "item1");
+                // gui.label("Debug", "item1");
+                // gui.label("Exit", "item1");
+            });
+
+            gui.layout(VBox);
+            gui.layout_item(300.0, 300.0);
+            gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(117, 55, 24));
+            gui.frame(size(300.0, 300.0), |gui| {
+            });
         })?;
 
         self.main_menu.sync_with_engine(&self.api);
