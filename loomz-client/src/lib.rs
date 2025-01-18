@@ -4,9 +4,11 @@ mod gui;
 mod animations;
 use animations::{Animations, PawnAnimationType};
 
+
 use std::time::Instant;
 use loomz_shared::base_types::{PositionF32, PositionF64, rect, rgb};
 use loomz_shared::api::WorldActorId;
+use loomz_shared::inputs::InputBuffer;
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
 
@@ -81,7 +83,6 @@ impl LoomzClient {
         client.main_menu = reader.load();
 
         client.init_main_menu()?;
-        client.main_menu.sync_with_engine(api);
 
         Ok(client)
     }
@@ -119,26 +120,49 @@ impl LoomzClient {
     }
 
     fn main_menu(&mut self) {
-        if let Some(new_input) = self.api.read_inputs() {
-            if let Some(new_size) = new_input.screen_size() {
-                self.resize_gui(new_size);
-            }
+        let new_inputs = match self.api.read_inputs() {
+            Some(inputs) => inputs,
+            None => { return; }
+        };
+
+        let mut gui_updates = gui::GuiUpdates::default();
+
+        if let Some(cursor_position) = new_inputs.cursor_position() {
+            gui_updates.cursor_position = Some(cursor_position.as_f32());
         }
 
-        //self.state = GameState::Gameplay;
+        if let Some(new_size) = new_inputs.screen_size() {
+            gui_updates.view = Some(rect(0.0, 0.0, new_size.width, new_size.height));
+        }
+
+        self.main_menu.update(&self.api, &gui_updates);
     }
 
     fn gameplay(&mut self) -> Result<(), CommonError> {
         if let Some(new_input) = self.api.read_inputs() {
-            if let Some(cursor_position) = new_input.cursor_position() {
-                self.on_cursor_moved(cursor_position);
-            }
-
-            if let Some(new_size) = new_input.screen_size() {
-                self.resize_gui(new_size);
-            }
+           self.gameplay_inputs(new_input);
         }
 
+        self.gameplay_loop();
+
+        Ok(())
+    }
+
+    fn gameplay_inputs(&mut self, new_input: InputBuffer) {
+        let mut gui_updates = gui::GuiUpdates::default();
+
+        if let Some(cursor_position) = new_input.cursor_position() {
+            self.target_position = cursor_position.as_f32();
+        }
+
+        if let Some(new_size) = new_input.screen_size() {
+            gui_updates.view = Some(rect(0.0, 0.0, new_size.width, new_size.height));
+        }
+
+        self.main_menu.update(&self.api, &gui_updates);
+    }
+
+    fn gameplay_loop(&mut self) {
         let world = self.api.world();
         let position = self.player.position;
         let target = self.target_position;
@@ -170,21 +194,6 @@ impl LoomzClient {
                 self.player.animation = PawnAnimationType::Idle;
             }
         }
-
-        Ok(())
-    }
-
-    fn on_cursor_moved(&mut self, position: PositionF64) {
-        self.target_position = position.as_f32();
-    }
-
-    fn resize_gui(&mut self, new_size: ::loomz_shared::SizeF32) {
-        let view = loomz_shared::RectF32 { 
-            left: 0.0, right: new_size.width,
-            top: 0.0, bottom: new_size.height,
-        };
-        self.main_menu.resize(&view);
-        self.main_menu.sync_with_engine(&self.api);
     }
 
     fn init_player(&mut self) {
@@ -207,7 +216,7 @@ impl LoomzClient {
     }
 
     fn init_main_menu(&mut self) -> Result<(), CommonError> {
-        use crate::gui::GuiLayoutType::VBox;
+        use crate::gui::{GuiLayoutType::VBox, GuiStyleState};
 
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32{ 
@@ -215,22 +224,22 @@ impl LoomzClient {
             top: 0.0, bottom: screen_size.height,
         };
 
-        self.main_menu.build(&self.api, &view, |gui| {
-            gui.font_style("menu_item", "bubblegum", 100.0, rgb(71, 43, 26));
-            gui.root_layout(VBox);
+        self.main_menu.build_style(&self.api, |style| {
+            style.root_layout(VBox);
+            style.font("menu_item", GuiStyleState::Base, "bubblegum", 100.0, rgb(71, 43, 26));
+            style.frame("main_menu_panel", GuiStyleState::Base, "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(24, 18, 15));
+        })?;
 
+        self.main_menu.build(&self.api, &view, |gui| {
             gui.layout(VBox);
             gui.layout_item(400.0, 440.0);
-            gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(24, 18, 15));
-            gui.frame(|gui| {
+            gui.frame("main_menu_panel", |gui| {
                 gui.layout_item(300.0, 100.0);
                 gui.label("Start", "menu_item");
                 gui.label("Debug", "menu_item");
                 gui.label("Exit", "menu_item");
             });
         })?;
-
-        self.main_menu.sync_with_engine(&self.api);
 
         Ok(())
     }

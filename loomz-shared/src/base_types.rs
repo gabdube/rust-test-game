@@ -54,6 +54,12 @@ impl RectF32 {
         }
     }
 
+    #[inline]
+    pub const fn is_point_inside(&self, point: PositionF32) -> bool {
+        let [x, y] = point.splat();
+        x >= self.left && y >= self.top && x < self.right && y < self.bottom
+    }
+
 }
 
 #[derive(Copy, Clone, Default, Debug)]

@@ -1,127 +1,46 @@
-use fnv::FnvHashMap;
-
-use loomz_shared::base_types::{PositionF32, SizeF32, RectF32, RgbaU8};
-use loomz_shared::assets::{MsdfFontId, msdf_font::ComputedGlyph};
-use loomz_shared::{assets_err, LoomzApi, TextureId};
-use crate::gui::{Gui, GuiComponents, component::*, layout::*};
-
-pub(super) struct GuiFontStyle {
-    pub font: MsdfFontId,
-    pub font_size: f32,
-    pub color: RgbaU8
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct GuiFrameStyle {
-    pub texture: TextureId,
-    pub region: RectF32,
-    pub color: RgbaU8,
-}
-
-pub(super) struct GuiBuilderData {
-    pub errors: Vec<crate::CommonError>,
-    pub font_styles: FnvHashMap<&'static str, GuiFontStyle>,
-    pub layouts_stack: Vec<(usize, GuiLayout)>,
-    pub default_font: Option<MsdfFontId>,
-    pub default_font_size: f32,
-}
+use loomz_shared::base_types::{PositionF32, SizeF32, RectF32};
+use loomz_shared::assets::msdf_font::ComputedGlyph;
+use loomz_shared::{LoomzApi, assets_err};
+use super::{Gui, GuiBuilderData, GuiComponents, component::*, layout::*, style::*};
 
 pub struct GuiBuilder<'a> {
     api: &'a LoomzApi,
     builder_data: &'a mut GuiBuilderData,
     components: &'a mut GuiComponents,
     layout_item: GuiLayoutItem,
-    frame_style: Option<GuiFrameStyle>,
     next_layout: GuiLayoutType,
     item_index: u32,
 }
 
 impl<'a> GuiBuilder<'a> {
 
-    pub fn new(api: &'a LoomzApi, gui: &'a mut Gui) -> Self {
-        if gui.builder_data.default_font_size < 1.0 {
-            gui.builder_data.default_font_size = 32.0;
-        }
-
-        if gui.builder_data.default_font.is_none() {
-            // Panic expected. There should always be at least a single font in the app assets
-            gui.builder_data.default_font = api.assets_ref()
-                .default_font_id()
-                .expect("No font found in application")
-                .into();
-        }
-
-        gui.builder_data.layouts_stack.clear();
-        gui.builder_data.layouts_stack.push((0, GuiLayout::default()));
-        gui.components.layouts.push(GuiLayout::default());
+    pub fn new(api: &'a LoomzApi, view: &RectF32, gui: &'a mut Gui) -> Self {
+        Self::clear_gui_components(view, gui);
 
         GuiBuilder {
             api,
             builder_data: &mut gui.builder_data,
             components: &mut gui.components,
             layout_item: GuiLayoutItem::default(),
-            frame_style: None,
             next_layout: GuiLayoutType::VBox,
             item_index: 0,
         }
     }
 
-    // pub fn frame_style(&mut self, style_key: &'static str, texture_key: &str, region: RectF32, color: RgbaU8) {
-    //     let texture = match self.api.assets_ref().texture_id_by_name(texture_key) {
-    //         Some(texture) => texture,
-    //         None => {
-    //             self.gui.builder_data.errors.push(assets_err!("No texture named {:?} in app", texture_key));
-    //             return;
-    //         }
-    //     };
+    fn clear_gui_components(view: &RectF32, gui: &mut Gui) {
+        let components = &mut gui.components;
+        components.base_view = *view;
+        components.state = Default::default();
+        components.layouts.clear();
+        components.layout_items.clear();
+        components.types.clear();
+        components.sprites.clear();
 
-    //     self.gui.builder_data.frame_styles.insert(style_key, GuiFrameStyle {
-    //         texture,
-    //         region,
-    //         color,
-    //     });
-    // }
+        let builder_data = &mut gui.builder_data;
+        builder_data.layouts_stack.clear();
+        builder_data.layouts_stack.push((0, GuiLayout::default()));
 
-    pub fn frame_style(&mut self, texture_key: &str, region: RectF32, color: RgbaU8) {
-        let texture = match self.api.assets_ref().texture_id_by_name(texture_key) {
-            Some(texture) => texture,
-            None => {
-                self.builder_data.errors.push(assets_err!("No texture named {:?} in app", texture_key));
-                return;
-            }
-        };
-
-        self.frame_style = Some(GuiFrameStyle {
-            texture,
-            region,
-            color,
-        });
-    }
-
-    pub fn font_style(&mut self, style_key: &'static str, font_key: &str, font_size: f32, color: RgbaU8) {
-        let font = match self.api.assets_ref().font_id_by_name(font_key) {
-            Some(font) => font,
-            None => {
-                self.builder_data.errors.push(assets_err!("No font named {:?} in app", font_key));
-                return;
-            }
-        };
-
-        self.builder_data.font_styles.insert(style_key, GuiFontStyle {
-            font,
-            font_size,
-            color,
-        });
-    }
-
-    /// Sets the layout of the root elements in the gui
-    pub fn root_layout(&mut self, layout_type: GuiLayoutType) {
-        let root = match self.builder_data.layouts_stack.get_mut(0) {
-            Some((_, root)) => root,
-            None => unreachable!("Root layout will always be present")
-        };
-
-        root.ty = layout_type;
+        components.layouts.push(GuiLayout::default());
     }
 
     /// Sets the layout used to position the child items of the next component
@@ -143,7 +62,7 @@ impl<'a> GuiBuilder<'a> {
         let style = match self.builder_data.font_styles.get(style_key) {
             Some(s) => s,
             None => {
-                self.builder_data.errors.push(assets_err!("No frame style with key {:?} in builder", style_key));
+                self.builder_data.errors.push(assets_err!("No label style with key {:?} in builder", style_key));
                 return;
             }
         };
@@ -160,11 +79,11 @@ impl<'a> GuiBuilder<'a> {
     }
 
     /// Adds a frame component into the gui using the last defined frame style
-    pub fn frame<F: FnOnce(&mut GuiBuilder)>(&mut self, callback: F) {
-        let style = match self.frame_style {
+    pub fn frame<F: FnOnce(&mut GuiBuilder)>(&mut self, style_key: &'static str, callback: F) {
+        let style = match self.builder_data.frame_styles.get(style_key) {
             Some(style) => style,
             None => {
-                self.builder_data.errors.push(assets_err!("No pushed frame style in builder"));
+                self.builder_data.errors.push(assets_err!("No label style with key {:?} in builder", style_key));
                 return;
             }
         };
@@ -264,18 +183,4 @@ fn build_text_component(
         font: style.font,
         color: style.color,
     }
-}
-
-impl Default for GuiBuilderData {
-
-    fn default() -> Self {
-        GuiBuilderData {
-            errors: Vec::with_capacity(0),
-            font_styles: FnvHashMap::default(),
-            layouts_stack: Vec::with_capacity(4),
-            default_font: None,
-            default_font_size: 0.0,
-        }
-    }
-
 }

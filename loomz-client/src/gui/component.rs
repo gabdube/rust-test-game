@@ -83,4 +83,16 @@ impl GuiComponentType {
         }
     }
 
+    pub fn on_mouse_enter(&self) {
+        match self {
+            _ => {},
+        }
+    }
+
+    pub fn on_mouse_left(&self) {
+        match self {
+            _ => {},
+        }
+    }
+
 }

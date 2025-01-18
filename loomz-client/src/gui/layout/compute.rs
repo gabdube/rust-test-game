@@ -70,9 +70,10 @@ fn vbox_layout(state: &mut LayoutComputeState, layout: GuiLayout) {
 
 #[cfg(test)]
 mod tests {
-    use loomz_shared::{LoomzApi, RectF32, PositionF32, SizeF32, size, rect, rgb};
+    use loomz_shared::{LoomzApi, RectF32, PositionF32, SizeF32, rect, rgb};
+    use super::super::super::{Gui, GuiStyleState};
     use super::super::GuiLayoutType::VBox;
-    use super::super::super::Gui;
+    
 
     macro_rules! assert_layout {
         ($layout:expr, $ty:expr, $w:literal, $h:literal, $children_count:literal) => {
@@ -107,26 +108,28 @@ mod tests {
         let api = LoomzApi::init().unwrap();
         let view = RectF32 { left: 0.0, top: 0.0, right: 1000.0, bottom: 1000.0 };
         let mut gui = Gui::default();
-        let build_result = gui.build(&api, &view, |gui| {
-            gui.font_style("item1", "bubblegum", 100.0, rgb(204, 142, 100));
-            gui.root_layout(VBox);
 
+        let style_result = gui.build_style(&api, |style| {
+            style.root_layout(VBox);
+            style.font("item", GuiStyleState::Base, "bubblegum", 100.0, rgb(204, 142, 100));
+            style.frame("frame", GuiStyleState::Base, "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
+        });
+
+        assert!(style_result.is_ok(), "Gui styling failed: {:?}", style_result);
+
+        let build_result = gui.build(&api, &view, |gui| {
             gui.layout(VBox);
             gui.layout_item(300.0, 300.0);
-            gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
-            gui.frame(|gui| {
-                gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
+            gui.frame("frame", |gui| {
                 gui.layout_item(200.0, 200.0);
-                gui.frame(|_| {});
+                gui.frame("frame", |_| {});
             }); 
 
             gui.layout(VBox);
             gui.layout_item(300.0, 300.0);
-            gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(117, 55, 24));
-            gui.frame(|gui| {
-                gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
+            gui.frame("frame", |gui| {
                 gui.layout_item(200.0, 200.0);
-                gui.frame(|_| {});
+                gui.frame("frame", |_| {});
             });
         });
 
