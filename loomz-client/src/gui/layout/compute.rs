@@ -3,8 +3,10 @@ use super::super::Gui;
 use super::{GuiLayout, GuiLayoutType, GuiLayoutItem};
 
 struct LayoutComputeState<'a> {
-    item_index: usize,
     layout_items: &'a mut [GuiLayoutItem],
+    layouts: &'a mut [GuiLayout],
+    item_index: i32,
+    layout_index: i32,
     view: RectF32,
 }
 
@@ -12,22 +14,29 @@ struct LayoutComputeState<'a> {
 /// Sizing the layout and the layout item is done a build time in `builder`
 pub fn compute(gui: &mut Gui) {
     let components = &mut gui.components;
-    let view = components.base_view;
-    let root = components.root_layout;
 
-    let mut state = LayoutComputeState {
-        item_index: 0,
-        layout_items: &mut components.layout_items,
-        view,
-    };
-
-    compute_layout(&mut state, root);
-}
-
-fn compute_layout(state: &mut LayoutComputeState, layout: GuiLayout) {
-    if layout.children_count == 0 {
+    // Layouts may be empty if `gui.resize` was called on an uninitialized gui
+    let root_children_count = components.layouts.get(0).map(|layout| layout.children_count ).unwrap_or(0);
+    if root_children_count == 0 {
         return;
     }
+
+    let mut state = LayoutComputeState {
+        layout_items: &mut components.layout_items,
+        layouts: &mut components.layouts,
+        item_index: 0,
+        layout_index: -1,
+        view: components.base_view,
+    };
+
+    compute_layout(&mut state);
+}
+
+fn compute_layout(state: &mut LayoutComputeState) {
+    state.layout_index += 1;
+
+    let layout_index = state.layout_index as usize;
+    let layout = state.layouts[layout_index];
 
     match layout.ty {
         GuiLayoutType::VBox => vbox_layout(state, layout),
@@ -35,20 +44,27 @@ fn compute_layout(state: &mut LayoutComputeState, layout: GuiLayout) {
 }
 
 fn vbox_layout(state: &mut LayoutComputeState, layout: GuiLayout) {
-    let view_width = state.view.width();
-    let view_height = state.view.height();
-
-    let offset_x = state.view.left + ((view_width - layout.width) * 0.5);
-    let mut offset_y = state.view.top + ((view_height - layout.height) * 0.5);
+    let view = state.view;
+    let view_width = view.width();
+    let view_height = view.height();
+    let offset_x = view.left + ((view_width - layout.width) * 0.5);
+    let mut offset_y = view.top + ((view_height - layout.height) * 0.5);
 
     for _ in 0..layout.children_count {
-        let mut item = state.layout_items[state.item_index];
+        let item_index = state.item_index as usize;
+        let mut item = state.layout_items[item_index];
+
         item.position.x = offset_x;
         item.position.y = offset_y;
         offset_y += item.size.height;
 
-        state.layout_items[state.item_index] = item;
+        state.layout_items[item_index] = item;
         state.item_index += 1;
+
+        if item.has_layout {
+            state.view = RectF32::from_position_and_size(item.position, item.size);
+            compute_layout(state);
+        }
     }
 }
 
@@ -59,14 +75,13 @@ mod tests {
     use super::super::super::Gui;
 
     macro_rules! assert_layout {
-        ($layout:expr, $ty:expr, $w:literal, $h:literal, $first:literal, $last:expr) => {
+        ($layout:expr, $ty:expr, $w:literal, $h:literal, $children_count:literal) => {
             {
                 let layout = &$layout;
                 assert_eq!(layout.ty, $ty, "Mismatched layout type");
-                // assert_eq!(layout.width, $w, "Mismatched layout width");
-                // assert_eq!(layout.height, $h, "Mismatched layout height");
-                // assert_eq!(layout.first_component, $first, "Mismatched layout first component index");
-                // assert_eq!(layout.last_component, $last, "Mismatched last component index");
+                assert_eq!(layout.width, $w, "Mismatched layout width");
+                assert_eq!(layout.height, $h, "Mismatched layout height");
+                assert_eq!(layout.children_count, $children_count, "Mismatched layout children_count");
             }
         };
     }
@@ -99,32 +114,39 @@ mod tests {
             gui.layout(VBox);
             gui.layout_item(300.0, 300.0);
             gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
-            gui.frame(size(300.0, 300.0), |gui| {
+            gui.frame(|gui| {
+                gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
+                gui.layout_item(200.0, 200.0);
+                gui.frame(|_| {});
             }); 
 
             gui.layout(VBox);
             gui.layout_item(300.0, 300.0);
             gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(117, 55, 24));
-            gui.frame(size(300.0, 300.0), |gui| {
+            gui.frame(|gui| {
+                gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
+                gui.layout_item(200.0, 200.0);
+                gui.frame(|_| {});
             });
         });
 
         assert!(build_result.is_ok(), "Gui build failed: {:?}", build_result);
 
-        let components = &gui.components;
-        //let layouts = &components.layouts;
+        let components = &gui.components; 
         let items = &components.layout_items;
+        let layouts = &components.layouts;
 
-        //assert_eq!(layouts.len(), 2);
-        assert_eq!(items.len(), 2);
+        assert_eq!(layouts.len(), 5);
+        assert_eq!(items.len(), 4);
 
-        assert_layout!(components.root_layout, VBox, 0.0, 0.0, 0, 1);
+        assert_layout!(layouts[0], VBox, 300.0, 600.0, 2);
         // assert_layout!(layouts[0], VBox, 0.0, 0.0, 0, u32::MAX);
         // assert_layout!(layouts[1], VBox, 0.0, 0.0, 1, u32::MAX);
 
         assert_layout_item!(items[0], 350.0, 200.0, 300.0, 300.0);
-        assert_layout_item!(items[1], 350.0, 500.0, 300.0, 300.0);
-
+        assert_layout_item!(items[1], 400.0, 250.0, 200.0, 200.0);
+        assert_layout_item!(items[2], 350.0, 500.0, 300.0, 300.0);
+        assert_layout_item!(items[3], 400.0, 550.0, 200.0, 200.0);
     }
 
 }

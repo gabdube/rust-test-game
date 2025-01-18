@@ -1,5 +1,5 @@
 mod component;
-use component::GuiComponentType;
+use component::{GuiComponentText, GuiComponentType};
 
 mod layout;
 use layout::{GuiLayout, GuiLayoutItem};
@@ -10,12 +10,12 @@ use builder::{GuiBuilder, GuiBuilderData};
 
 use loomz_shared::base_types::RectF32;
 use loomz_shared::api::{LoomzApi, GuiId, GuiSprite, GuiSpriteType};
+use loomz_shared::store::*;
 use loomz_shared::{CommonError, client_err};
 
 struct GuiComponents {
     base_view: RectF32,
-    root_layout: GuiLayout,
-    //layouts: Vec<GuiLayout>,
+    layouts: Vec<GuiLayout>,
     layout_items: Vec<GuiLayoutItem>,
     types: Vec<GuiComponentType>,
     sprites: Vec<GuiSprite>,
@@ -44,11 +44,9 @@ impl Gui {
             return Err(error_base);
         }
 
-        self.components.root_layout = self.builder_data.layouts_stack[0];
-        println!("{:?}", self.components.root_layout);
+        self.components.layouts[0] = self.get_root_layout();
 
         layout::compute(self);
-        self.generate_sprites();
 
         Ok(())
     }
@@ -56,10 +54,10 @@ impl Gui {
     pub fn resize(&mut self, view: &RectF32) {
         self.components.base_view = *view;
         layout::compute(self);
-        self.generate_sprites();
     }
 
-    pub fn sync_with_engine(&self, api: &LoomzApi) {
+    pub fn sync_with_engine(&mut self, api: &LoomzApi) {
+        self.generate_sprites();
         api.gui().update_gui(&self.id, &self.components.sprites);
     }
 
@@ -78,12 +76,96 @@ impl Gui {
     fn clear(&mut self) {
         let c = &mut self.components;
         c.base_view = RectF32::default();
-        c.root_layout = GuiLayout::default();
-        //c.layouts.clear();
+        c.layouts.clear();
         c.layout_items.clear();
         c.types.clear();
         c.sprites.clear();
     }
+
+    fn get_root_layout(&self) -> GuiLayout {
+        match self.builder_data.layouts_stack.get(0).copied() {
+            Some((_, root)) => root,
+            None => unreachable!("Root layout will always be present")
+        }
+    }
+}
+
+impl StoreAndLoad for Gui {
+
+    fn store(&self, writer: &mut SaveFileWriterBase) {
+        // Note: no need to store builder data or the generated sprites in components
+        let components = &self.components;
+
+        writer.store(&self.id);
+        writer.write(&components.base_view);
+        writer.write_slice(&components.layouts);
+        writer.write_slice(&components.layout_items);
+
+        writer.write_u32(components.types.len() as u32);
+        for component_type in components.types.iter() {
+            match component_type {
+                GuiComponentType::Frame(frame) => {
+                    writer.write_u32(0);
+                    writer.write(frame);
+                },
+                GuiComponentType::Text(text) => {
+                    writer.write_u32(1);
+                    writer.write(&text.font);
+                    writer.write_into_u32(text.color);
+                    writer.write_slice(&text.glyphs);
+                }
+            }
+        }
+    }
+
+    fn load(reader: &mut SaveFileReaderBase) -> Self {
+        let id = reader.load();
+        let builder_data = Box::default();
+
+        let mut components = GuiComponents {
+            base_view: RectF32::default(),
+            layouts: Vec::new(),
+            layout_items: Vec::new(),
+            types: Vec::new(),
+            sprites: Vec::with_capacity(64),
+        };
+
+        components.base_view = reader.read();
+        components.layouts = reader.read_slice().to_vec();
+        components.layout_items = reader.read_slice().to_vec();
+
+        let component_types_count = reader.read_u32() as usize;
+        components.types = Vec::with_capacity(component_types_count);
+        for _ in 0..component_types_count {
+            let enum_identifier = reader.read_u32();
+            match enum_identifier {
+                0 => {
+                    components.types.push(GuiComponentType::Frame(reader.read()));
+                },
+                1 => {
+                    let font = reader.read();
+                    let color = reader.read_from_u32();
+                    let glyphs = reader.read_slice().to_vec();
+                    components.types.push(GuiComponentType::Text(GuiComponentText {
+                        font,
+                        color,
+                        glyphs
+                    }));
+                },
+                i => {
+                    panic!("Unknown enum identifier {:?}", i);
+                }
+            }
+        }
+
+
+        Gui {
+            id,
+            builder_data,
+            components: Box::new(components),
+        }
+    }
+
 }
 
 impl Default for Gui {
@@ -93,8 +175,7 @@ impl Default for Gui {
             builder_data: Box::default(),
             components: Box::new(GuiComponents {
                 base_view: RectF32::default(),
-                root_layout: GuiLayout::default(),
-                //layouts: Vec::with_capacity(8),
+                layouts: Vec::with_capacity(8),
                 layout_items: Vec::with_capacity(16),
                 types: Vec::with_capacity(16),
                 sprites: Vec::with_capacity(64),

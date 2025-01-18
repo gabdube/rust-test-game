@@ -3,7 +3,7 @@ use fnv::FnvHashMap;
 use loomz_shared::base_types::{PositionF32, SizeF32, RectF32, RgbaU8};
 use loomz_shared::assets::{MsdfFontId, msdf_font::ComputedGlyph};
 use loomz_shared::{assets_err, LoomzApi, TextureId};
-use super::{Gui, component::*, layout::*};
+use crate::gui::{Gui, GuiComponents, component::*, layout::*};
 
 pub(super) struct GuiFontStyle {
     pub font: MsdfFontId,
@@ -18,24 +18,22 @@ pub(super) struct GuiFrameStyle {
     pub color: RgbaU8,
 }
 
-#[derive(Default)]
 pub(super) struct GuiBuilderData {
     pub errors: Vec<crate::CommonError>,
     pub font_styles: FnvHashMap<&'static str, GuiFontStyle>,
-    pub frame_styles: FnvHashMap<&'static str, GuiFrameStyle>,
-    pub layouts_stack: Vec<GuiLayout>,
+    pub layouts_stack: Vec<(usize, GuiLayout)>,
     pub default_font: Option<MsdfFontId>,
     pub default_font_size: f32,
 }
 
 pub struct GuiBuilder<'a> {
     api: &'a LoomzApi,
-    gui: &'a mut Gui,
-    layout_item: Option<GuiLayoutItem>,
+    builder_data: &'a mut GuiBuilderData,
+    components: &'a mut GuiComponents,
+    layout_item: GuiLayoutItem,
     frame_style: Option<GuiFrameStyle>,
-    layout_index: u32,
+    next_layout: GuiLayoutType,
     item_index: u32,
-    items_level: u32,
 }
 
 impl<'a> GuiBuilder<'a> {
@@ -54,16 +52,17 @@ impl<'a> GuiBuilder<'a> {
         }
 
         gui.builder_data.layouts_stack.clear();
-        gui.builder_data.layouts_stack.push(gui.components.root_layout);
+        gui.builder_data.layouts_stack.push((0, GuiLayout::default()));
+        gui.components.layouts.push(GuiLayout::default());
 
         GuiBuilder {
             api,
-            gui,
-            layout_item: None,
+            builder_data: &mut gui.builder_data,
+            components: &mut gui.components,
+            layout_item: GuiLayoutItem::default(),
             frame_style: None,
-            layout_index: 0,
+            next_layout: GuiLayoutType::VBox,
             item_index: 0,
-            items_level: 0,
         }
     }
 
@@ -87,7 +86,7 @@ impl<'a> GuiBuilder<'a> {
         let texture = match self.api.assets_ref().texture_id_by_name(texture_key) {
             Some(texture) => texture,
             None => {
-                self.gui.builder_data.errors.push(assets_err!("No texture named {:?} in app", texture_key));
+                self.builder_data.errors.push(assets_err!("No texture named {:?} in app", texture_key));
                 return;
             }
         };
@@ -103,12 +102,12 @@ impl<'a> GuiBuilder<'a> {
         let font = match self.api.assets_ref().font_id_by_name(font_key) {
             Some(font) => font,
             None => {
-                self.gui.builder_data.errors.push(assets_err!("No font named {:?} in app", font_key));
+                self.builder_data.errors.push(assets_err!("No font named {:?} in app", font_key));
                 return;
             }
         };
 
-        self.gui.builder_data.font_styles.insert(style_key, GuiFontStyle {
+        self.builder_data.font_styles.insert(style_key, GuiFontStyle {
             font,
             font_size,
             color,
@@ -117,51 +116,42 @@ impl<'a> GuiBuilder<'a> {
 
     /// Sets the layout of the root elements in the gui
     pub fn root_layout(&mut self, layout_type: GuiLayoutType) {
-        let root_layout = self.gui.components.root_layout;
-        // if root_layout.width != 0.0 || root_layout.height != 0.0 {
-        //     eprintln!("Trying to overwrite root layout. Ignoring second call");
-        //     return;
-        // }
+        let root = match self.builder_data.layouts_stack.get_mut(0) {
+            Some((_, root)) => root,
+            None => unreachable!("Root layout will always be present")
+        };
 
-        self.gui.components.root_layout.ty = layout_type;
+        root.ty = layout_type;
     }
 
     /// Sets the layout used to position the child items of the next component
     pub fn layout(&mut self, layout_type: GuiLayoutType) {
-        // let next_item_index = self.gui.components.layout_items.len() as u32;
-        // self.gui.components.layouts.push(GuiLayout {
-        //     ty: layout_type,
-        //     width: 0.0,
-        //     height: 0.0,
-        //     first_component: next_item_index,
-        //     last_component: u32::MAX, // u32::MAX means the layout does not have any item yet
-        // });
-
-        // self.layout_index = (self.gui.components.layouts.len() as u32) - 1;
+        self.next_layout = layout_type;
     }
 
     /// Sets the layout item of the next component
     pub fn layout_item(&mut self, width: f32, height: f32) {
-        self.layout_item = Some(GuiLayoutItem { 
+        self.layout_item = GuiLayoutItem {
+            has_layout: false,
             position: PositionF32::default(),
             size: SizeF32 { width, height }
-        });
+        };
     }
 
     /// Adds a simple text component to the gui
     pub fn label(&mut self, text_value: &str, style_key: &str) {
-        let style = match self.gui.builder_data.font_styles.get(style_key) {
+        let style = match self.builder_data.font_styles.get(style_key) {
             Some(s) => s,
             None => {
-                self.gui.builder_data.errors.push(assets_err!("No frame style with key {:?} in builder", style_key));
+                self.builder_data.errors.push(assets_err!("No frame style with key {:?} in builder", style_key));
                 return;
             }
         };
 
         let component = build_text_component(self.api, text_value, &style);
-        let layout_item = self.next_layout_item(component.size());
+        let layout_item = self.layout_item;
 
-        let compo = &mut self.gui.components;
+        let compo = &mut self.components;
         compo.layout_items.push(layout_item);
         compo.types.push(GuiComponentType::Text(component));
 
@@ -169,56 +159,44 @@ impl<'a> GuiBuilder<'a> {
         self.item_index += 1;
     }
 
-    /// Adds a frame component into the gui. If style_key is empty, use the last value of `frame_style`
-    pub fn frame<F: FnOnce(&mut GuiBuilder)>(&mut self, size: SizeF32, callback: F) {
+    /// Adds a frame component into the gui using the last defined frame style
+    pub fn frame<F: FnOnce(&mut GuiBuilder)>(&mut self, callback: F) {
         let style = match self.frame_style {
             Some(style) => style,
             None => {
-                self.gui.builder_data.errors.push(assets_err!("No pushed frame style in builder"));
+                self.builder_data.errors.push(assets_err!("No pushed frame style in builder"));
                 return;
             }
         };
 
+        let mut item = self.layout_item;
+        item.has_layout = true;
+
         let frame = GuiComponentFrame {
             texture: style.texture,
-            size,
+            size: item.size,
             texcoord: style.region,
             color: style.color,
         };
 
-        let layout_item = self.next_layout_item(size);
-
-        let compo = &mut self.gui.components;
-        compo.layout_items.push(layout_item);
+        let compo = &mut self.components;
+        compo.layout_items.push(item);
         compo.types.push(GuiComponentType::Frame(frame));
 
-        self.update_layout(size);
+        self.update_layout(item.size);
+        self.push_next_layout();
 
-        self.layout_index += 1;
         self.item_index += 1;
-        self.items_level += 1;
 
         callback(self);
 
-        self.items_level -= 1;
-    }
-
-    fn next_layout_item(&mut self, size: SizeF32) -> GuiLayoutItem {
-        match self.layout_item.take() {
-            Some(item) => item,
-            None => {
-                GuiLayoutItem {
-                    position: PositionF32::default(),
-                    size
-                }
-            }
-        }
+        self.store_layout();
     }
 
     fn update_layout(&mut self, item_size: SizeF32) {
-        let current_layout = match self.gui.builder_data.layouts_stack.last_mut() {
-            Some(layout) => layout,
-            None => unreachable!("There will always be a root layout at index 0")
+        let current_layout = match self.builder_data.layouts_stack.last_mut() {
+            Some((_, layout)) => layout,
+            None => unreachable!("There will always be a layout")
         };
 
         current_layout.children_count += 1;
@@ -229,6 +207,28 @@ impl<'a> GuiBuilder<'a> {
                 current_layout.height += item_size.height;
             }
         }
+    }
+
+    fn push_next_layout(&mut self) {
+        let next_layout_index = self.components.layouts.len();
+        let new_layout = GuiLayout {
+            ty: self.next_layout,
+            width: 0.0,
+            height: 0.0,
+            children_count: 0,
+        };
+
+        self.components.layouts.push(new_layout);
+        self.builder_data.layouts_stack.push((next_layout_index, new_layout));
+    }
+
+    fn store_layout(&mut self) {
+        let (layout_index, new_layout) = match self.builder_data.layouts_stack.pop() {
+            Some(value) => value,
+            None => unreachable!("There must always be at least 2 layouts (root+new_layout) in the stack when calling this function")
+        };
+
+        self.components.layouts[layout_index] = new_layout;
     }
 }
 
@@ -264,4 +264,18 @@ fn build_text_component(
         font: style.font,
         color: style.color,
     }
+}
+
+impl Default for GuiBuilderData {
+
+    fn default() -> Self {
+        GuiBuilderData {
+            errors: Vec::with_capacity(0),
+            font_styles: FnvHashMap::default(),
+            layouts_stack: Vec::with_capacity(4),
+            default_font: None,
+            default_font_size: 0.0,
+        }
+    }
+
 }

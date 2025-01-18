@@ -5,7 +5,7 @@ mod animations;
 use animations::{Animations, PawnAnimationType};
 
 use std::time::Instant;
-use loomz_shared::base_types::{PositionF32, PositionF64, size, rect, rgb};
+use loomz_shared::base_types::{PositionF32, PositionF64, rect, rgb};
 use loomz_shared::api::WorldActorId;
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
@@ -78,6 +78,10 @@ impl LoomzClient {
         client.state = reader.read_from_u32();
         client.target_position = reader.read();
         client.player = reader.load();
+        client.main_menu = reader.load();
+
+        client.init_main_menu()?;
+        client.main_menu.sync_with_engine(api);
 
         Ok(client)
     }
@@ -86,6 +90,7 @@ impl LoomzClient {
         writer.write_into_u32(self.state);
         writer.write(&self.target_position);
         writer.store(&self.player);
+        writer.store(&self.main_menu);
     }
 
     pub fn update(&mut self) -> Result<(), CommonError> {
@@ -211,22 +216,17 @@ impl LoomzClient {
         };
 
         self.main_menu.build(&self.api, &view, |gui| {
-            gui.font_style("item1", "bubblegum", 100.0, rgb(204, 142, 100));
+            gui.font_style("menu_item", "bubblegum", 100.0, rgb(71, 43, 26));
             gui.root_layout(VBox);
 
             gui.layout(VBox);
-            gui.layout_item(300.0, 300.0);
-            gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
-            gui.frame(size(300.0, 300.0), |gui| {
-                // gui.label("Start", "item1");
-                // gui.label("Debug", "item1");
-                // gui.label("Exit", "item1");
-            });
-
-            gui.layout(VBox);
-            gui.layout_item(300.0, 300.0);
-            gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(117, 55, 24));
-            gui.frame(size(300.0, 300.0), |gui| {
+            gui.layout_item(400.0, 440.0);
+            gui.frame_style("gui", rect(0.0, 0.0, 2.0, 2.0), rgb(24, 18, 15));
+            gui.frame(|gui| {
+                gui.layout_item(300.0, 100.0);
+                gui.label("Start", "menu_item");
+                gui.label("Debug", "menu_item");
+                gui.label("Exit", "menu_item");
             });
         })?;
 

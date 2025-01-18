@@ -18,23 +18,10 @@ pub(super) struct GuiLayout {
 
 #[derive(Copy, Clone, Default, Debug)]
 pub(super) struct GuiLayoutItem {
+    pub has_layout: bool,
     pub position: PositionF32,
     pub size: SizeF32,
 }
-
-impl GuiLayout {
-
-    // pub fn update_size(&mut self, item_size: SizeF32) {
-    //     match self.ty {
-    //         GuiLayoutType::VBox => {
-    //             self.width = f32::max(self.width, item_size.width);
-    //             self.height += item_size.height;
-    //         },
-    //     }
-    // }
-
-}
-
 
 impl Default for GuiLayout {
     fn default() -> Self {

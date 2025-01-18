@@ -10,6 +10,15 @@ pub struct RectF32 {
 
 impl RectF32 {
 
+    pub fn from_position_and_size(pos: PositionF32, size: SizeF32) -> Self {
+        RectF32 {
+            left: pos.x,
+            top: pos.y,
+            right: pos.x + size.width,
+            bottom: pos.y + size.height
+        }
+    }
+
     #[inline]
     pub const fn splat(&self) -> [f32; 4] {
         [self.left, self.top, self.right, self.bottom]
@@ -62,6 +71,23 @@ impl RgbaU8 {
 
     pub const fn splat(&self) -> [u8; 4] {
         [self.r, self.g, self.b, self.a]
+    }
+}
+
+impl Into<u32> for RgbaU8 {
+    fn into(self) -> u32 {
+        (self.r as u32) + ((self.g as u32) << 8) + ((self.b as u32) << 16) + ((self.a as u32) << 24)
+    }
+}
+
+impl From<u32> for RgbaU8 {
+    fn from(value: u32) -> Self {
+        RgbaU8 {
+            r: ((value & 0x000000FF) >> 0) as u8,
+            g: ((value & 0x0000FF00) >> 8) as u8,
+            b: ((value & 0x00FF0000) >> 16) as u8,
+            a: ((value & 0xFF000000) >> 24) as u8,
+        }
     }
 }
 

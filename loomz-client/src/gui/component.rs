@@ -30,7 +30,12 @@ impl GuiComponentText {
     fn generate_sprites(&self, item: &GuiLayoutItem, sprites: &mut Vec<GuiSprite>) {
         let font = self.font;
         let color = self.color;
-        let [x, y] = item.position.splat();
+        let [mut x, mut y] = item.position.splat();
+
+        let size = self.size();
+        x += (item.size.width - size.width) / 2.0;
+        y += (item.size.height - size.height) / 2.0;
+
         for glyph in self.glyphs.iter() {
             sprites.push(GuiSprite {
                 ty: GuiSpriteType::Font(font),
@@ -42,6 +47,7 @@ impl GuiComponentText {
     }
 }
 
+#[derive(Copy, Clone)]
 pub struct GuiComponentFrame {
     pub texture: TextureId,
     pub size: SizeF32,

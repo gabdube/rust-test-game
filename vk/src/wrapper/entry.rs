@@ -20,7 +20,7 @@ const LIB_PATH: &str = "libvulkan.so.1";
 const LIB_PATH: &str = "libvulkan.so";
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
-const LIB_PATH: &str = "libvulkan.dylib";
+const LIB_PATH: &str = "libvulkan.1.dylib";
 
 pub struct Entry {
     _lib: Library,
