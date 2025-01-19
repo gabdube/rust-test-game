@@ -131,6 +131,10 @@ impl LoomzClient {
             gui_updates.cursor_position = Some(cursor_position.as_f32());
         }
 
+        if let Some(buttons) = new_inputs.mouse_buttons() {
+            gui_updates.left_mouse_down = Some(buttons.left_button_down());
+        }
+
         if let Some(new_size) = new_inputs.screen_size() {
             gui_updates.view = Some(rect(0.0, 0.0, new_size.width, new_size.height));
         }
@@ -148,15 +152,20 @@ impl LoomzClient {
         Ok(())
     }
 
-    fn gameplay_inputs(&mut self, new_input: InputBuffer) {
+    fn gameplay_inputs(&mut self, new_inputs: InputBuffer) {
         let mut gui_updates = gui::GuiUpdates::default();
 
-        if let Some(cursor_position) = new_input.cursor_position() {
+        if let Some(cursor_position) = new_inputs.cursor_position() {
             self.target_position = cursor_position.as_f32();
+            gui_updates.cursor_position = Some(cursor_position.as_f32());
         }
 
-        if let Some(new_size) = new_input.screen_size() {
+        if let Some(new_size) = new_inputs.screen_size() {
             gui_updates.view = Some(rect(0.0, 0.0, new_size.width, new_size.height));
+        }
+
+        if let Some(buttons) = new_inputs.mouse_buttons() {
+            gui_updates.left_mouse_down = Some(buttons.left_button_down());
         }
 
         self.main_menu.update(&self.api, &gui_updates);
@@ -228,6 +237,7 @@ impl LoomzClient {
             style.root_layout(VBox);
             style.label("menu_item", GuiStyleState::Base, "bubblegum", 100.0, rgb(71, 43, 26));
             style.label("menu_item", GuiStyleState::Hovered, "bubblegum", 100.0, rgb(71, 26, 26));
+            style.label("menu_item", GuiStyleState::Selected, "bubblegum", 100.0, rgb(110, 34, 34));
             style.frame("main_menu_panel", GuiStyleState::Base, "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(24, 18, 15));
         })?;
 
@@ -236,6 +246,7 @@ impl LoomzClient {
             gui.layout_item(400.0, 440.0);
             gui.frame("main_menu_panel", |gui| {
                 gui.layout_item(300.0, 100.0);
+                gui.label_callback();
                 gui.label("Start", "menu_item");
                 gui.label("Debug", "menu_item");
                 gui.label("Exit", "menu_item");

@@ -48,13 +48,17 @@ impl<'a> GuiBuilder<'a> {
         self.next_layout = layout_type;
     }
 
-    /// Sets the layout item of the next component
+    /// Sets the layout item of the next components
     pub fn layout_item(&mut self, width: f32, height: f32) {
         self.layout_item = GuiLayoutItem {
             has_layout: false,
             position: PositionF32::default(),
             size: SizeF32 { width, height }
         };
+    }
+
+    pub fn label_callback(&mut self, ) {
+
     }
 
     /// Adds a simple text component to the gui

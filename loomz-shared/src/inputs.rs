@@ -13,10 +13,16 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(Copy, Clone)]
+    #[derive(Copy, Clone, Debug)]
     pub struct MouseButtonState: u32 {
         const LEFT = 0b0001;
-        const RIGHT = 0b0001;
+        const RIGHT = 0b0010;
+    }
+}
+
+impl MouseButtonState {
+    pub const fn left_button_down(&self) -> bool {
+        self.contains(MouseButtonState::LEFT)
     }
 }
 
@@ -59,6 +65,18 @@ impl InnerInputBuffer {
         self.update_flags |= InputUpdateFlags::MOUSE_MOVE;
         self.cursor_position_old = self.cursor_position;
         self.cursor_position = PositionF64 { x, y };
+    }
+
+    fn mouse_buttons(&mut self) -> Option<MouseButtonState> {
+        match self.update_flags.contains(InputUpdateFlags::MOUSE_BTN) {
+            true => {
+                self.update_flags.remove(InputUpdateFlags::MOUSE_BTN);
+                Some(self.mouse_buttons)
+            },
+            false => {
+                None
+            }
+        }
     }
 
     fn update_mouse_button(&mut self, btns: MouseButtonState) {
@@ -117,6 +135,10 @@ impl InputBuffer {
 
     pub fn mouse_buttons_value(&self) -> MouseButtonState {
         self.inputs().mouse_buttons
+    }
+
+    pub fn mouse_buttons(&self) -> Option<MouseButtonState> {
+        self.inputs().mouse_buttons()
     }
 
     pub fn screen_size(&self) -> Option<SizeF32> {

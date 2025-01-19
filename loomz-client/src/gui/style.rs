@@ -10,14 +10,14 @@ pub(super) type GuiStyleMap = FnvHashMap<StyleKey, u32>;
 pub enum GuiStyleState {
     Base,
     Hovered,
-    Active
+    Selected
 }
 
 #[derive(Copy, Clone)]
 pub(super) struct GuiComponentStyleBase<T: Copy> {
     pub base: T,
     pub hovered: T,
-    pub active: T,
+    pub selected: T,
 }
 
 #[derive(Copy, Clone)]
@@ -91,7 +91,7 @@ impl<'a> GuiStyleBuilder<'a> {
             self.styles.push(GuiComponentStyle::Label(GuiComponentStyleBase {
                 base: label_style_value,
                 hovered: label_style_value,
-                active: label_style_value,
+                selected: label_style_value,
             }))
         }
     }
@@ -132,7 +132,7 @@ impl<'a> GuiStyleBuilder<'a> {
             self.styles.push(GuiComponentStyle::Frame(GuiComponentStyleBase {
                 base: frame_style_value,
                 hovered: frame_style_value,
-                active: frame_style_value,
+                selected: frame_style_value,
             }))
         }
     }
@@ -143,7 +143,7 @@ fn update_style<T: Copy>(state: GuiStyleState, style: &mut GuiComponentStyleBase
     let style = match state {
         GuiStyleState::Base => &mut style.base,
         GuiStyleState::Hovered => &mut style.hovered,
-        GuiStyleState::Active => &mut style.active,
+        GuiStyleState::Selected => &mut style.selected,
     };
 
     *style = value;

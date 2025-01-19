@@ -1,4 +1,6 @@
 mod style;
+use std::u32;
+
 use style::{GuiStyleBuilder, GuiStyleMap, GuiComponentStyle};
 pub use style::GuiStyleState;
 
@@ -24,11 +26,11 @@ struct GuiComponentState {
     selected_index: u32,
 }
 
-
 #[derive(Default, Copy, Clone)]
 pub struct GuiUpdates {
     pub cursor_position: Option<PositionF32>,
     pub view: Option<RectF32>,
+    pub left_mouse_down: Option<bool>,
 }
 
 struct GuiBuilderData {
@@ -106,6 +108,10 @@ impl Gui {
             self.update_cursor_position(cursor_position, &mut need_sync);
         }
 
+        if let Some(left_button) = updates.left_mouse_down {
+            self.update_mouse_button(left_button, &mut need_sync);
+        }
+
         if need_sync {
             self.sync_with_engine(api);
         }
@@ -116,26 +122,43 @@ impl Gui {
         layout::compute(self);
     }
 
-    fn on_hovered_changed(&mut self, new_position: u32, last_position: u32) {
+    fn on_style_update(&mut self, old_state: GuiComponentState) {
+        let state = self.inner_state.state;
         let styles = &self.inner_state.styles;
-        let types_count = self.inner_state.types.len() as u32;
+        let types = &mut self.inner_state.types;
+        let types_count = types.len() as u32;
 
-        if last_position != u32::MAX {
-            assert!(last_position < types_count, "last_position is not in scope");
-            self.inner_state.types[last_position as usize].update_style(styles, GuiStyleState::Base);
+        if old_state.selected_index != state.selected_index {
+            if state.selected_index < types_count {
+                types[state.selected_index as usize].update_style(styles, GuiStyleState::Selected);
+            } else {
+                if old_state.selected_index < types_count {
+                    types[old_state.selected_index as usize].update_style(styles, GuiStyleState::Base);
+                }
+
+                if state.hovered_index < types_count {
+                    types[state.hovered_index as usize].update_style(styles, GuiStyleState::Hovered);
+                }
+            }
+        }
+
+        if old_state.hovered_index != state.hovered_index && state.selected_index == u32::MAX {
+            if old_state.hovered_index < types_count {
+                types[old_state.hovered_index as usize].update_style(styles, GuiStyleState::Base);
+            }
+
+            if state.hovered_index < types_count {
+                types[state.hovered_index as usize].update_style(styles, GuiStyleState::Hovered);
+            }
         }
         
-        if new_position != u32::MAX {
-            assert!(new_position < types_count, "new_position is not in scope");
-            self.inner_state.types[new_position as usize].update_style(styles, GuiStyleState::Hovered);
-        }
     }
 
     fn update_cursor_position(&mut self, position: PositionF32, need_sync: &mut bool) {
         let inner_state = &mut self.inner_state;
 
-        let last_position = inner_state.state.hovered_index;
-        let mut new_position = u32::MAX;
+        let old_state = inner_state.state;
+        let mut new_hovered_index = u32::MAX;
 
         let mut index = 0;
         let max_components = inner_state.layout_items.len();
@@ -143,15 +166,29 @@ impl Gui {
             let item = inner_state.layout_items[index];
             let view = RectF32::from_position_and_size(item.position, item.size);
             if view.is_point_inside(position)  {
-                new_position = index as u32;
+                new_hovered_index = index as u32;
             }
 
             index += 1;
         }
 
-        if last_position != new_position {
-            inner_state.state.hovered_index = new_position;
-            self.on_hovered_changed(new_position, last_position);
+        if old_state.hovered_index != new_hovered_index {
+            inner_state.state.hovered_index = new_hovered_index;
+            self.on_style_update(old_state);
+            *need_sync = true;
+        }
+    }
+
+    fn update_mouse_button(&mut self, left_button_pressed: bool, need_sync: &mut bool) {
+        let old_state = self.inner_state.state;
+        let mut new_selected_index = u32::MAX;
+        if left_button_pressed {
+            new_selected_index = old_state.hovered_index;
+        }
+
+        if old_state.selected_index != new_selected_index {
+            self.inner_state.state.selected_index = new_selected_index;
+            self.on_style_update(old_state);
             *need_sync = true;
         }
     }

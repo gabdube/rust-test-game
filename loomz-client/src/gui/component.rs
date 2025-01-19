@@ -63,7 +63,7 @@ impl GuiLabel {
         let style = match new_state {
             GuiStyleState::Base => style.base,
             GuiStyleState::Hovered => style.hovered,
-            GuiStyleState::Active => style.active,
+            GuiStyleState::Selected => style.selected,
         };
 
         // Note: Font change not supported because recomputing the glyph would be a pain in the ass
@@ -109,7 +109,7 @@ impl GuiFrame {
         let style = match new_state {
             GuiStyleState::Base => style.base,
             GuiStyleState::Hovered => style.hovered,
-            GuiStyleState::Active => style.active,
+            GuiStyleState::Selected => style.selected,
         };
 
         self.texture = style.texture;
