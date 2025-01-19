@@ -4,8 +4,8 @@ use std::u32;
 use style::{GuiStyleBuilder, GuiStyleMap, GuiComponentStyle};
 pub use style::GuiStyleState;
 
-mod component;
-use component::{GuiLabel, GuiComponentType};
+mod components;
+use components::{GuiLabel, GuiComponentType};
 
 mod layout;
 use layout::{GuiLayout, GuiLayoutItem};

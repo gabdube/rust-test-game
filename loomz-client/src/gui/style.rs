@@ -1,6 +1,6 @@
 use fnv::FnvHashMap;
 use loomz_shared::{LoomzApi, RgbaU8, RectF32, assets_err};
-use crate::gui::{Gui, GuiBuilderData, GuiLayoutType, component::{GuiComponentTag, GuiLabelStyle, GuiFrameStyle}};
+use crate::gui::{Gui, GuiBuilderData, GuiLayoutType, components::{GuiComponentTag, GuiLabelStyle, GuiFrameStyle}};
 
 type StyleKey = (&'static str, GuiComponentTag);
 pub(super) type GuiStyleMap = FnvHashMap<StyleKey, u32>;

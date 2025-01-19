@@ -1,7 +1,7 @@
 use loomz_shared::base_types::{PositionF32, SizeF32, RectF32};
 use loomz_shared::assets::msdf_font::ComputedGlyph;
 use loomz_shared::{LoomzApi, assets_err};
-use super::{Gui, GuiBuilderData, GuiInnerState, component::*, layout::*, style::*};
+use super::{Gui, GuiBuilderData, GuiInnerState, components::*, layout::*, style::*};
 
 pub struct GuiBuilder<'a> {
     api: &'a LoomzApi,
@@ -174,7 +174,7 @@ fn build_text_component(
     style: &GuiLabelStyle,
     style_index: u32,
 ) -> GuiLabel {
-    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_segmentation::UnicodeSegmentation; 
 
     let font_asset = match api.assets_ref().font(style.font) {
         Some(font) => font,
