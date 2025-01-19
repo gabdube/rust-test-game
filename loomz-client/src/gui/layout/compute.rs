@@ -13,20 +13,20 @@ struct LayoutComputeState<'a> {
 /// Compute the position of the items in the layout.
 /// Sizing the layout and the layout item is done a build time in `builder`
 pub fn compute(gui: &mut Gui) {
-    let components = &mut gui.components;
+    let gui = &mut gui.inner_state;
 
     // Layouts may be empty if `gui.resize` was called on an uninitialized gui
-    let root_children_count = components.layouts.get(0).map(|layout| layout.children_count ).unwrap_or(0);
+    let root_children_count = gui.layouts.get(0).map(|layout| layout.children_count ).unwrap_or(0);
     if root_children_count == 0 {
         return;
     }
 
     let mut state = LayoutComputeState {
-        layout_items: &mut components.layout_items,
-        layouts: &mut components.layouts,
+        layout_items: &mut gui.layout_items,
+        layouts: &mut gui.layouts,
         item_index: 0,
         layout_index: -1,
-        view: components.base_view,
+        view: gui.base_view,
     };
 
     compute_layout(&mut state);
@@ -135,9 +135,9 @@ mod tests {
 
         assert!(build_result.is_ok(), "Gui build failed: {:?}", build_result);
 
-        let components = &gui.components; 
-        let items = &components.layout_items;
-        let layouts = &components.layouts;
+        let gui = &gui.inner_state; 
+        let items = &gui.layout_items;
+        let layouts = &gui.layouts;
 
         assert_eq!(layouts.len(), 5);
         assert_eq!(items.len(), 4);

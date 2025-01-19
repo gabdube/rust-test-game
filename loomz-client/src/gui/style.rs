@@ -1,7 +1,12 @@
+use fnv::FnvHashMap;
 use loomz_shared::{LoomzApi, RgbaU8, RectF32, assets_err};
 use loomz_shared::assets::{MsdfFontId, TextureId};
-use crate::gui::{Gui, GuiBuilderData, GuiLayoutType, GuiStyleState};
+use crate::gui::{Gui, GuiBuilderData, GuiLayoutType};
 
+
+pub(super) type GuiStyleMap = FnvHashMap<&'static str, u32>;
+
+#[derive(Clone, Copy)]
 pub(super) struct GuiFontStyle {
     pub font: MsdfFontId,
     pub font_size: f32,
@@ -15,10 +20,28 @@ pub(super) struct GuiFrameStyle {
     pub color: RgbaU8,
 }
 
+#[derive(Copy, Clone)]
+pub enum GuiStyleState {
+    Base,
+    Hovered,
+    Active
+}
+
+pub(super) struct GuiComponentStyleBase<T: Copy> {
+    pub base: T,
+    pub hovered: T,
+    pub active: T,
+}
+
+pub(super) enum GuiComponentStyle {
+    Font(GuiComponentStyleBase<GuiFontStyle>),
+    Frame(GuiComponentStyleBase<GuiFrameStyle>)
+}
 
 pub struct GuiStyleBuilder<'a> {
     api: &'a LoomzApi,
     builder_data: &'a mut GuiBuilderData,
+    styles: &'a mut Vec<GuiComponentStyle>
 }
 
 impl<'a> GuiStyleBuilder<'a> {
@@ -29,6 +52,7 @@ impl<'a> GuiStyleBuilder<'a> {
         GuiStyleBuilder {
             api,
             builder_data: &mut gui.builder_data,
+            styles: &mut gui.inner_state.styles,
         }
     }
 
@@ -60,11 +84,27 @@ impl<'a> GuiStyleBuilder<'a> {
             }
         };
 
-        self.builder_data.font_styles.insert(style_key, GuiFontStyle {
+        let font_style_value = GuiFontStyle {
             font,
             font_size,
             color,
-        });
+        };
+
+        if let Some(index) = self.builder_data.font_styles.get(style_key) {
+            let style_index = *index as usize;
+            match &mut self.styles[style_index] {
+                GuiComponentStyle::Font(font_style) => update_style(state, font_style, font_style_value),
+                _ => unreachable!("Style type is enforced by the code")
+            };
+        } else {
+            let style_index = self.styles.len();
+            self.builder_data.font_styles.insert(style_key, style_index as u32);
+            self.styles.push(GuiComponentStyle::Font(GuiComponentStyleBase {
+                base: font_style_value,
+                hovered: font_style_value,
+                active: font_style_value,
+            }))
+        }
     }
 
     pub fn frame(
@@ -83,12 +123,37 @@ impl<'a> GuiStyleBuilder<'a> {
             }
         };
 
-        self.builder_data.frame_styles.insert(style_key, GuiFrameStyle {
+        let frame_style_value = GuiFrameStyle {
             texture,
             region,
             color,
-        });
+        };
+
+        if let Some(index) = self.builder_data.frame_styles.get(style_key) {
+            let style_index = *index as usize;
+            match &mut self.styles[style_index] {
+                GuiComponentStyle::Frame(frame_style) => update_style(state, frame_style, frame_style_value),
+                _ => unreachable!("Style type is enforced by the code")
+            };
+        } else {
+            let style_index = self.styles.len();
+            self.builder_data.frame_styles.insert(style_key, style_index as u32);
+            self.styles.push(GuiComponentStyle::Frame(GuiComponentStyleBase {
+                base: frame_style_value,
+                hovered: frame_style_value,
+                active: frame_style_value,
+            }))
+        }
     }
 
+}
 
+fn update_style<T: Copy>(state: GuiStyleState, style: &mut GuiComponentStyleBase<T>, value: T) {
+    let style = match state {
+        GuiStyleState::Base => &mut style.base,
+        GuiStyleState::Hovered => &mut style.hovered,
+        GuiStyleState::Active => &mut style.active,
+    };
+
+    *style = value;
 }

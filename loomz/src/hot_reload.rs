@@ -212,7 +212,7 @@ fn lib_path() -> Result<PathBuf, CommonError> {
 
     let mut src = match cfg!(debug_assertions) {
         true => PathBuf::from("./target/debug"),
-        false => PathBuf::from("./target/debug"),
+        false => PathBuf::from("./target/release"),
     };
     src.push(&name);
 

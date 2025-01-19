@@ -1,3 +1,7 @@
+mod style;
+use style::{GuiStyleBuilder, GuiStyleMap, GuiComponentStyle};
+pub use style::GuiStyleState;
+
 mod component;
 use component::{GuiComponentText, GuiComponentType};
 
@@ -5,24 +9,14 @@ mod layout;
 use layout::{GuiLayout, GuiLayoutItem};
 pub use layout::GuiLayoutType;
 
-mod style;
-use style::{GuiStyleBuilder, GuiFontStyle, GuiFrameStyle};
-
 mod builder;
 use builder::GuiBuilder;
 
-use fnv::FnvHashMap;
 use loomz_shared::base_types::{RectF32, PositionF32};
 use loomz_shared::api::{LoomzApi, GuiId, GuiSprite, GuiSpriteType};
 use loomz_shared::store::*;
 use loomz_shared::{CommonError, client_err};
 
-#[derive(Copy, Clone)]
-pub enum GuiStyleState {
-    Base,
-    Hovered,
-    Active
-}
 
 #[derive(Copy, Clone)]
 struct GuiComponentState {
@@ -38,16 +32,17 @@ pub struct GuiUpdates {
 }
 
 struct GuiBuilderData {
-    pub errors: Vec<crate::CommonError>,
-    pub layouts_stack: Vec<(usize, GuiLayout)>,
-    pub font_styles: FnvHashMap<&'static str, GuiFontStyle>,
-    pub frame_styles: FnvHashMap<&'static str, GuiFrameStyle>,
-    pub root_layout_type: GuiLayoutType,
+    errors: Vec<crate::CommonError>,
+    layouts_stack: Vec<(usize, GuiLayout)>,
+    font_styles: GuiStyleMap,
+    frame_styles: GuiStyleMap,
+    root_layout_type: GuiLayoutType,
 }
 
-struct GuiComponents {
+struct GuiInnerState {
     base_view: RectF32,
     state: GuiComponentState,
+    styles: Vec<GuiComponentStyle>,
     layouts: Vec<GuiLayout>,
     layout_items: Vec<GuiLayoutItem>,
     types: Vec<GuiComponentType>,
@@ -57,7 +52,7 @@ struct GuiComponents {
 pub struct Gui {
     id: GuiId,
     builder_data: Box<GuiBuilderData>,
-    components: Box<GuiComponents>,
+    inner_state: Box<GuiInnerState>,
 }
 
 impl Gui {
@@ -91,7 +86,7 @@ impl Gui {
             return Err(error_base);
         }
 
-        self.components.layouts[0] = self.get_root_layout();
+        self.inner_state.layouts[0] = self.get_root_layout();
 
         layout::compute(self);
 
@@ -118,30 +113,35 @@ impl Gui {
     }
 
     fn resize(&mut self, view: &RectF32) {
-        self.components.base_view = *view;
+        self.inner_state.base_view = *view;
         layout::compute(self);
     }
 
     fn on_hovered_changed(&mut self, new_position: u32, last_position: u32) {
+        let styles = &self.inner_state.styles;
+        let types_count = self.inner_state.types.len() as u32;
+
         if last_position != u32::MAX {
-            self.components.types[last_position as usize].on_mouse_left();
+            assert!(last_position < types_count, "last_position is not in scope");
+            self.inner_state.types[last_position as usize].update_style(styles, GuiStyleState::Base);
         }
         
         if new_position != u32::MAX {
-            self.components.types[new_position as usize].on_mouse_enter();
+            assert!(new_position < types_count, "new_position is not in scope");
+            self.inner_state.types[new_position as usize].update_style(styles, GuiStyleState::Hovered);
         }
     }
 
     fn update_cursor_position(&mut self, position: PositionF32, need_sync: &mut bool) {
-        let components = &mut self.components;
+        let inner_state = &mut self.inner_state;
 
-        let last_position = components.state.hovered_index;
+        let last_position = inner_state.state.hovered_index;
         let mut new_position = u32::MAX;
 
         let mut index = 0;
-        let max_components = components.layout_items.len();
+        let max_components = inner_state.layout_items.len();
         while index < max_components {
-            let item = components.layout_items[index];
+            let item = inner_state.layout_items[index];
             let view = RectF32::from_position_and_size(item.position, item.size);
             if view.is_point_inside(position)  {
                 new_position = index as u32;
@@ -151,27 +151,28 @@ impl Gui {
         }
 
         if last_position != new_position {
-            components.state.hovered_index = new_position;
+            inner_state.state.hovered_index = new_position;
             self.on_hovered_changed(new_position, last_position);
             *need_sync = true;
         }
     }
 
     fn generate_sprites(&mut self) {
-        let sprites = &mut self.components.sprites;
+        let inner = &mut self.inner_state;
+        let sprites = &mut inner.sprites;
         sprites.clear();
 
-        let component_count = self.components.layout_items.len();
+        let component_count = inner.layout_items.len();
         for i in 0..component_count {
-            let view = &self.components.layout_items[i];
-            let component_type = &self.components.types[i];
+            let view = &inner.layout_items[i];
+            let component_type = &inner.types[i];
             component_type.generate_sprites(view, sprites);
         }
     }
 
     fn sync_with_engine(&mut self, api: &LoomzApi) {
         self.generate_sprites();
-        api.gui().update_gui(&self.id, &self.components.sprites);
+        api.gui().update_gui(&self.id, &self.inner_state.sprites);
     }
 
     fn get_root_layout(&self) -> GuiLayout {
@@ -180,22 +181,15 @@ impl Gui {
             None => unreachable!("Root layout will always be present")
         }
     }
-}
 
-impl StoreAndLoad for Gui {
+    //
+    // Load / Store
+    //
 
-    fn store(&self, writer: &mut SaveFileWriterBase) {
-        // Note: no need to store builder data or the generated sprites in components
-        let components = &self.components;
-
-        writer.store(&self.id);
-        writer.write(&components.base_view);
-        writer.write(&components.state);
-        writer.write_slice(&components.layouts);
-        writer.write_slice(&components.layout_items);
-
-        writer.write_u32(components.types.len() as u32);
-        for component_type in components.types.iter() {
+    fn store_components_data(&self, writer: &mut SaveFileWriterBase) {
+        let inner = &self.inner_state;
+        writer.write_u32(inner.types.len() as u32);
+        for component_type in inner.types.iter() {
             match component_type {
                 GuiComponentType::Frame(frame) => {
                     writer.write_u32(0);
@@ -205,46 +199,32 @@ impl StoreAndLoad for Gui {
                     writer.write_u32(1);
                     writer.write(&text.font);
                     writer.write_into_u32(text.color);
+                    writer.write_u32(text.style_index);
                     writer.write_slice(&text.glyphs);
                 }
             }
         }
     }
 
-    fn load(reader: &mut SaveFileReaderBase) -> Self {
-        let id = reader.load();
-        let builder_data = Box::default();
-
-        let mut components = GuiComponents {
-            base_view: RectF32::default(),
-            state: GuiComponentState::default(),
-            layouts: Vec::new(),
-            layout_items: Vec::new(),
-            types: Vec::new(),
-            sprites: Vec::with_capacity(64),
-        };
-
-        components.base_view = reader.read();
-        components.state = reader.read();
-        components.layouts = reader.read_slice().to_vec();
-        components.layout_items = reader.read_slice().to_vec();
-
+    fn load_components_data(reader: &mut SaveFileReaderBase, inner_state: &mut GuiInnerState) {
         let component_types_count = reader.read_u32() as usize;
-        components.types = Vec::with_capacity(component_types_count);
+        inner_state.types = Vec::with_capacity(component_types_count);
         for _ in 0..component_types_count {
             let enum_identifier = reader.read_u32();
             match enum_identifier {
                 0 => {
-                    components.types.push(GuiComponentType::Frame(reader.read()));
+                    inner_state.types.push(GuiComponentType::Frame(reader.read()));
                 },
                 1 => {
                     let font = reader.read();
                     let color = reader.read_from_u32();
+                    let style_index = reader.read_u32();
                     let glyphs = reader.read_slice().to_vec();
-                    components.types.push(GuiComponentType::Text(GuiComponentText {
+                    inner_state.types.push(GuiComponentType::Text(GuiComponentText {
                         font,
                         color,
-                        glyphs
+                        glyphs,
+                        style_index
                     }));
                 },
                 i => {
@@ -252,12 +232,48 @@ impl StoreAndLoad for Gui {
                 }
             }
         }
+    } 
 
+}
+
+impl StoreAndLoad for Gui {
+
+    fn store(&self, writer: &mut SaveFileWriterBase) {
+        // Note: no need to store builder data or the generated sprites in components
+        let inner = &self.inner_state;
+
+        writer.store(&self.id);
+        writer.write(&inner.base_view);
+        writer.write(&inner.state);
+        writer.write_slice(&inner.layouts);
+        writer.write_slice(&inner.layout_items);
+        self.store_components_data(writer);
+    }
+
+    fn load(reader: &mut SaveFileReaderBase) -> Self {
+        let id = reader.load();
+        let builder_data = Box::default();
+
+        let mut inner_state = GuiInnerState {
+            base_view: RectF32::default(),
+            state: GuiComponentState::default(),
+            layouts: Vec::new(),
+            styles: Vec::new(),
+            layout_items: Vec::new(),
+            types: Vec::new(),
+            sprites: Vec::with_capacity(64),
+        };
+
+        inner_state.base_view = reader.read();
+        inner_state.state = reader.read();
+        inner_state.layouts = reader.read_slice().to_vec();
+        inner_state.layout_items = reader.read_slice().to_vec();
+        Self::load_components_data(reader, &mut inner_state);
 
         Gui {
             id,
             builder_data,
-            components: Box::new(components),
+            inner_state: Box::new(inner_state),
         }
     }
 
@@ -268,10 +284,11 @@ impl Default for Gui {
         Gui {
             id: GuiId::default(),
             builder_data: Box::default(),
-            components: Box::new(GuiComponents {
+            inner_state: Box::new(GuiInnerState {
                 base_view: RectF32::default(),
                 state: GuiComponentState::default(),
                 layouts: Vec::with_capacity(8),
+                styles: Vec::with_capacity(16),
                 layout_items: Vec::with_capacity(16),
                 types: Vec::with_capacity(16),
                 sprites: Vec::with_capacity(64),
@@ -285,8 +302,8 @@ impl Default for GuiBuilderData {
     fn default() -> Self {
         GuiBuilderData {
             errors: Vec::with_capacity(0),
-            font_styles: FnvHashMap::default(),
-            frame_styles: FnvHashMap::default(),
+            font_styles: GuiStyleMap::default(),
+            frame_styles: GuiStyleMap::default(),
             layouts_stack: Vec::with_capacity(4),
             root_layout_type: GuiLayoutType::VBox,
         }

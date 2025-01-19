@@ -1,12 +1,13 @@
 use loomz_shared::base_types::{SizeF32, RectF32, RgbaU8};
 use loomz_shared::assets::{MsdfFontId, TextureId};
 use loomz_shared::assets::msdf_font::ComputedGlyph;
-use super::{GuiLayoutItem, GuiSprite, GuiSpriteType};
+use super::{GuiLayoutItem, GuiSprite, GuiSpriteType, GuiComponentStyle, GuiStyleState};
 
 pub struct GuiComponentText {
     pub glyphs: Vec<ComputedGlyph>,
     pub color: RgbaU8,
     pub font: MsdfFontId,
+    pub style_index: u32,
 }
 
 impl GuiComponentText {
@@ -45,6 +46,22 @@ impl GuiComponentText {
             });
         }
     }
+
+    fn update_style(&mut self, styles: &Vec<GuiComponentStyle>, new_state: GuiStyleState) {
+        let style = match styles.get(self.style_index as usize) {
+            Some(GuiComponentStyle::Font(font_style)) => font_style,
+            _ => unreachable!("Styles are always valid")
+        };
+
+        let style = match new_state {
+            GuiStyleState::Base => style.base,
+            GuiStyleState::Hovered => style.hovered,
+            GuiStyleState::Active => style.active,
+        };
+
+        // Note: Font change not supported
+        self.color = style.color;
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -53,6 +70,7 @@ pub struct GuiComponentFrame {
     pub size: SizeF32,
     pub texcoord: RectF32,
     pub color: RgbaU8,
+    pub style_index: u32,
 }
 
 impl GuiComponentFrame {
@@ -66,6 +84,23 @@ impl GuiComponentFrame {
             texcoord: self.texcoord,
             color: self.color,
         });
+    }
+
+    fn update_style(&mut self, styles: &Vec<GuiComponentStyle>, new_state: GuiStyleState) {
+        let style = match styles.get(self.style_index as usize) {
+            Some(GuiComponentStyle::Frame(frame_style)) => frame_style,
+            _ => unreachable!("Styles are always valid")
+        };
+
+        let style = match new_state {
+            GuiStyleState::Base => style.base,
+            GuiStyleState::Hovered => style.hovered,
+            GuiStyleState::Active => style.active,
+        };
+
+        self.texture = style.texture;
+        self.texcoord = style.region;
+        self.color = style.color;
     }
 }
 
@@ -83,15 +118,10 @@ impl GuiComponentType {
         }
     }
 
-    pub fn on_mouse_enter(&self) {
+    pub fn update_style(&mut self, styles: &Vec<GuiComponentStyle>, new_state: GuiStyleState) {
         match self {
-            _ => {},
-        }
-    }
-
-    pub fn on_mouse_left(&self) {
-        match self {
-            _ => {},
+            GuiComponentType::Frame(frame) => frame.update_style(styles, new_state),
+            GuiComponentType::Text(text) => text.update_style(styles, new_state),
         }
     }
 

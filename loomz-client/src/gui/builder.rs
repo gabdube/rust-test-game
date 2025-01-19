@@ -1,12 +1,12 @@
 use loomz_shared::base_types::{PositionF32, SizeF32, RectF32};
 use loomz_shared::assets::msdf_font::ComputedGlyph;
 use loomz_shared::{LoomzApi, assets_err};
-use super::{Gui, GuiBuilderData, GuiComponents, component::*, layout::*, style::*};
+use super::{Gui, GuiBuilderData, GuiInnerState, component::*, layout::*, style::*};
 
 pub struct GuiBuilder<'a> {
     api: &'a LoomzApi,
     builder_data: &'a mut GuiBuilderData,
-    components: &'a mut GuiComponents,
+    gui: &'a mut GuiInnerState,
     layout_item: GuiLayoutItem,
     next_layout: GuiLayoutType,
     item_index: u32,
@@ -20,7 +20,7 @@ impl<'a> GuiBuilder<'a> {
         GuiBuilder {
             api,
             builder_data: &mut gui.builder_data,
-            components: &mut gui.components,
+            gui: &mut gui.inner_state,
             layout_item: GuiLayoutItem::default(),
             next_layout: GuiLayoutType::VBox,
             item_index: 0,
@@ -28,19 +28,19 @@ impl<'a> GuiBuilder<'a> {
     }
 
     fn clear_gui_components(view: &RectF32, gui: &mut Gui) {
-        let components = &mut gui.components;
-        components.base_view = *view;
-        components.state = Default::default();
-        components.layouts.clear();
-        components.layout_items.clear();
-        components.types.clear();
-        components.sprites.clear();
+        let inner = &mut gui.inner_state;
+        inner.base_view = *view;
+        inner.state = Default::default();
+        inner.layouts.clear();
+        inner.layout_items.clear();
+        inner.types.clear();
+        inner.sprites.clear();
 
         let builder_data = &mut gui.builder_data;
         builder_data.layouts_stack.clear();
         builder_data.layouts_stack.push((0, GuiLayout::default()));
 
-        components.layouts.push(GuiLayout::default());
+        inner.layouts.push(GuiLayout::default());
     }
 
     /// Sets the layout used to position the child items of the next component
@@ -59,20 +59,25 @@ impl<'a> GuiBuilder<'a> {
 
     /// Adds a simple text component to the gui
     pub fn label(&mut self, text_value: &str, style_key: &str) {
-        let style = match self.builder_data.font_styles.get(style_key) {
-            Some(s) => s,
+        let style_index = match self.builder_data.font_styles.get(style_key) {
+            Some(style_index) => *style_index,
             None => {
                 self.builder_data.errors.push(assets_err!("No label style with key {:?} in builder", style_key));
                 return;
             }
         };
 
-        let component = build_text_component(self.api, text_value, &style);
+        let style = match &self.gui.styles[style_index as usize] {
+            GuiComponentStyle::Font(font_style) => font_style.base,
+            _ => unreachable!("GuiComponentStyle cannot be something else than Font")
+        };
+
+        let component = build_text_component(self.api, text_value, &style, style_index);
         let layout_item = self.layout_item;
 
-        let compo = &mut self.components;
-        compo.layout_items.push(layout_item);
-        compo.types.push(GuiComponentType::Text(component));
+        let gui = &mut self.gui;
+        gui.layout_items.push(layout_item);
+        gui.types.push(GuiComponentType::Text(component));
 
         self.update_layout(layout_item.size);
         self.item_index += 1;
@@ -80,12 +85,17 @@ impl<'a> GuiBuilder<'a> {
 
     /// Adds a frame component into the gui using the last defined frame style
     pub fn frame<F: FnOnce(&mut GuiBuilder)>(&mut self, style_key: &'static str, callback: F) {
-        let style = match self.builder_data.frame_styles.get(style_key) {
-            Some(style) => style,
+        let style_index = match self.builder_data.frame_styles.get(style_key) {
+            Some(style_index) => *style_index,
             None => {
-                self.builder_data.errors.push(assets_err!("No label style with key {:?} in builder", style_key));
+                self.builder_data.errors.push(assets_err!("No frame style with key {:?} in builder", style_key));
                 return;
             }
+        };
+
+        let style = match &self.gui.styles[style_index as usize] {
+            GuiComponentStyle::Frame(frame_style) => frame_style.base,
+            _ => unreachable!("GuiComponentStyle cannot be something else than Frame")
         };
 
         let mut item = self.layout_item;
@@ -96,11 +106,12 @@ impl<'a> GuiBuilder<'a> {
             size: item.size,
             texcoord: style.region,
             color: style.color,
+            style_index,
         };
 
-        let compo = &mut self.components;
-        compo.layout_items.push(item);
-        compo.types.push(GuiComponentType::Frame(frame));
+        let gui = &mut self.gui;
+        gui.layout_items.push(item);
+        gui.types.push(GuiComponentType::Frame(frame));
 
         self.update_layout(item.size);
         self.push_next_layout();
@@ -129,7 +140,7 @@ impl<'a> GuiBuilder<'a> {
     }
 
     fn push_next_layout(&mut self) {
-        let next_layout_index = self.components.layouts.len();
+        let next_layout_index = self.gui.layouts.len();
         let new_layout = GuiLayout {
             ty: self.next_layout,
             width: 0.0,
@@ -137,7 +148,7 @@ impl<'a> GuiBuilder<'a> {
             children_count: 0,
         };
 
-        self.components.layouts.push(new_layout);
+        self.gui.layouts.push(new_layout);
         self.builder_data.layouts_stack.push((next_layout_index, new_layout));
     }
 
@@ -147,7 +158,7 @@ impl<'a> GuiBuilder<'a> {
             None => unreachable!("There must always be at least 2 layouts (root+new_layout) in the stack when calling this function")
         };
 
-        self.components.layouts[layout_index] = new_layout;
+        self.gui.layouts[layout_index] = new_layout;
     }
 }
 
@@ -155,6 +166,7 @@ fn build_text_component(
     api: &LoomzApi,
     text_value: &str,
     style: &GuiFontStyle,
+    style_index: u32,
 ) -> GuiComponentText {
     use unicode_segmentation::UnicodeSegmentation;
 
@@ -182,5 +194,6 @@ fn build_text_component(
         glyphs,
         font: style.font,
         color: style.color,
+        style_index,
     }
 }
