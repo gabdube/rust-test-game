@@ -59,16 +59,17 @@ impl<'a> GuiBuilder<'a> {
 
     /// Adds a simple text component to the gui
     pub fn label(&mut self, text_value: &str, style_key: &str) {
-        let style_index = match self.builder_data.font_styles.get(style_key) {
+        let style_key = (style_key, GuiComponentTag::Label);
+        let style_index = match self.builder_data.styles.get(&style_key) {
             Some(style_index) => *style_index,
             None => {
-                self.builder_data.errors.push(assets_err!("No label style with key {:?} in builder", style_key));
+                self.builder_data.errors.push(assets_err!("No label style with key {:?} in builder", style_key.0));
                 return;
             }
         };
 
         let style = match &self.gui.styles[style_index as usize] {
-            GuiComponentStyle::Font(font_style) => font_style.base,
+            GuiComponentStyle::Label(font_style) => font_style.base,
             _ => unreachable!("GuiComponentStyle cannot be something else than Font")
         };
 
@@ -77,7 +78,7 @@ impl<'a> GuiBuilder<'a> {
 
         let gui = &mut self.gui;
         gui.layout_items.push(layout_item);
-        gui.types.push(GuiComponentType::Text(component));
+        gui.types.push(GuiComponentType::Label(component));
 
         self.update_layout(layout_item.size);
         self.item_index += 1;
@@ -85,10 +86,11 @@ impl<'a> GuiBuilder<'a> {
 
     /// Adds a frame component into the gui using the last defined frame style
     pub fn frame<F: FnOnce(&mut GuiBuilder)>(&mut self, style_key: &'static str, callback: F) {
-        let style_index = match self.builder_data.frame_styles.get(style_key) {
+        let style_key = (style_key, GuiComponentTag::Frame);
+        let style_index = match self.builder_data.styles.get(&style_key) {
             Some(style_index) => *style_index,
             None => {
-                self.builder_data.errors.push(assets_err!("No frame style with key {:?} in builder", style_key));
+                self.builder_data.errors.push(assets_err!("No frame style with key {:?} in builder", style_key.0));
                 return;
             }
         };
@@ -101,7 +103,7 @@ impl<'a> GuiBuilder<'a> {
         let mut item = self.layout_item;
         item.has_layout = true;
 
-        let frame = GuiComponentFrame {
+        let frame = GuiFrame {
             texture: style.texture,
             size: item.size,
             texcoord: style.region,
@@ -165,9 +167,9 @@ impl<'a> GuiBuilder<'a> {
 fn build_text_component(
     api: &LoomzApi,
     text_value: &str,
-    style: &GuiFontStyle,
+    style: &GuiLabelStyle,
     style_index: u32,
-) -> GuiComponentText {
+) -> GuiLabel {
     use unicode_segmentation::UnicodeSegmentation;
 
     let font_asset = match api.assets_ref().font(style.font) {
@@ -190,8 +192,8 @@ fn build_text_component(
         glyphs.push(glyph);
     }
 
-    GuiComponentText {
-        glyphs,
+    GuiLabel {
+        glyphs: glyphs.into_boxed_slice(),
         font: style.font,
         color: style.color,
         style_index,

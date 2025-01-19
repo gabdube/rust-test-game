@@ -1,24 +1,10 @@
 use fnv::FnvHashMap;
 use loomz_shared::{LoomzApi, RgbaU8, RectF32, assets_err};
-use loomz_shared::assets::{MsdfFontId, TextureId};
-use crate::gui::{Gui, GuiBuilderData, GuiLayoutType};
+use crate::gui::{Gui, GuiBuilderData, GuiLayoutType, component::{GuiComponentTag, GuiLabelStyle, GuiFrameStyle}};
 
+type StyleKey = (&'static str, GuiComponentTag);
+pub(super) type GuiStyleMap = FnvHashMap<StyleKey, u32>;
 
-pub(super) type GuiStyleMap = FnvHashMap<&'static str, u32>;
-
-#[derive(Clone, Copy)]
-pub(super) struct GuiFontStyle {
-    pub font: MsdfFontId,
-    pub font_size: f32,
-    pub color: RgbaU8
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct GuiFrameStyle {
-    pub texture: TextureId,
-    pub region: RectF32,
-    pub color: RgbaU8,
-}
 
 #[derive(Copy, Clone)]
 pub enum GuiStyleState {
@@ -27,14 +13,16 @@ pub enum GuiStyleState {
     Active
 }
 
+#[derive(Copy, Clone)]
 pub(super) struct GuiComponentStyleBase<T: Copy> {
     pub base: T,
     pub hovered: T,
     pub active: T,
 }
 
+#[derive(Copy, Clone)]
 pub(super) enum GuiComponentStyle {
-    Font(GuiComponentStyleBase<GuiFontStyle>),
+    Label(GuiComponentStyleBase<GuiLabelStyle>),
     Frame(GuiComponentStyleBase<GuiFrameStyle>)
 }
 
@@ -58,8 +46,7 @@ impl<'a> GuiStyleBuilder<'a> {
 
     fn clear_gui_styles(gui: &mut Gui) {
         let data = &mut gui.builder_data;
-        data.font_styles.clear();
-        data.frame_styles.clear();
+        data.styles.clear();
         data.root_layout_type = GuiLayoutType::VBox;
     }
 
@@ -68,7 +55,7 @@ impl<'a> GuiStyleBuilder<'a> {
         self.builder_data.root_layout_type = ty;
     }
 
-    pub fn font(
+    pub fn label(
         &mut self,
         style_key: &'static str,
         state: GuiStyleState,
@@ -84,25 +71,27 @@ impl<'a> GuiStyleBuilder<'a> {
             }
         };
 
-        let font_style_value = GuiFontStyle {
+        let label_style_value = GuiLabelStyle {
             font,
             font_size,
             color,
         };
 
-        if let Some(index) = self.builder_data.font_styles.get(style_key) {
+        let style_key = (style_key, GuiComponentTag::Label);
+
+        if let Some(index) = self.builder_data.styles.get(&style_key) {
             let style_index = *index as usize;
             match &mut self.styles[style_index] {
-                GuiComponentStyle::Font(font_style) => update_style(state, font_style, font_style_value),
+                GuiComponentStyle::Label(label_style) => update_style(state, label_style, label_style_value),
                 _ => unreachable!("Style type is enforced by the code")
             };
         } else {
             let style_index = self.styles.len();
-            self.builder_data.font_styles.insert(style_key, style_index as u32);
-            self.styles.push(GuiComponentStyle::Font(GuiComponentStyleBase {
-                base: font_style_value,
-                hovered: font_style_value,
-                active: font_style_value,
+            self.builder_data.styles.insert(style_key, style_index as u32);
+            self.styles.push(GuiComponentStyle::Label(GuiComponentStyleBase {
+                base: label_style_value,
+                hovered: label_style_value,
+                active: label_style_value,
             }))
         }
     }
@@ -129,7 +118,9 @@ impl<'a> GuiStyleBuilder<'a> {
             color,
         };
 
-        if let Some(index) = self.builder_data.frame_styles.get(style_key) {
+        let style_key = (style_key, GuiComponentTag::Frame);
+
+        if let Some(index) = self.builder_data.styles.get(&style_key) {
             let style_index = *index as usize;
             match &mut self.styles[style_index] {
                 GuiComponentStyle::Frame(frame_style) => update_style(state, frame_style, frame_style_value),
@@ -137,7 +128,7 @@ impl<'a> GuiStyleBuilder<'a> {
             };
         } else {
             let style_index = self.styles.len();
-            self.builder_data.frame_styles.insert(style_key, style_index as u32);
+            self.builder_data.styles.insert(style_key, style_index as u32);
             self.styles.push(GuiComponentStyle::Frame(GuiComponentStyleBase {
                 base: frame_style_value,
                 hovered: frame_style_value,

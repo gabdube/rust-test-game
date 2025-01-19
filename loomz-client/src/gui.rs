@@ -3,7 +3,7 @@ use style::{GuiStyleBuilder, GuiStyleMap, GuiComponentStyle};
 pub use style::GuiStyleState;
 
 mod component;
-use component::{GuiComponentText, GuiComponentType};
+use component::{GuiLabel, GuiComponentType};
 
 mod layout;
 use layout::{GuiLayout, GuiLayoutItem};
@@ -34,8 +34,7 @@ pub struct GuiUpdates {
 struct GuiBuilderData {
     errors: Vec<crate::CommonError>,
     layouts_stack: Vec<(usize, GuiLayout)>,
-    font_styles: GuiStyleMap,
-    frame_styles: GuiStyleMap,
+    styles: GuiStyleMap,
     root_layout_type: GuiLayoutType,
 }
 
@@ -195,7 +194,7 @@ impl Gui {
                     writer.write_u32(0);
                     writer.write(frame);
                 },
-                GuiComponentType::Text(text) => {
+                GuiComponentType::Label(text) => {
                     writer.write_u32(1);
                     writer.write(&text.font);
                     writer.write_into_u32(text.color);
@@ -219,8 +218,8 @@ impl Gui {
                     let font = reader.read();
                     let color = reader.read_from_u32();
                     let style_index = reader.read_u32();
-                    let glyphs = reader.read_slice().to_vec();
-                    inner_state.types.push(GuiComponentType::Text(GuiComponentText {
+                    let glyphs = reader.read_slice().to_vec().into_boxed_slice();
+                    inner_state.types.push(GuiComponentType::Label(GuiLabel {
                         font,
                         color,
                         glyphs,
@@ -246,6 +245,7 @@ impl StoreAndLoad for Gui {
         writer.write(&inner.base_view);
         writer.write(&inner.state);
         writer.write_slice(&inner.layouts);
+        writer.write_slice(&inner.styles);
         writer.write_slice(&inner.layout_items);
         self.store_components_data(writer);
     }
@@ -267,6 +267,7 @@ impl StoreAndLoad for Gui {
         inner_state.base_view = reader.read();
         inner_state.state = reader.read();
         inner_state.layouts = reader.read_slice().to_vec();
+        inner_state.styles = reader.read_slice().to_vec();
         inner_state.layout_items = reader.read_slice().to_vec();
         Self::load_components_data(reader, &mut inner_state);
 
@@ -302,8 +303,7 @@ impl Default for GuiBuilderData {
     fn default() -> Self {
         GuiBuilderData {
             errors: Vec::with_capacity(0),
-            font_styles: GuiStyleMap::default(),
-            frame_styles: GuiStyleMap::default(),
+            styles: GuiStyleMap::default(),
             layouts_stack: Vec::with_capacity(4),
             root_layout_type: GuiLayoutType::VBox,
         }

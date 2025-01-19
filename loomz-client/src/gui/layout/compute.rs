@@ -111,7 +111,7 @@ mod tests {
 
         let style_result = gui.build_style(&api, |style| {
             style.root_layout(VBox);
-            style.font("item", GuiStyleState::Base, "bubblegum", 100.0, rgb(204, 142, 100));
+            style.label("item", GuiStyleState::Base, "bubblegum", 100.0, rgb(204, 142, 100));
             style.frame("frame", GuiStyleState::Base, "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
         });
 

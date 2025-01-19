@@ -226,8 +226,8 @@ impl LoomzClient {
 
         self.main_menu.build_style(&self.api, |style| {
             style.root_layout(VBox);
-            style.font("menu_item", GuiStyleState::Base, "bubblegum", 100.0, rgb(71, 43, 26));
-            style.font("menu_item", GuiStyleState::Hovered, "bubblegum", 100.0, rgb(99, 28, 28));
+            style.label("menu_item", GuiStyleState::Base, "bubblegum", 100.0, rgb(71, 43, 26));
+            style.label("menu_item", GuiStyleState::Hovered, "bubblegum", 100.0, rgb(71, 26, 26));
             style.frame("main_menu_panel", GuiStyleState::Base, "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(24, 18, 15));
         })?;
 

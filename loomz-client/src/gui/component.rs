@@ -3,14 +3,21 @@ use loomz_shared::assets::{MsdfFontId, TextureId};
 use loomz_shared::assets::msdf_font::ComputedGlyph;
 use super::{GuiLayoutItem, GuiSprite, GuiSpriteType, GuiComponentStyle, GuiStyleState};
 
-pub struct GuiComponentText {
-    pub glyphs: Vec<ComputedGlyph>,
+#[derive(Clone, Copy)]
+pub(super) struct GuiLabelStyle {
+    pub font: MsdfFontId,
+    pub font_size: f32,
+    pub color: RgbaU8
+}
+
+pub struct GuiLabel {
+    pub glyphs: Box<[ComputedGlyph]>,
     pub color: RgbaU8,
     pub font: MsdfFontId,
     pub style_index: u32,
 }
 
-impl GuiComponentText {
+impl GuiLabel {
     pub fn size(&self) -> SizeF32 {
         let mut size = SizeF32 { 
             width: 0.0,
@@ -49,7 +56,7 @@ impl GuiComponentText {
 
     fn update_style(&mut self, styles: &Vec<GuiComponentStyle>, new_state: GuiStyleState) {
         let style = match styles.get(self.style_index as usize) {
-            Some(GuiComponentStyle::Font(font_style)) => font_style,
+            Some(GuiComponentStyle::Label(label_style)) => label_style,
             _ => unreachable!("Styles are always valid")
         };
 
@@ -59,13 +66,20 @@ impl GuiComponentText {
             GuiStyleState::Active => style.active,
         };
 
-        // Note: Font change not supported
+        // Note: Font change not supported because recomputing the glyph would be a pain in the ass
         self.color = style.color;
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct GuiFrameStyle {
+    pub texture: TextureId,
+    pub region: RectF32,
+    pub color: RgbaU8,
+}
+
 #[derive(Copy, Clone)]
-pub struct GuiComponentFrame {
+pub struct GuiFrame {
     pub texture: TextureId,
     pub size: SizeF32,
     pub texcoord: RectF32,
@@ -73,7 +87,7 @@ pub struct GuiComponentFrame {
     pub style_index: u32,
 }
 
-impl GuiComponentFrame {
+impl GuiFrame {
     fn generate_sprites(&self, item: &GuiLayoutItem, sprites: &mut Vec<GuiSprite>) {
         sprites.push(GuiSprite {
             ty: GuiSpriteType::Image(self.texture),
@@ -104,9 +118,16 @@ impl GuiComponentFrame {
     }
 }
 
+#[repr(u8)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum GuiComponentTag {
+    Frame,
+    Label
+}
+
 pub enum GuiComponentType {
-    Frame(GuiComponentFrame),
-    Text(GuiComponentText),
+    Frame(GuiFrame),
+    Label(GuiLabel),
 }
 
 impl GuiComponentType {
@@ -114,14 +135,14 @@ impl GuiComponentType {
     pub fn generate_sprites(&self, item: &GuiLayoutItem, sprites: &mut Vec<GuiSprite>) {
         match self {
             GuiComponentType::Frame(frame) => frame.generate_sprites(item, sprites),
-            GuiComponentType::Text(text) => text.generate_sprites(item, sprites),
+            GuiComponentType::Label(label) => label.generate_sprites(item, sprites),
         }
     }
 
     pub fn update_style(&mut self, styles: &Vec<GuiComponentStyle>, new_state: GuiStyleState) {
         match self {
             GuiComponentType::Frame(frame) => frame.update_style(styles, new_state),
-            GuiComponentType::Text(text) => text.update_style(styles, new_state),
+            GuiComponentType::Label(label) => label.update_style(styles, new_state),
         }
     }
 
