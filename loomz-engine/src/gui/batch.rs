@@ -97,9 +97,18 @@ fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(GuiSpriteType, vk::Imag
     let mut sprites_start = 0;
     let mut sprites_stop = 0;
 
-    let first_sprite = gui.first().and_then(|gui| gui.sprites.first() );
-    let mut current_sprite_type = first_sprite.map(|sprite| sprite.sprite.ty );
-    
+    let mut current_sprite_type = None;
+
+    while current_sprite_type.is_none() && gui_index < gui.len() {
+        current_sprite_type = gui.get(gui_index)
+            .and_then(|gui| gui.sprites.first() )
+            .map(|sprite| sprite.sprite.ty );
+
+        if current_sprite_type.is_none() {
+            gui_index += 1;
+        }
+    }
+
     ::std::iter::from_fn(move || {
         let gui = gui.get(gui_index)?;
         loop {
@@ -133,7 +142,7 @@ fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(GuiSpriteType, vk::Imag
     })
 }
 
-pub(super) fn build(core: &mut LoomzEngineCore, gui_module: &mut GuiModule, ) -> Result<(), CommonError> {
+pub(super) fn build(core: &mut LoomzEngineCore, gui_module: &mut GuiModule) -> Result<(), CommonError> {
     gui_module.batches.clear();
     gui_module.descriptors.reset_batch_layout();
 

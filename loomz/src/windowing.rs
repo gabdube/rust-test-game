@@ -37,6 +37,10 @@ impl<'a> ApplicationHandler for LoomzApplication {
                     self.last_error = Some(e);
                     event_loop.exit();
                 }
+
+                if self.api.must_exit() {
+                    event_loop.exit();
+                }
             },
             WindowEvent::Resized(size) => {
                 if let Err(e) = self.resized(size.width, size.height) {

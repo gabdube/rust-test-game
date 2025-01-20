@@ -19,6 +19,15 @@ impl RectF32 {
         }
     }
 
+    pub fn from_size(size: SizeF32) -> Self {
+        RectF32 {
+            left: 0.0,
+            top: 0.0,
+            right: size.width,
+            bottom: size.height,
+        }
+    }
+
     #[inline]
     pub const fn splat(&self) -> [f32; 4] {
         [self.left, self.top, self.right, self.bottom]

@@ -16,6 +16,7 @@ use crate::CommonError;
 struct InnerInputs {
     buffer: InputBuffer,
     new_inputs: AtomicBool,
+    exit: AtomicBool,
 }
 
 struct ApiInner {
@@ -39,7 +40,8 @@ impl LoomzApi {
 
         let inputs = InnerInputs {
             buffer: InputBuffer::new(),
-            new_inputs: AtomicBool::new(false)
+            new_inputs: AtomicBool::new(false),
+            exit: AtomicBool::new(false),
         };
 
         let inner = ApiInner {
@@ -86,6 +88,14 @@ impl LoomzApi {
 
     pub fn gui(&self) -> &GuiApi {
         &self.inner.gui
+    }
+
+    pub fn exit(&self) {
+        self.inner.inputs.exit.store(true, Ordering::SeqCst);
+    }
+
+    pub fn must_exit(&self) -> bool {
+        self.inner.inputs.exit.load(Ordering::SeqCst)
     }
 
 }

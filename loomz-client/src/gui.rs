@@ -3,7 +3,7 @@ use style::{GuiStyleBuilder, GuiStyleMap, GuiComponentStyle};
 pub use style::GuiStyleState;
 
 mod callbacks;
-use callbacks::GuiComponentCallbacksValue;
+use callbacks::{IntoGuiCallback, GuiComponentCallbacksValue, RawCallbackValue};
 
 mod components;
 use components::{GuiLabel, GuiComponentBase, GuiComponentData};
@@ -21,6 +21,10 @@ use loomz_shared::api::{LoomzApi, GuiId, GuiSprite, GuiSpriteType};
 use loomz_shared::store::*;
 use loomz_shared::{CommonError, client_err};
 
+#[derive(Copy, Clone)]
+enum GuiInnerEvent {
+    Click
+}
 
 #[derive(Copy, Clone)]
 struct GuiComponentState {
@@ -45,16 +49,20 @@ struct GuiBuilderData {
 
 #[repr(C)]
 struct GuiInnerState {
-    id: GuiId,
-    base_view: RectF32,
     state: GuiComponentState,
-    layouts: Vec<GuiLayout>,
     styles: Vec<GuiComponentStyle>,
     callbacks: Vec<GuiComponentCallbacksValue>,
+    callbacks_output: Vec<RawCallbackValue>,
+
+    base_view: RectF32,
+    layouts: Vec<GuiLayout>,
     layout_items: Vec<GuiLayoutItem>,
     component_base: Vec<GuiComponentBase>,
     component_data: Vec<GuiComponentData>,
+
+    id: GuiId,
     sprites: Vec<GuiSprite>,
+
     builder_data: Box<GuiBuilderData>,
 }
 
@@ -109,16 +117,27 @@ impl Gui {
         }
     }
 
+    pub fn drain_events<'a, E: IntoGuiCallback>(&'a mut self) -> impl Iterator<Item=E> + 'a {
+        let callback_outputs = &mut self.inner_state.callbacks_output;
+        callback_outputs.drain(..)
+                .map(|raw| E::from_u64(raw) )
+    }
+
+    fn sync_with_engine(&mut self, api: &LoomzApi) {
+        self.generate_sprites();
+        api.gui().update_gui(&self.inner_state.id, &self.inner_state.sprites);
+    }
+
     fn resize(&mut self, view: &RectF32) {
         self.inner_state.base_view = *view;
         layout::compute(self);
     }
 
     fn on_style_update(&mut self, old_state: GuiComponentState) {
-        let state = self.inner_state.state;
         let styles = &self.inner_state.styles;
         let base = &self.inner_state.component_base;
         let data = &mut self.inner_state.component_data;
+        let state = self.inner_state.state;
         let component_count = data.len() as u32;
 
         let mut update_style = |index: u32, new_state: GuiStyleState| {
@@ -142,7 +161,7 @@ impl Gui {
             }
         }
 
-        if old_state.hovered_index != state.hovered_index && state.selected_index == u32::MAX {
+        if state.selected_index == u32::MAX && old_state.hovered_index != state.hovered_index {
             if old_state.hovered_index < component_count {
                 update_style(old_state.hovered_index, GuiStyleState::Base);
             }
@@ -151,7 +170,17 @@ impl Gui {
                 update_style(state.hovered_index, GuiStyleState::Hovered);
             }
         }
-        
+
+    }
+
+    fn on_events(&mut self, component_index: usize, inner_event: GuiInnerEvent) {
+        let inner = &mut self.inner_state;
+        let base = inner.component_base[component_index];
+        if base.callbacks_index != u32::MAX {
+            let callbacks = inner.callbacks[base.callbacks_index as usize];
+            let callback_output = &mut inner.callbacks_output;
+            inner.component_data[component_index].on_events(&callbacks, callback_output, inner_event);
+        }
     }
 
     fn update_cursor_position(&mut self, position: PositionF32, need_sync: &mut bool) {
@@ -191,6 +220,12 @@ impl Gui {
             self.on_style_update(old_state);
             *need_sync = true;
         }
+
+        if !left_button_pressed && old_state.selected_index != u32::MAX {
+            if old_state.selected_index == old_state.hovered_index {
+                self.on_events(old_state.selected_index as usize, GuiInnerEvent::Click);
+            }
+        }
     }
 
     fn generate_sprites(&mut self) {
@@ -204,11 +239,6 @@ impl Gui {
             let component_type = &inner.component_data[i];
             component_type.generate_sprites(view, sprites);
         }
-    }
-
-    fn sync_with_engine(&mut self, api: &LoomzApi) {
-        self.generate_sprites();
-        api.gui().update_gui(&self.inner_state.id, &self.inner_state.sprites);
     }
 
     fn get_root_layout(&self) -> GuiLayout {
@@ -305,12 +335,16 @@ impl StoreAndLoad for Gui {
             id: GuiId::default(),
             base_view: RectF32::default(),
             state: GuiComponentState::default(),
-            layouts: Vec::new(),
+
             styles: Vec::new(),
             callbacks: Vec::new(),
+            callbacks_output: Vec::with_capacity(8),
+
+            layouts: Vec::new(),
             layout_items: Vec::new(),
             component_base: Vec::new(),
             component_data: Vec::new(),
+
             sprites: Vec::with_capacity(64),
             builder_data: Box::default()
         };
@@ -339,13 +373,18 @@ impl Default for Gui {
                 id: GuiId::default(),
                 base_view: RectF32::default(),
                 state: GuiComponentState::default(),
-                layouts: Vec::with_capacity(8),
+                
                 styles: Vec::with_capacity(8),
                 callbacks: Vec::with_capacity(8),
+                callbacks_output: Vec::with_capacity(8),
+
+                layouts: Vec::with_capacity(8),
                 layout_items: Vec::with_capacity(16),
                 component_base: Vec::with_capacity(16),
                 component_data: Vec::with_capacity(16),
+
                 sprites: Vec::with_capacity(64),
+
                 builder_data: Box::default(),
             }),
         }

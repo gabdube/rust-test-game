@@ -32,9 +32,7 @@ impl GuiApi {
     }
 
     pub fn update_gui(&self, id: &GuiId, sprites: &[GuiSprite]) {
-        if sprites.len() > 0 {
-            self.gui.push_with_data(id, sprites, |sprites| sprites );
-        }
+        self.gui.push_with_data(id, sprites, |sprites| sprites );
     }
 
     pub fn gui_updates<'a>(&'a self) -> Option<impl Iterator<Item = (GuiId, &'static [GuiSprite])> + 'a> {

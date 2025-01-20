@@ -1,7 +1,8 @@
 use loomz_shared::base_types::{SizeF32, RgbaU8};
 use loomz_shared::assets::MsdfFontId;
 use loomz_shared::assets::msdf_font::ComputedGlyph;
-use super::{GuiLayoutItem, GuiSprite, GuiSpriteType, GuiComponentStyle, GuiStyleState};
+use crate::gui::{GuiLayoutItem, GuiSprite, GuiSpriteType, GuiComponentStyle, GuiStyleState,
+  GuiComponentCallbacksValue, RawCallbackValue, GuiInnerEvent};
 
 #[derive(Copy, Clone)]
 pub enum GuiLabelCallback {
@@ -77,6 +78,19 @@ impl GuiLabel {
 
         // Note: Font change not supported because recomputing the glyph would be a pain in the ass
         self.color = style.color;
+    }
+
+    pub fn on_events(&mut self, callbacks: &GuiComponentCallbacksValue, output: &mut Vec<RawCallbackValue>, event: GuiInnerEvent) {
+        let callbacks_value = match callbacks {
+            GuiComponentCallbacksValue::Label(values) => values,
+            _ => unreachable!("Callback types are enforced by the builder")
+        };
+        
+        match event {
+            GuiInnerEvent::Click => {
+                output.push(callbacks_value.click);
+            }
+        }
     }
 }
 

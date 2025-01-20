@@ -5,7 +5,8 @@ pub use label::GuiLabelCallback;
 mod frame;
 pub(crate) use frame::*;
 
-use super::{GuiLayoutItem, GuiSprite, GuiSpriteType, GuiComponentStyle, GuiStyleState};
+use super::{GuiLayoutItem, GuiSprite, GuiSpriteType, GuiComponentStyle, GuiStyleState, 
+    GuiComponentCallbacksValue, RawCallbackValue, GuiInnerEvent};
 
 #[repr(u8)]
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -38,6 +39,13 @@ impl GuiComponentData {
         match self {
             GuiComponentData::Frame(frame) => frame.update_style(style, new_state),
             GuiComponentData::Label(label) => label.update_style(style, new_state),
+        }
+    }
+
+    pub fn on_events(&mut self, callbacks: &GuiComponentCallbacksValue, output: &mut Vec<RawCallbackValue>, event: GuiInnerEvent) {
+        match self {
+            GuiComponentData::Frame(frame) => {},
+            GuiComponentData::Label(label) => label.on_events(callbacks, output, event),
         }
     }
 
