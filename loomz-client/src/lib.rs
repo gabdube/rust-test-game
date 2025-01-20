@@ -11,6 +11,10 @@ use loomz_shared::api::WorldActorId;
 use loomz_shared::inputs::InputBuffer;
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
+const START_GAME: u64 = 100;
+const START_SANDBOX: u64 = 101;
+const EXIT_GAME: u64 = 102;
+
 
 #[derive(Default)]
 pub struct Player {
@@ -225,7 +229,7 @@ impl LoomzClient {
     }
 
     fn init_main_menu(&mut self) -> Result<(), CommonError> {
-        use crate::gui::{GuiLayoutType::VBox, GuiStyleState};
+        use crate::gui::{GuiLayoutType::VBox, GuiStyleState, GuiLabelCallback};
 
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32{ 
@@ -235,9 +239,9 @@ impl LoomzClient {
 
         self.main_menu.build_style(&self.api, |style| {
             style.root_layout(VBox);
-            style.label("menu_item", GuiStyleState::Base, "bubblegum", 100.0, rgb(71, 43, 26));
-            style.label("menu_item", GuiStyleState::Hovered, "bubblegum", 100.0, rgb(71, 26, 26));
-            style.label("menu_item", GuiStyleState::Selected, "bubblegum", 100.0, rgb(110, 34, 34));
+            style.label("menu_item", GuiStyleState::Base, "bubblegum", 90.0, rgb(71, 43, 26));
+            style.label("menu_item", GuiStyleState::Hovered, "bubblegum", 90.0, rgb(71, 26, 26));
+            style.label("menu_item", GuiStyleState::Selected, "bubblegum", 90.0, rgb(110, 34, 34));
             style.frame("main_menu_panel", GuiStyleState::Base, "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(24, 18, 15));
         })?;
 
@@ -246,9 +250,14 @@ impl LoomzClient {
             gui.layout_item(400.0, 440.0);
             gui.frame("main_menu_panel", |gui| {
                 gui.layout_item(300.0, 100.0);
-                gui.label_callback();
+
+                gui.label_callback(GuiLabelCallback::Click, START_GAME);
                 gui.label("Start", "menu_item");
-                gui.label("Debug", "menu_item");
+
+                gui.label_callback(GuiLabelCallback::Click, START_SANDBOX);
+                gui.label("Sandbox", "menu_item");
+
+                gui.label_callback(GuiLabelCallback::Click, EXIT_GAME);
                 gui.label("Exit", "menu_item");
             });
         })?;

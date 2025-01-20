@@ -39,13 +39,13 @@ impl<'a> GuiStyleBuilder<'a> {
 
         GuiStyleBuilder {
             api,
-            builder_data: &mut gui.builder_data,
+            builder_data: &mut gui.inner_state.builder_data,
             styles: &mut gui.inner_state.styles,
         }
     }
 
     fn clear_gui_styles(gui: &mut Gui) {
-        let data = &mut gui.builder_data;
+        let data = &mut gui.inner_state.builder_data;
         data.styles.clear();
         data.root_layout_type = GuiLayoutType::VBox;
     }

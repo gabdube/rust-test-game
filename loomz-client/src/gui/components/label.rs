@@ -3,18 +3,27 @@ use loomz_shared::assets::MsdfFontId;
 use loomz_shared::assets::msdf_font::ComputedGlyph;
 use super::{GuiLayoutItem, GuiSprite, GuiSpriteType, GuiComponentStyle, GuiStyleState};
 
+#[derive(Copy, Clone)]
+pub enum GuiLabelCallback {
+    Click
+}
+
+#[derive(Copy, Clone)]
+pub struct GuiLabelCallbackValues {
+    pub click: u64,
+}
+
 #[derive(Clone, Copy)]
-pub(crate) struct GuiLabelStyle {
+pub struct GuiLabelStyle {
     pub font: MsdfFontId,
     pub font_size: f32,
     pub color: RgbaU8
 }
 
-pub(crate) struct GuiLabel {
+pub struct GuiLabel {
     pub glyphs: Box<[ComputedGlyph]>,
     pub color: RgbaU8,
     pub font: MsdfFontId,
-    pub style_index: u32,
 }
 
 impl GuiLabel {
@@ -54,9 +63,9 @@ impl GuiLabel {
         }
     }
 
-    pub fn update_style(&mut self, styles: &Vec<GuiComponentStyle>, new_state: GuiStyleState) {
-        let style = match styles.get(self.style_index as usize) {
-            Some(GuiComponentStyle::Label(label_style)) => label_style,
+    pub fn update_style(&mut self, style: &GuiComponentStyle, new_state: GuiStyleState) {
+        let style = match style {
+            GuiComponentStyle::Label(label_style) => label_style,
             _ => unreachable!("Styles are always valid")
         };
 

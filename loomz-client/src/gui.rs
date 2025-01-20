@@ -1,11 +1,13 @@
 mod style;
-use std::u32;
-
 use style::{GuiStyleBuilder, GuiStyleMap, GuiComponentStyle};
 pub use style::GuiStyleState;
 
+mod callbacks;
+use callbacks::GuiComponentCallbacksValue;
+
 mod components;
-use components::{GuiLabel, GuiComponentType};
+use components::{GuiLabel, GuiComponentBase, GuiComponentData};
+pub use components::GuiLabelCallback;
 
 mod layout;
 use layout::{GuiLayout, GuiLayoutItem};
@@ -37,22 +39,26 @@ struct GuiBuilderData {
     errors: Vec<crate::CommonError>,
     layouts_stack: Vec<(usize, GuiLayout)>,
     styles: GuiStyleMap,
+    last_callbacks: GuiComponentCallbacksValue,
     root_layout_type: GuiLayoutType,
 }
 
+#[repr(C)]
 struct GuiInnerState {
+    id: GuiId,
     base_view: RectF32,
     state: GuiComponentState,
-    styles: Vec<GuiComponentStyle>,
     layouts: Vec<GuiLayout>,
+    styles: Vec<GuiComponentStyle>,
+    callbacks: Vec<GuiComponentCallbacksValue>,
     layout_items: Vec<GuiLayoutItem>,
-    types: Vec<GuiComponentType>,
+    component_base: Vec<GuiComponentBase>,
+    component_data: Vec<GuiComponentData>,
     sprites: Vec<GuiSprite>,
+    builder_data: Box<GuiBuilderData>,
 }
 
 pub struct Gui {
-    id: GuiId,
-    builder_data: Box<GuiBuilderData>,
     inner_state: Box<GuiInnerState>,
 }
 
@@ -62,14 +68,7 @@ impl Gui {
         let mut builder = GuiStyleBuilder::new(api, self);
         cb(&mut builder);
 
-        if self.builder_data.errors.len() > 0 {
-            let mut error_base = client_err!("Failed to build Gui style");
-            for error in self.builder_data.errors.drain(..) {
-                error_base.merge(error);
-            }
-
-            return Err(error_base);
-        }
+        self.check_errors()?;
 
         Ok(())
     }
@@ -77,15 +76,8 @@ impl Gui {
     pub fn build<F: FnOnce(&mut GuiBuilder)>(&mut self, api: &LoomzApi, view: &RectF32, cb: F) -> Result<(), CommonError> {
         let mut builder = GuiBuilder::new(api, view, self);
         cb(&mut builder);
-        
-        if self.builder_data.errors.len() > 0 {
-            let mut error_base = client_err!("Failed to build Gui components");
-            for error in self.builder_data.errors.drain(..) {
-                error_base.merge(error);
-            }
 
-            return Err(error_base);
-        }
+        self.check_errors()?;
 
         self.inner_state.layouts[0] = self.get_root_layout();
 
@@ -125,30 +117,38 @@ impl Gui {
     fn on_style_update(&mut self, old_state: GuiComponentState) {
         let state = self.inner_state.state;
         let styles = &self.inner_state.styles;
-        let types = &mut self.inner_state.types;
-        let types_count = types.len() as u32;
+        let base = &self.inner_state.component_base;
+        let data = &mut self.inner_state.component_data;
+        let component_count = data.len() as u32;
+
+        let mut update_style = |index: u32, new_state: GuiStyleState| {
+            let component_index = index as usize;
+            let style_index = base[component_index].style_index as usize;
+            let style = &styles[style_index];
+            data[component_index].update_style(style, new_state);
+        };
 
         if old_state.selected_index != state.selected_index {
-            if state.selected_index < types_count {
-                types[state.selected_index as usize].update_style(styles, GuiStyleState::Selected);
+            if state.selected_index < component_count {
+                update_style(state.selected_index, GuiStyleState::Selected);
             } else {
-                if old_state.selected_index < types_count {
-                    types[old_state.selected_index as usize].update_style(styles, GuiStyleState::Base);
+                if old_state.selected_index < component_count {
+                    update_style(old_state.selected_index, GuiStyleState::Base);
                 }
 
-                if state.hovered_index < types_count {
-                    types[state.hovered_index as usize].update_style(styles, GuiStyleState::Hovered);
+                if state.hovered_index < component_count {
+                    update_style(state.hovered_index, GuiStyleState::Hovered);
                 }
             }
         }
 
         if old_state.hovered_index != state.hovered_index && state.selected_index == u32::MAX {
-            if old_state.hovered_index < types_count {
-                types[old_state.hovered_index as usize].update_style(styles, GuiStyleState::Base);
+            if old_state.hovered_index < component_count {
+                update_style(old_state.hovered_index, GuiStyleState::Base);
             }
 
-            if state.hovered_index < types_count {
-                types[state.hovered_index as usize].update_style(styles, GuiStyleState::Hovered);
+            if state.hovered_index < component_count {
+                update_style(state.hovered_index, GuiStyleState::Hovered);
             }
         }
         
@@ -201,21 +201,35 @@ impl Gui {
         let component_count = inner.layout_items.len();
         for i in 0..component_count {
             let view = &inner.layout_items[i];
-            let component_type = &inner.types[i];
+            let component_type = &inner.component_data[i];
             component_type.generate_sprites(view, sprites);
         }
     }
 
     fn sync_with_engine(&mut self, api: &LoomzApi) {
         self.generate_sprites();
-        api.gui().update_gui(&self.id, &self.inner_state.sprites);
+        api.gui().update_gui(&self.inner_state.id, &self.inner_state.sprites);
     }
 
     fn get_root_layout(&self) -> GuiLayout {
-        match self.builder_data.layouts_stack.get(0).copied() {
+        match self.inner_state.builder_data.layouts_stack.get(0).copied() {
             Some((_, root)) => root,
             None => unreachable!("Root layout will always be present")
         }
+    }
+
+    fn check_errors(&mut self) -> Result<(), CommonError> {
+        let errors = &mut self.inner_state.builder_data.errors;
+        if errors.len() == 0 {
+            return Ok(());
+        }
+
+        let mut error_base = client_err!("Failed to build Gui components");
+        for error in errors.drain(..) {
+            error_base.merge(error);
+        }
+
+        return Err(error_base);
     }
 
     //
@@ -224,18 +238,17 @@ impl Gui {
 
     fn store_components_data(&self, writer: &mut SaveFileWriterBase) {
         let inner = &self.inner_state;
-        writer.write_u32(inner.types.len() as u32);
-        for component_type in inner.types.iter() {
+        writer.write_u32(inner.component_data.len() as u32);
+        for component_type in inner.component_data.iter() {
             match component_type {
-                GuiComponentType::Frame(frame) => {
+                GuiComponentData::Frame(frame) => {
                     writer.write_u32(0);
                     writer.write(frame);
                 },
-                GuiComponentType::Label(text) => {
+                GuiComponentData::Label(text) => {
                     writer.write_u32(1);
                     writer.write(&text.font);
                     writer.write_into_u32(text.color);
-                    writer.write_u32(text.style_index);
                     writer.write_slice(&text.glyphs);
                 }
             }
@@ -244,23 +257,21 @@ impl Gui {
 
     fn load_components_data(reader: &mut SaveFileReaderBase, inner_state: &mut GuiInnerState) {
         let component_types_count = reader.read_u32() as usize;
-        inner_state.types = Vec::with_capacity(component_types_count);
+        inner_state.component_data = Vec::with_capacity(component_types_count);
         for _ in 0..component_types_count {
             let enum_identifier = reader.read_u32();
             match enum_identifier {
                 0 => {
-                    inner_state.types.push(GuiComponentType::Frame(reader.read()));
+                    inner_state.component_data.push(GuiComponentData::Frame(reader.read()));
                 },
                 1 => {
                     let font = reader.read();
                     let color = reader.read_from_u32();
-                    let style_index = reader.read_u32();
                     let glyphs = reader.read_slice().to_vec().into_boxed_slice();
-                    inner_state.types.push(GuiComponentType::Label(GuiLabel {
+                    inner_state.component_data.push(GuiComponentData::Label(GuiLabel {
                         font,
                         color,
                         glyphs,
-                        style_index
                     }));
                 },
                 i => {
@@ -278,39 +289,43 @@ impl StoreAndLoad for Gui {
         // Note: no need to store builder data or the generated sprites in components
         let inner = &self.inner_state;
 
-        writer.store(&self.id);
+        writer.store(&inner.id);
         writer.write(&inner.base_view);
         writer.write(&inner.state);
         writer.write_slice(&inner.layouts);
         writer.write_slice(&inner.styles);
+        writer.write_slice(&inner.callbacks);
         writer.write_slice(&inner.layout_items);
+        writer.write_slice(&inner.component_base);
         self.store_components_data(writer);
     }
 
     fn load(reader: &mut SaveFileReaderBase) -> Self {
-        let id = reader.load();
-        let builder_data = Box::default();
-
         let mut inner_state = GuiInnerState {
+            id: GuiId::default(),
             base_view: RectF32::default(),
             state: GuiComponentState::default(),
             layouts: Vec::new(),
             styles: Vec::new(),
+            callbacks: Vec::new(),
             layout_items: Vec::new(),
-            types: Vec::new(),
+            component_base: Vec::new(),
+            component_data: Vec::new(),
             sprites: Vec::with_capacity(64),
+            builder_data: Box::default()
         };
 
+        inner_state.id = reader.load();
         inner_state.base_view = reader.read();
         inner_state.state = reader.read();
         inner_state.layouts = reader.read_slice().to_vec();
         inner_state.styles = reader.read_slice().to_vec();
+        inner_state.callbacks = reader.read_slice().to_vec();
         inner_state.layout_items = reader.read_slice().to_vec();
+        inner_state.component_base = reader.read_slice().to_vec();
         Self::load_components_data(reader, &mut inner_state);
 
         Gui {
-            id,
-            builder_data,
             inner_state: Box::new(inner_state),
         }
     }
@@ -320,16 +335,18 @@ impl StoreAndLoad for Gui {
 impl Default for Gui {
     fn default() -> Self {
         Gui {
-            id: GuiId::default(),
-            builder_data: Box::default(),
             inner_state: Box::new(GuiInnerState {
+                id: GuiId::default(),
                 base_view: RectF32::default(),
                 state: GuiComponentState::default(),
                 layouts: Vec::with_capacity(8),
-                styles: Vec::with_capacity(16),
+                styles: Vec::with_capacity(8),
+                callbacks: Vec::with_capacity(8),
                 layout_items: Vec::with_capacity(16),
-                types: Vec::with_capacity(16),
+                component_base: Vec::with_capacity(16),
+                component_data: Vec::with_capacity(16),
                 sprites: Vec::with_capacity(64),
+                builder_data: Box::default(),
             }),
         }
     }
@@ -341,6 +358,7 @@ impl Default for GuiBuilderData {
         GuiBuilderData {
             errors: Vec::with_capacity(0),
             styles: GuiStyleMap::default(),
+            last_callbacks: GuiComponentCallbacksValue::None,
             layouts_stack: Vec::with_capacity(4),
             root_layout_type: GuiLayoutType::VBox,
         }

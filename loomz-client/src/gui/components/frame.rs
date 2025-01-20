@@ -16,7 +16,6 @@ pub(crate) struct GuiFrame {
     pub size: SizeF32,
     pub texcoord: RectF32,
     pub color: RgbaU8,
-    pub style_index: u32,
 }
 
 impl GuiFrame {
@@ -32,9 +31,9 @@ impl GuiFrame {
         });
     }
 
-    pub fn update_style(&mut self, styles: &Vec<GuiComponentStyle>, new_state: GuiStyleState) {
-        let style = match styles.get(self.style_index as usize) {
-            Some(GuiComponentStyle::Frame(frame_style)) => frame_style,
+    pub fn update_style(&mut self, style: &GuiComponentStyle, new_state: GuiStyleState) {
+        let style = match style {
+            GuiComponentStyle::Frame(frame_style) => frame_style,
             _ => unreachable!("Styles are always valid")
         };
 

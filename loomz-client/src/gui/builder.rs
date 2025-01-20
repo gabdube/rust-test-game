@@ -1,11 +1,16 @@
 use loomz_shared::base_types::{PositionF32, SizeF32, RectF32};
 use loomz_shared::assets::msdf_font::ComputedGlyph;
 use loomz_shared::{LoomzApi, assets_err};
-use super::{Gui, GuiBuilderData, GuiInnerState, components::*, layout::*, style::*};
+use super::{
+    components::*,
+    layout::*,
+    style::*,
+    callbacks::{IntoGuiCallback, GuiComponentCallbacksValue},
+    Gui, GuiInnerState
+};
 
 pub struct GuiBuilder<'a> {
     api: &'a LoomzApi,
-    builder_data: &'a mut GuiBuilderData,
     gui: &'a mut GuiInnerState,
     layout_item: GuiLayoutItem,
     next_layout: GuiLayoutType,
@@ -19,7 +24,6 @@ impl<'a> GuiBuilder<'a> {
 
         GuiBuilder {
             api,
-            builder_data: &mut gui.builder_data,
             gui: &mut gui.inner_state,
             layout_item: GuiLayoutItem::default(),
             next_layout: GuiLayoutType::VBox,
@@ -32,13 +36,16 @@ impl<'a> GuiBuilder<'a> {
         inner.base_view = *view;
         inner.state = Default::default();
         inner.layouts.clear();
+        inner.callbacks.clear();
         inner.layout_items.clear();
-        inner.types.clear();
+        inner.component_base.clear();
+        inner.component_data.clear();
         inner.sprites.clear();
 
-        let builder_data = &mut gui.builder_data;
+        let builder_data = &mut inner.builder_data;
         builder_data.layouts_stack.clear();
         builder_data.layouts_stack.push((0, GuiLayout::default()));
+        builder_data.last_callbacks = GuiComponentCallbacksValue::None;
 
         inner.layouts.push(GuiLayout::default());
     }
@@ -57,67 +64,91 @@ impl<'a> GuiBuilder<'a> {
         };
     }
 
-    pub fn label_callback(&mut self, ) {
-
+    pub fn label_callback<ID: IntoGuiCallback>(&mut self, _callback: GuiLabelCallback, callback_id: ID) {
+        let click = callback_id.into_u64();
+        self.gui.builder_data.last_callbacks = GuiComponentCallbacksValue::Label(GuiLabelCallbackValues { click });
     }
 
     /// Adds a simple text component to the gui
     pub fn label(&mut self, text_value: &str, style_key: &str) {
+        let gui = &mut self.gui;
+        let builder_data = &mut gui.builder_data;
+
+        // Layout item
+        gui.layout_items.push(self.layout_item);
+
+        // Component base
+        let callbacks_index = match builder_data.last_callbacks.take() {
+            cb @ GuiComponentCallbacksValue::Label(_) => {
+                gui.callbacks.push(cb);
+                (gui.callbacks.len() - 1) as u32
+            },
+            _ => u32::MAX,
+        };
+
         let style_key = (style_key, GuiComponentTag::Label);
-        let style_index = match self.builder_data.styles.get(&style_key) {
+        let style_index = match builder_data.styles.get(&style_key) {
             Some(style_index) => *style_index,
             None => {
-                self.builder_data.errors.push(assets_err!("No label style with key {:?} in builder", style_key.0));
+                builder_data.errors.push(assets_err!("No label style with key {:?} in builder", style_key.0));
                 return;
             }
         };
 
-        let style = match &self.gui.styles[style_index as usize] {
-            GuiComponentStyle::Label(font_style) => font_style.base,
+        gui.component_base.push(GuiComponentBase {
+            callbacks_index,
+            style_index,
+        });
+        
+        // Component data
+        let style = match gui.styles.get(style_index as usize) {
+            Some(GuiComponentStyle::Label(label_style)) => &label_style.base,
             _ => unreachable!("GuiComponentStyle cannot be something else than Font")
         };
+        let label = build_label_component(self.api, text_value, style);
+        gui.component_data.push(GuiComponentData::Label(label));
 
-        let component = build_text_component(self.api, text_value, &style, style_index);
-        let layout_item = self.layout_item;
-
-        let gui = &mut self.gui;
-        gui.layout_items.push(layout_item);
-        gui.types.push(GuiComponentType::Label(component));
-
-        self.update_layout(layout_item.size);
+        self.update_layout(self.layout_item.size);
         self.item_index += 1;
     }
 
     /// Adds a frame component into the gui using the last defined frame style
     pub fn frame<F: FnOnce(&mut GuiBuilder)>(&mut self, style_key: &'static str, callback: F) {
+        let gui = &mut self.gui;
+        let builder_data = &mut gui.builder_data;
+
+        // Layout item
+        let mut item = self.layout_item;
+        item.has_layout = true;
+        gui.layout_items.push(item);
+
+        // Component base
         let style_key = (style_key, GuiComponentTag::Frame);
-        let style_index = match self.builder_data.styles.get(&style_key) {
+        let style_index = match builder_data.styles.get(&style_key) {
             Some(style_index) => *style_index,
             None => {
-                self.builder_data.errors.push(assets_err!("No frame style with key {:?} in builder", style_key.0));
+                builder_data.errors.push(assets_err!("No frame style with key {:?} in builder", style_key.0));
                 return;
             }
         };
+        gui.component_base.push(GuiComponentBase {
+            callbacks_index: u32::MAX,
+            style_index,
+        });
 
-        let style = match &self.gui.styles[style_index as usize] {
-            GuiComponentStyle::Frame(frame_style) => frame_style.base,
+        // Component data
+        let style = match gui.styles.get(style_index as usize) {
+            Some(GuiComponentStyle::Frame(frame_style)) => frame_style.base,
             _ => unreachable!("GuiComponentStyle cannot be something else than Frame")
         };
-
-        let mut item = self.layout_item;
-        item.has_layout = true;
-
         let frame = GuiFrame {
             texture: style.texture,
             size: item.size,
             texcoord: style.region,
             color: style.color,
-            style_index,
         };
+        gui.component_data.push(GuiComponentData::Frame(frame));
 
-        let gui = &mut self.gui;
-        gui.layout_items.push(item);
-        gui.types.push(GuiComponentType::Frame(frame));
 
         self.update_layout(item.size);
         self.push_next_layout();
@@ -130,7 +161,7 @@ impl<'a> GuiBuilder<'a> {
     }
 
     fn update_layout(&mut self, item_size: SizeF32) {
-        let current_layout = match self.builder_data.layouts_stack.last_mut() {
+        let current_layout = match self.gui.builder_data.layouts_stack.last_mut() {
             Some((_, layout)) => layout,
             None => unreachable!("There will always be a layout")
         };
@@ -155,24 +186,24 @@ impl<'a> GuiBuilder<'a> {
         };
 
         self.gui.layouts.push(new_layout);
-        self.builder_data.layouts_stack.push((next_layout_index, new_layout));
+        self.gui.builder_data.layouts_stack.push((next_layout_index, new_layout));
     }
 
     fn store_layout(&mut self) {
-        let (layout_index, new_layout) = match self.builder_data.layouts_stack.pop() {
+        let (layout_index, new_layout) = match self.gui.builder_data.layouts_stack.pop() {
             Some(value) => value,
             None => unreachable!("There must always be at least 2 layouts (root+new_layout) in the stack when calling this function")
         };
 
         self.gui.layouts[layout_index] = new_layout;
     }
+
 }
 
-fn build_text_component(
+fn build_label_component(
     api: &LoomzApi,
     text_value: &str,
     style: &GuiLabelStyle,
-    style_index: u32,
 ) -> GuiLabel {
     use unicode_segmentation::UnicodeSegmentation; 
 
@@ -199,7 +230,6 @@ fn build_text_component(
     GuiLabel {
         glyphs: glyphs.into_boxed_slice(),
         font: style.font,
-        color: style.color,
-        style_index,
+        color: style.color
     }
 }

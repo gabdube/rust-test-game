@@ -1,5 +1,6 @@
 mod label;
 pub(crate) use label::*;
+pub use label::GuiLabelCallback;
 
 mod frame;
 pub(crate) use frame::*;
@@ -13,24 +14,30 @@ pub(super) enum GuiComponentTag {
     Label
 }
 
-pub(crate) enum GuiComponentType {
+#[derive(Copy, Clone)]
+pub(super) struct GuiComponentBase {
+    pub callbacks_index: u32,
+    pub style_index: u32,
+}
+
+pub(super) enum GuiComponentData {
     Frame(GuiFrame),
     Label(GuiLabel),
 }
 
-impl GuiComponentType {
+impl GuiComponentData {
 
     pub fn generate_sprites(&self, item: &GuiLayoutItem, sprites: &mut Vec<GuiSprite>) {
         match self {
-            GuiComponentType::Frame(frame) => frame.generate_sprites(item, sprites),
-            GuiComponentType::Label(label) => label.generate_sprites(item, sprites),
+            GuiComponentData::Frame(frame) => frame.generate_sprites(item, sprites),
+            GuiComponentData::Label(label) => label.generate_sprites(item, sprites),
         }
     }
 
-    pub fn update_style(&mut self, styles: &Vec<GuiComponentStyle>, new_state: GuiStyleState) {
+    pub fn update_style(&mut self, style: &GuiComponentStyle, new_state: GuiStyleState) {
         match self {
-            GuiComponentType::Frame(frame) => frame.update_style(styles, new_state),
-            GuiComponentType::Label(label) => label.update_style(styles, new_state),
+            GuiComponentData::Frame(frame) => frame.update_style(style, new_state),
+            GuiComponentData::Label(label) => label.update_style(style, new_state),
         }
     }
 
