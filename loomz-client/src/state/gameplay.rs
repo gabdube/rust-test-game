@@ -1,14 +1,17 @@
 use loomz_shared::api::WorldActorId;
 use loomz_shared::base_types::{PositionF64, PositionF32, rect};
 use loomz_shared::inputs::InputBuffer;
+use loomz_shared::CommonError;
 use crate::animations::PawnAnimationType;
 use crate::{GameState, LoomzClient, Player};
 
 impl LoomzClient {
 
-    pub(crate) fn init_gameplay(&mut self) {
+    pub(crate) fn init_gameplay(&mut self) -> Result<(), CommonError> {
+        self.init_gameplay_gui()?;
         self.init_player();
         self.state = GameState::Game;
+        Ok(())
     }
 
     pub(crate) fn gameplay(&mut self) {
@@ -89,6 +92,23 @@ impl LoomzClient {
 
         self.player = player;
         self.target_position = start_position;
+    }
+
+    fn init_gameplay_gui(&mut self) -> Result<(), CommonError> {
+        use crate::gui::GuiLayoutType::VBox;
+
+        let screen_size = self.api.inputs().screen_size_value();
+        let view = loomz_shared::RectF32::from_size(screen_size);
+
+        self.menu.build_style(&self.api, |style| {
+            style.root_layout(VBox);
+        })?;
+
+        self.menu.build(&self.api, &view, |_gui| {
+
+        })?;
+
+        Ok(())
     }
 
 }

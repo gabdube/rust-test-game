@@ -145,3 +145,6 @@ impl LoomzEngine {
     }
 
 }
+
+unsafe impl Send for LoomzEngine {}
+unsafe impl Sync for LoomzEngine {}

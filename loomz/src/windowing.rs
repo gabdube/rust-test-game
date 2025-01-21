@@ -64,6 +64,10 @@ impl<'a> ApplicationHandler for LoomzApplication {
         }
     }
 
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        self.window().set_visible(false);
+    }
+
 }
 
 fn create_window(event_loop: &ActiveEventLoop) -> Result<Window, CommonError> {

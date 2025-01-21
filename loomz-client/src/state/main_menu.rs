@@ -53,7 +53,7 @@ impl LoomzClient {
         }
 
         if start_game {
-            self.init_gameplay();
+            self.init_gameplay()?;
         } else if start_sandbox {
             self.init_sandbox()?;
         }
