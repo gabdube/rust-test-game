@@ -1,4 +1,4 @@
-use loomz_shared::{CommonError, rect, rgb};
+use loomz_shared::{CommonError, rect};
 use crate::{LoomzClient, GameState};
 
 const START_GAME: u64 = 100;
@@ -62,23 +62,20 @@ impl LoomzClient {
     }
 
     fn init_main_menu_menu(&mut self) -> Result<(), CommonError> {
-        use crate::gui::{GuiLayoutType::VBox, GuiStyleState, GuiLabelCallback};
+        use crate::gui::{GuiLayoutType, GuiLabelCallback};
 
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32::from_size(screen_size);
 
         self.menu.build_style(&self.api, |style| {
-            style.root_layout(VBox);
-            style.label("menu_item", GuiStyleState::Base, "bubblegum", 90.0, rgb(71, 43, 26));
-            style.label("menu_item", GuiStyleState::Hovered, "bubblegum", 90.0, rgb(71, 26, 26));
-            style.label("menu_item", GuiStyleState::Selected, "bubblegum", 90.0, rgb(110, 34, 34));
-            style.frame("main_menu_panel", GuiStyleState::Base, "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(24, 18, 15));
+            style.root_layout(GuiLayoutType::VBox);
+            super::shared::main_panel_style(style);
         })?;
 
         self.menu.build(&self.api, &view, |gui| {
-            gui.layout(VBox);
+            gui.layout(GuiLayoutType::VBox);
             gui.layout_item(400.0, 440.0);
-            gui.frame("main_menu_panel", |gui| {
+            gui.frame("main_panel_style", |gui| {
                 gui.layout_item(300.0, 100.0);
 
                 gui.label_callback(GuiLabelCallback::Click, START_GAME);

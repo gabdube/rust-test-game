@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["multithreading"]
+default = []
 hot-reload = ["libloading", "notify", "loomz-client/hot-reload"]
 multithreading = ["parking_lot"]
 

@@ -94,53 +94,76 @@ impl<'a> NextBatch<'a> {
     }
 }
 
-fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(GuiSpriteType, vk::ImageView, &'a [GuiViewSprite])> {
+fn find_first_sprite_type(gui: &[GuiView], gui_index_out: &mut usize) -> Option<GuiSpriteType> {
     let mut gui_index = 0;
-    let mut sprites_start = 0;
-    let mut sprites_stop = 0;
-
     let mut current_sprite_type = None;
 
     while current_sprite_type.is_none() && gui_index < gui.len() {
-        current_sprite_type = gui.get(gui_index)
-            .and_then(|gui| gui.sprites.first() )
-            .map(|sprite| sprite.sprite.ty );
+        let gui = gui.get(gui_index);
+
+        if let Some(gui) = gui {
+            if gui.visible {
+                current_sprite_type = gui.sprites.first()
+                    .map(|sprite| sprite.sprite.ty );
+            }
+        }
 
         if current_sprite_type.is_none() {
             gui_index += 1;
         }
     }
 
+    *gui_index_out = gui_index;
+    current_sprite_type
+}
+
+fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(GuiSpriteType, vk::ImageView, &'a [GuiViewSprite])> {
+    let mut gui_index = 0;
+    let mut sprites_start = 0;
+    let mut sprites_stop = 0;
+    let mut current_sprite_type = find_first_sprite_type(gui, &mut gui_index);
+
     ::std::iter::from_fn(move || {
-        let gui = gui.get(gui_index)?;
         loop {
-            if sprites_stop == gui.sprites.len() {
-                break;
+            let gui = match gui.get(gui_index) {
+                Some(gui) => gui,
+                None => { return None }
+            };
+
+            if !gui.visible {
+                gui_index += 1;
+                continue;
             }
 
-            let sprite_view = &gui.sprites[sprites_stop];
-            if Some(sprite_view.sprite.ty) != current_sprite_type {
-                break;
+            loop {
+                if sprites_stop == gui.sprites.len() {
+                    break;
+                }
+            
+                let sprite_view = &gui.sprites[sprites_stop];
+                if Some(sprite_view.sprite.ty) != current_sprite_type {
+                    break;
+                }
+            
+                sprites_stop += 1;
             }
 
-            sprites_stop += 1;
+            let view = gui.sprites[sprites_start].image_view;
+            let sprite_type = gui.sprites[sprites_start].sprite.ty;
+            let sprites = &gui.sprites[sprites_start..sprites_stop];
+            let value = (sprite_type, view, sprites);
+
+            current_sprite_type = Some(sprite_type);
+            sprites_start = sprites_stop;
+
+            if sprites_start == gui.sprites.len() {
+                gui_index += 1;
+                sprites_start = 0;
+                sprites_stop = 0;
+            }
+
+            return Some(value);
         }
-
-        let view = gui.sprites[sprites_start].image_view;
-        let sprite_type = gui.sprites[sprites_start].sprite.ty;
-        let sprites = &gui.sprites[sprites_start..sprites_stop];
-        let value = (sprite_type, view, sprites);
-
-        current_sprite_type = Some(sprite_type);
-        sprites_start = sprites_stop;
-
-        if sprites_start == gui.sprites.len() {
-            gui_index += 1;
-            sprites_start = 0;
-            sprites_stop = 0;
-        }
-
-        Some(value)
     })
 }
 

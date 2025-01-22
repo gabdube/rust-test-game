@@ -6,7 +6,7 @@ use std::{slice, sync::Arc};
 use loomz_shared::api::{LoomzApi, GuiId, GuiSprite};
 use loomz_shared::assets::{LoomzAssetsBundle, AssetId, MsdfFontId, TextureId};
 use loomz_shared::{CommonError, CommonErrorType};
-use loomz_shared::{assets_err, chain_err};
+use loomz_shared::{assets_err, backend_err, chain_err};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
 use super::pipeline_compiler::PipelineCompiler;
 
@@ -64,6 +64,7 @@ struct GuiViewSprite {
 
 struct GuiView {
     sprites: Vec<GuiViewSprite>,
+    visible: bool,
 }
 
 struct GuiData {
@@ -114,7 +115,7 @@ impl GuiModule {
             vertex_alloc: VertexAlloc::default(),
             gui: Vec::with_capacity(4),
             vertex: vec![GuiVertex::default(); 500],
-            indices: vec![0; 1000]
+            indices: vec![0; 1000],
         };
         
         let mut gui = GuiModule {
@@ -220,6 +221,7 @@ impl GuiModule {
 
         guis.push(GuiView {
             sprites: Vec::new(),
+            visible: true,
         });
 
         id.bind(next_id as u32);
@@ -227,9 +229,19 @@ impl GuiModule {
         next_id
     }
 
-    fn update_gui<'a>(&mut self, core: &mut LoomzEngineCore, index: usize, sprites: &'a [GuiSprite]) -> Result<(), CommonError> {
-        let gui = &mut self.data.gui[index];
+    fn update_gui_sprites<'a>(&mut self, core: &mut LoomzEngineCore, index: usize, sprites: &'a [GuiSprite]) -> Result<(), CommonError> {
+        let gui = match self.data.gui.get_mut(index) {
+            Some(gui) => {
+                
+                gui
+            },
+            None => {
+                return Err(backend_err!("Tried to fetch gui at index {}, but it does not exits", index));
+            } 
+        };
+
         gui.sprites.clear();
+        
 
         if gui.sprites.capacity() < sprites.len() {
             gui.sprites.reserve(sprites.len());
@@ -252,13 +264,35 @@ impl GuiModule {
         Ok(())
     }
 
+    fn toggle_gui_visibility(&mut self, index: usize, visible: bool) -> Result<(), CommonError> {
+        match self.data.gui.get_mut(index) {
+            Some(gui) => {
+                gui.visible = visible;
+                self.update_batches = true;
+                Ok(())
+            },
+            None => {
+                Err(backend_err!("Tried to fetch gui at index {}, but it does not exits", index))
+            } 
+        }
+    }
+
     fn api_update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        use loomz_shared::GuiApiUpdate;
+        
         if let Some(updates) = api.gui().gui_updates() {
-            for (id, sprites) in updates {
+            for (id, update) in updates {
                 let index = id.bound_value()
                     .unwrap_or_else(|| self.create_gui(id) );
 
-                self.update_gui(core, index, sprites)?;
+                match update {
+                    GuiApiUpdate::ToggleGui(visible) => {
+                       self.toggle_gui_visibility(index, visible)?;
+                    },
+                    GuiApiUpdate::UpdateSprites(sprites) => {
+                        self.update_gui_sprites(core, index, sprites)?;
+                    }
+                }
             }
         }
 

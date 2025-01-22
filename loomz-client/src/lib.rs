@@ -54,7 +54,7 @@ impl LoomzClient {
             delta_ms: 0.0,
         };
         
-        let client = LoomzClient {
+        let mut client = LoomzClient {
             api: api.clone(),
             timing,
             animations: Box::default(),
@@ -69,6 +69,8 @@ impl LoomzClient {
 
         client.animations.load(api)?;
 
+        client.init_sandbox()?;
+
         Ok(client)
     }
 
@@ -81,8 +83,6 @@ impl LoomzClient {
         client.target_position = reader.read();
         client.player = reader.load();
         client.menu = reader.load();
-
-        client.init_main_menu()?;
 
         Ok(client)
     }
@@ -101,7 +101,7 @@ impl LoomzClient {
             GameState::Uninitialized => self.uninitialized()?,
             GameState::MainMenu => self.main_menu()?,
             GameState::Game => self.gameplay(),
-            GameState::Sandbox => self.sandbox(),
+            GameState::Sandbox => self.sandbox()?,
         }
 
         Ok(())

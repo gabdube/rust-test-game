@@ -35,8 +35,9 @@ impl<'a> GuiBuilder<'a> {
         let inner = &mut gui.inner_state;
         inner.base_view = *view;
         inner.state = Default::default();
-        inner.layouts.clear();
         inner.callbacks.clear();
+        inner.callbacks_output.clear();
+        inner.layouts.clear();
         inner.layout_items.clear();
         inner.component_base.clear();
         inner.component_data.clear();

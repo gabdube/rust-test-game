@@ -1,6 +1,6 @@
 mod style;
-use style::{GuiStyleBuilder, GuiStyleMap, GuiComponentStyle};
-pub use style::GuiStyleState;
+use style::{GuiStyleMap, GuiComponentStyle};
+pub use style::{GuiStyleBuilder, GuiStyleState};
 
 mod callbacks;
 use callbacks::{IntoGuiCallback, GuiComponentCallbacksValue, RawCallbackValue};
@@ -121,6 +121,10 @@ impl Gui {
         let callback_outputs = &mut self.inner_state.callbacks_output;
         callback_outputs.drain(..)
                 .map(|raw| E::from_u64(raw) )
+    }
+
+    pub fn toggle(&self, api: &LoomzApi, visible: bool) {
+        api.gui().toggle_gui(&self.inner_state.id, visible);
     }
 
     fn sync_with_engine(&mut self, api: &LoomzApi) {
