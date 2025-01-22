@@ -1,10 +1,5 @@
-
 use parking_lot::Mutex;
-use std::{
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
-    time::Duration,
-    thread::{sleep, Builder, JoinHandle}
-};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use loomz_shared::CommonError;
 
 struct InnerMutexData {
@@ -13,10 +8,10 @@ struct InnerMutexData {
 
 struct InnerData {
     data: Mutex<InnerMutexData>,
-    window_ready: AtomicBool,
     exit: AtomicBool,
 }
 
+/// Synchronization between the container app "loomz" and the client/engine threads
 pub struct LoomzMultithreadedShared {
     inner: Arc<InnerData>
 }
@@ -28,7 +23,6 @@ impl LoomzMultithreadedShared {
             data: Mutex::new(InnerMutexData {
                 last_error: None,
             }),
-            window_ready: AtomicBool::new(false),
             exit: AtomicBool::new(false)
         };
 
@@ -37,16 +31,12 @@ impl LoomzMultithreadedShared {
         }
     }
 
-    pub fn exit(&self) -> bool {
-        self.inner.exit.load(Ordering::SeqCst)
-    }
-
-    pub fn set_exiting(&self) {
+    pub fn exit(&self) {
         self.inner.exit.store(true, Ordering::SeqCst)
     }
 
-    pub fn waiting_for_window(&self) -> bool {
-        self.inner.window_ready.load(Ordering::SeqCst) == false
+    pub fn running(&self) -> bool {
+        self.inner.exit.load(Ordering::SeqCst) == false
     }
 
     pub fn last_error(&self) -> Result<(), CommonError> {

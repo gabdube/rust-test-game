@@ -51,6 +51,8 @@ impl LoomzEngine {
         self.core.set_output(display, window, window_size)?;
         self.world.set_output(&self.core);
         self.gui.set_output(&self.core);
+        self.render()?;
+        self.core.ctx.device.device_wait_idle().unwrap();
         Ok(())
     }
 

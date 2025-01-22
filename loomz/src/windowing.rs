@@ -12,14 +12,14 @@ impl<'a> ApplicationHandler for LoomzApplication {
         let window = match create_window(event_loop) {
             Ok(window) => window,
             Err(e) => {
-                self.last_error = Some(e);
+                self.set_last_error(e);
                 event_loop.exit();
                 return;
             }
         };
 
         if let Err(e) = self.set_window(window) {
-            self.last_error = Some(e);
+            self.set_last_error(e);
             event_loop.exit();
             return;
         }
@@ -29,32 +29,32 @@ impl<'a> ApplicationHandler for LoomzApplication {
         match event {
             WindowEvent::RedrawRequested => {
                 if let Err(e) = self.update() {
-                    self.last_error = Some(e);
+                    self.set_last_error(e);
                     event_loop.exit();
                 }
 
                 if let Err(e) = self.redraw() {
-                    self.last_error = Some(e);
+                    self.set_last_error(e);
                     event_loop.exit();
                 }
 
-                if self.api.must_exit() {
+                if self.api().must_exit() {
                     event_loop.exit();
                 }
             },
             WindowEvent::Resized(size) => {
                 if let Err(e) = self.resized(size.width, size.height) {
-                    self.last_error = Some(e);
+                    self.set_last_error(e);
                     event_loop.exit();
                 }
 
-                self.api.write_inputs().update_screen_size(size.width as f32, size.height as f32);
+                self.api().write_inputs().update_screen_size(size.width as f32, size.height as f32);
             },
             WindowEvent::CursorMoved { device_id: _, position } => {
-                self.api.write_inputs().update_cursor_position(position.x, position.y);
+                self.api().write_inputs().update_cursor_position(position.x, position.y);
             },
             WindowEvent::MouseInput { device_id: _, state, button } => {
-                let mut inputs = self.api.write_inputs();
+                let mut inputs = self.api().write_inputs();
                 parse_mouse_input(&mut inputs, state, button);
             },
             WindowEvent::CloseRequested => {
@@ -103,6 +103,12 @@ fn parse_mouse_input(inputs: &mut InputBuffer, state: ElementState, btn: MouseBu
 
 pub fn run(app: &mut LoomzApplication) {
     let event_loop = EventLoop::new().unwrap();
+
+    #[cfg(not(feature="multithreading"))]
     event_loop.set_control_flow(ControlFlow::Poll);
+
+    #[cfg(feature="multithreading")]
+    event_loop.set_control_flow(ControlFlow::Wait);
+
     event_loop.run_app(app).unwrap();
 }

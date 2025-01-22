@@ -86,9 +86,11 @@ impl<'a> NextBatch<'a> {
     }
 
     fn upload_vertex(&mut self, core: &mut LoomzEngineCore, alloc: &mut VertexAlloc<GuiVertex>) {
-        let i = self.index_count as usize;
-        let v = self.vertex_count as usize;
-        alloc.set_data(core, &self.indices[0..i], &self.vertex[0..v]);
+        if self.index_count > 0 {
+            let i = self.index_count as usize;
+            let v = self.vertex_count as usize;
+            alloc.set_data(core, &self.indices[0..i], &self.vertex[0..v]);
+        }
     }
 }
 
