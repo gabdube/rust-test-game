@@ -72,10 +72,15 @@ impl LoomzApi {
     }
 
     pub fn read_inputs(&self) -> Option<InputBuffer> {
-        match self.inner.inputs.new_inputs.fetch_and(false, Ordering::Relaxed) {
+        match self.inner.inputs.new_inputs.load(Ordering::Relaxed) {
             true => Some(self.inner.inputs.buffer.clone()),
             false => None
         }
+    }
+
+    pub fn clear_inputs_update_flags(&self) {
+        self.inner.inputs.new_inputs.store(false, Ordering::Relaxed);
+        self.inner.inputs.buffer.clear_update_flags();
     }
 
     pub fn inputs(&self) -> &InputBuffer {

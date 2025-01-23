@@ -32,6 +32,7 @@ struct ClientTiming {
     delta_ms: f64,
 }
 
+// repr(C) because I don't like the default fields alignment
 #[repr(C)]
 pub struct LoomzClient {
     api: LoomzApi,
@@ -42,7 +43,7 @@ pub struct LoomzClient {
     target_position: PositionF32,
 
     menu: gui::Gui,
-
+    
     state: GameState,
 }
 
@@ -103,6 +104,8 @@ impl LoomzClient {
             GameState::Game => self.gameplay(),
             GameState::Sandbox => self.sandbox()?,
         }
+
+        self.api.clear_inputs_update_flags();
 
         Ok(())
     }

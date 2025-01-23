@@ -57,6 +57,12 @@ impl<'a> ApplicationHandler for LoomzApplication {
                 let mut inputs = self.api().write_inputs();
                 parse_mouse_input(&mut inputs, state, button);
             },
+            WindowEvent::KeyboardInput { device_id: _, is_synthetic: _, event } => {
+                if !event.repeat {
+                    let mut inputs = self.api().write_inputs();
+                    parse_keyboard_input(&mut inputs, &event);
+                }
+            },
             WindowEvent::CloseRequested => {
                 event_loop.exit();
             },
@@ -99,6 +105,15 @@ fn parse_mouse_input(inputs: &mut InputBuffer, state: ElementState, btn: MouseBu
 
         inputs.update_mouse_button(button_state);
     }
+}
+
+fn parse_keyboard_input(inputs: &mut InputBuffer, key: &winit::event::KeyEvent) {
+    let key_code = match key.physical_key {
+        winit::keyboard::PhysicalKey::Code(code) => code as u32,
+        _ => 0,
+    };
+
+    inputs.set_key(key_code, key.state.is_pressed());
 }
 
 pub fn run(app: &mut LoomzApplication) {

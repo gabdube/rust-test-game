@@ -1,3 +1,4 @@
+use loomz_shared::inputs::keys;
 use loomz_shared::{CommonError, rect};
 use crate::{GameState, LoomzClient};
 
@@ -14,12 +15,27 @@ impl LoomzClient {
 
     pub(crate) fn sandbox(&mut self) -> Result<(), CommonError> {
         self.sandbox_update()?;
-        self.sandbox_gui_updates();
-        self.sandbox_gui_events()?;
+
+        if self.menu.visible() {
+            self.sandbox_gui_updates();
+            self.sandbox_gui_events()?;
+        }
+
         Ok(())
     }
 
     fn sandbox_update(&mut self) -> Result<(), CommonError> {
+        let new_inputs = match self.api.read_inputs() {
+            Some(inputs) => inputs,
+            None => { return Ok(()); }
+        };
+
+        if let Some(keystate) = new_inputs.keystate() {
+            if keystate.clicked(keys::ESC) {
+                self.menu.toggle(&self.api, !self.menu.visible());
+            }
+        }
+
         Ok(())
     }
 

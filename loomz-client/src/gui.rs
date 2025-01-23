@@ -64,6 +64,8 @@ struct GuiInnerState {
     sprites: Vec<GuiSprite>,
 
     builder_data: Box<GuiBuilderData>,
+
+    visible: bool,
 }
 
 pub struct Gui {
@@ -123,8 +125,13 @@ impl Gui {
                 .map(|raw| E::from_u64(raw) )
     }
 
-    pub fn toggle(&self, api: &LoomzApi, visible: bool) {
+    pub fn toggle(&mut self, api: &LoomzApi, visible: bool) {
+        self.inner_state.visible = visible;
         api.gui().toggle_gui(&self.inner_state.id, visible);
+    }
+
+    pub fn visible(&self) -> bool {
+        self.inner_state.visible
     }
 
     fn sync_with_engine(&mut self, api: &LoomzApi) {
@@ -350,7 +357,9 @@ impl StoreAndLoad for Gui {
             component_data: Vec::new(),
 
             sprites: Vec::with_capacity(64),
-            builder_data: Box::default()
+            builder_data: Box::default(),
+
+            visible: true,
         };
 
         inner_state.id = reader.load();
@@ -390,6 +399,8 @@ impl Default for Gui {
                 sprites: Vec::with_capacity(64),
 
                 builder_data: Box::default(),
+
+                visible: true,
             }),
         }
     }

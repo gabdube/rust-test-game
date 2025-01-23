@@ -44,7 +44,7 @@ impl GuiComponentData {
 
     pub fn on_events(&mut self, callbacks: &GuiComponentCallbacksValue, output: &mut Vec<RawCallbackValue>, event: GuiInnerEvent) {
         match self {
-            GuiComponentData::Frame(frame) => {},
+            GuiComponentData::Frame(_frame) => {},
             GuiComponentData::Label(label) => label.on_events(callbacks, output, event),
         }
     }
