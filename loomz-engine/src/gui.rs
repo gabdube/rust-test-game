@@ -241,7 +241,6 @@ impl GuiModule {
         };
 
         gui.sprites.clear();
-        
 
         if gui.sprites.capacity() < sprites.len() {
             gui.sprites.reserve(sprites.len());
@@ -256,7 +255,7 @@ impl GuiModule {
             gui.sprites.push(GuiViewSprite {
                 image_view,
                 sprite
-            });
+            }); 
         }
 
         self.update_batches = true;

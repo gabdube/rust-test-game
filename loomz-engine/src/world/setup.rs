@@ -1,10 +1,13 @@
 use loomz_engine_core::{LoomzEngineCore, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
 use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, chain_err};
-use super::{WorldPushConstant, WorldVertex};
+use super::{WorldPushConstant, WorldVertex, WorldDebugVertex};
 
 const WORLD_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/world.vert.spv");
 const WORLD_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/world.frag.spv");
+
+const WORLD_DEBUG_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/debug.vert.spv");
+const WORLD_DEBUG_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/debug.frag.spv");
 
 
 impl super::WorldModule {
@@ -105,6 +108,71 @@ impl super::WorldModule {
         Ok(())
     }
 
+    pub(super) fn setup_debug_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        let ctx = &core.ctx;
+
+        // Pipeline layout
+        // The debug pipeline does not use any descriptor sets
+        let constant_range = vk::PushConstantRange {
+            offset: 0,
+            size: ::std::mem::size_of::<WorldPushConstant>() as u32,
+            stage_flags: vk::ShaderStageFlags::VERTEX,
+        };
+
+        let pipeline_create_info = vk::PipelineLayoutCreateInfo {
+            set_layout_count: 0,
+            p_set_layouts: ::std::ptr::null(),
+            push_constant_range_count: 1,
+            p_push_constant_ranges: &constant_range,
+            ..Default::default()
+        };
+
+        let pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
+            .map_err(|err| backend_init_err!("Failed to create debug pipeline layout: {}", err) )?;
+        
+
+        // Shader source
+        let modules = GraphicsShaderModules::new(ctx, WORLD_DEBUG_VERT_SRC, WORLD_DEBUG_FRAG_SRC)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute world debug pipeline shader modules") )?;
+
+        // Pipeline
+        let vertex_fields = [
+            PipelineVertexFormat {
+                location: 0,
+                offset: 0,
+                format: vk::Format::R32G32_SFLOAT,
+            },
+            PipelineVertexFormat {
+                location: 1,
+                offset: 8,
+                format: vk::Format::R8G8B8A8_UNORM,
+            },
+        ];
+
+        self.resources.debug_pipeline_layout = pipeline_layout;
+
+        let pipeline = &mut self.resources.debug_pipeline;
+        pipeline.set_shader_modules(modules);
+        pipeline.set_vertex_format::<WorldDebugVertex>(&vertex_fields);
+        pipeline.set_pipeline_layout(pipeline_layout);
+        pipeline.set_depth_testing(false);
+        pipeline.set_blending(false);
+        pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
+            polygon_mode: vk::PolygonMode::FILL,
+            cull_mode: vk::CullModeFlags::NONE,
+            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+            line_width: 1.0,
+            ..Default::default()
+        });
+
+        let info = &core.info;
+        pipeline.set_sample_count(info.sample_count);
+        pipeline.set_color_attachment_format(info.color_format);
+        pipeline.set_depth_attachment_format(info.depth_format);
+
+        Ok(())
+    }
+
     pub(super) fn setup_descriptors(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let allocations = [
             DescriptorsAllocation {
@@ -159,7 +227,7 @@ impl super::WorldModule {
         let render = &mut self.render;
 
         render.pipeline_layout = self.resources.pipeline_layout;
-        render.vertex_buffer = self.resources.vertex.buffer;
+        render.vertex_buffer = [self.resources.vertex.buffer];
         render.index_offset = self.resources.vertex.index_offset();
         render.vertex_offset = self.resources.vertex.vertex_offset();
     }

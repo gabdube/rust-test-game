@@ -51,6 +51,8 @@ struct GraphicsPipelineBuildInfo {
     render_info: vk::PipelineRenderingCreateInfo,
 
     pipeline_layout: vk::PipelineLayout,
+
+    blending_enabled: bool,
 }
 
 pub struct GraphicsPipeline {
@@ -163,6 +165,10 @@ impl GraphicsPipeline {
         self.build.depth_stencil.depth_write_enable = enabled as u32;
     }
 
+    pub fn set_blending(&mut self, enabled: bool) {
+        self.build.blending_enabled = enabled;
+    }
+
     pub fn rasterization(&mut self, state: &vk::PipelineRasterizationStateCreateInfo) {
         self.build.rasterization = *state;
     }
@@ -182,8 +188,10 @@ impl GraphicsPipeline {
         build.vertex_input.vertex_binding_description_count = build.vertex_binding_count as _;
         build.vertex_input.p_vertex_binding_descriptions = build.vertex_bindings.as_ptr();
 
-        build.color_blend.attachment_count = build.blend_attachments.len() as _;
-        build.color_blend.p_attachments = build.blend_attachments.as_ptr();
+        if build.blending_enabled {
+            build.color_blend.attachment_count = build.blend_attachments.len() as _;
+            build.color_blend.p_attachments = build.blend_attachments.as_ptr();
+        }
 
         build.dynamic.dynamic_state_count = build.dynamic_states.len() as _;
         build.dynamic.p_dynamic_states = build.dynamic_states.as_ptr();
@@ -282,6 +290,8 @@ impl Default for GraphicsPipelineBuildInfo {
             render_info: vk::PipelineRenderingCreateInfo::default(),
 
             pipeline_layout: vk::PipelineLayout::null(),
+
+            blending_enabled: true,
         }
     }
 }

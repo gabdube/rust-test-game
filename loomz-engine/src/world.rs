@@ -33,6 +33,13 @@ pub struct WorldVertex {
 
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
+pub struct WorldDebugVertex {
+    pub pos: [f32; 2],
+    pub color: [u8; 4],
+}
+
+#[repr(C)]
+#[derive(Default, Copy, Clone)]
 pub struct SpriteData {
     pub offset: [f32; 2],
     pub size: [f32; 2],
@@ -52,11 +59,13 @@ pub struct WorldBatch {
 struct WorldResources {
     assets: Arc<LoomzAssetsBundle>,
     pipeline: GraphicsPipeline,
+    debug_pipeline: GraphicsPipeline,
     vertex: VertexAlloc<WorldVertex>,
     textures: FnvHashMap<TextureId, Texture>,
     global_layout: vk::DescriptorSetLayout,
     batch_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
+    debug_pipeline_layout: vk::PipelineLayout,
 }
 
 #[derive(Default)]
@@ -90,15 +99,25 @@ struct WorldData {
     instances: Vec<WorldInstance>,
 }
 
+#[derive(Copy, Clone)]
+struct WorldDebugRender {
+    pipeline_handle: vk::Pipeline,
+    pipeline_layout: vk::PipelineLayout,
+    vertex_buffer: [vk::Buffer; 1],
+    push_constants: [WorldPushConstant; 1],
+    vertex_offset: [vk::DeviceSize; 1],
+    vertex_count: u32,
+}
+
 /// Data used on rendering
 #[derive(Copy, Clone)]
 struct WorldRender {
     pipeline_handle: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
-    vertex_buffer: vk::Buffer,
-    sprites: vk::DescriptorSet,
-    index_offset: vk::DeviceSize,
+    vertex_buffer: [vk::Buffer; 1],
     vertex_offset: [vk::DeviceSize; 1],
+    index_offset: vk::DeviceSize,
+    sprites: vk::DescriptorSet,
     push_constants: [WorldPushConstant; 1],
 }
 
@@ -107,8 +126,10 @@ pub(crate) struct WorldModule {
     descriptors: Box<WorldDescriptors>,
     data: Box<WorldData>,
     render: Box<WorldRender>,
+    debug_render: Box<WorldDebugRender>,
     batches: Vec<WorldBatch>,
     update_batches: bool,
+    debug: bool,
 }
 
 impl WorldModule {
@@ -117,11 +138,13 @@ impl WorldModule {
         let resources = WorldResources {
             assets: api.assets(),
             pipeline: GraphicsPipeline::new(),
+            debug_pipeline: GraphicsPipeline::new(),
             vertex: VertexAlloc::default(),
             textures: FnvHashMap::default(),
             global_layout: vk::DescriptorSetLayout::null(),
             batch_layout: vk::DescriptorSetLayout::null(),
             pipeline_layout: vk::PipelineLayout::null(),
+            debug_pipeline_layout: vk::PipelineLayout::null(),
         };
 
         let data = WorldData {
@@ -134,23 +157,35 @@ impl WorldModule {
         let render = WorldRender {
             pipeline_handle: vk::Pipeline::null(),
             pipeline_layout: vk::PipelineLayout::null(),
-            vertex_buffer: vk::Buffer::null(),
-            sprites: vk::DescriptorSet::null(),
+            vertex_buffer: [vk::Buffer::null()],
+            vertex_offset: [0],
             index_offset: 0,
+            sprites: vk::DescriptorSet::null(),
+            push_constants: [WorldPushConstant::default(); 1],
+        };
+
+        let debug_render = WorldDebugRender {
+            pipeline_handle: vk::Pipeline::null(),
+            pipeline_layout: vk::PipelineLayout::null(),
+            vertex_buffer: [vk::Buffer::null()],
             vertex_offset: [0],
             push_constants: [WorldPushConstant::default(); 1],
+            vertex_count: 0,
         };
 
         let mut world = WorldModule {
             data: Box::new(data),
             resources: Box::new(resources),
             render: Box::new(render),
+            debug_render: Box::new(debug_render),
             batches: Vec::with_capacity(16),
             descriptors: Box::default(),
             update_batches: false,
+            debug: true,
         };
 
         world.setup_pipeline(core)?;
+        world.setup_debug_pipeline(core)?;
         world.setup_descriptors(core)?;
         world.setup_vertex_buffers(core)?;
         world.setup_sprites_buffers(core)?;
@@ -162,6 +197,7 @@ impl WorldModule {
     pub fn destroy(self, core: &mut LoomzEngineCore) {
         self.descriptors.allocator.destroy(core);
         self.resources.pipeline.destroy(&core.ctx);
+        self.resources.debug_pipeline.destroy(&core.ctx);
         self.resources.vertex.free(core);
         self.data.sprites.free(core);
 
@@ -170,6 +206,7 @@ impl WorldModule {
         }
 
         let device = &core.ctx.device;
+        device.destroy_pipeline_layout(self.resources.debug_pipeline_layout);
         device.destroy_pipeline_layout(self.resources.pipeline_layout);
         device.destroy_descriptor_set_layout(self.resources.global_layout);
         device.destroy_descriptor_set_layout(self.resources.batch_layout);
@@ -205,26 +242,50 @@ impl WorldModule {
     // Rendering
     //
 
+    #[inline(always)]
+    fn push_values(constants: &[WorldPushConstant; 1]) -> &[u8] {
+        unsafe { constants.align_to::<u8>().1 }
+    }
+
     pub fn render(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
-        #[inline(always)]
-        fn push_values(constants: &[WorldPushConstant; 1]) -> &[u8] {
-            unsafe { constants.align_to::<u8>().1 }
+        self.render_batches(ctx, cmd);
+
+        if self.debug {
+            self.render_debug_info(ctx, cmd);
         }
-        
+    }
+
+    fn render_batches(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
         const GRAPHICS: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
         let device = &ctx.device;
         let render = *self.render;
 
         device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
-        device.cmd_bind_index_buffer(cmd, render.vertex_buffer, render.index_offset, vk::IndexType::UINT32);
-        device.cmd_bind_vertex_buffers(cmd, 0, slice::from_ref(&render.vertex_buffer), &render.vertex_offset);
-        device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push_values(&render.push_constants));
+        device.cmd_bind_index_buffer(cmd, render.vertex_buffer[0], render.index_offset, vk::IndexType::UINT32);
+        device.cmd_bind_vertex_buffers(cmd, 0, &render.vertex_buffer, &render.vertex_offset);
+        device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, Self::push_values(&render.push_constants));
         device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, GLOBAL_LAYOUT_INDEX, slice::from_ref(&render.sprites), &[]);
 
         for batch in self.batches.iter() {
             device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, BATCH_LAYOUT_INDEX, slice::from_ref(&batch.set), &[]);
             device.cmd_draw_indexed(cmd, 6, batch.instances_count, 0, 0, batch.instances_offset);
         }
+
+    }
+
+    fn render_debug_info(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
+        const GRAPHICS: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
+        let device = &ctx.device;
+        let render = *self.debug_render;
+
+        if render.vertex_count == 0 {
+            return;
+        }
+
+        device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
+        device.cmd_bind_vertex_buffers(cmd, 0, &render.vertex_buffer, &render.vertex_offset);
+        device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, Self::push_values(&render.push_constants));
+        device.cmd_draw(cmd, render.vertex_count, 1, 0, 0);
     }
 
     //

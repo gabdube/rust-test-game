@@ -102,7 +102,7 @@ impl Gui {
         let mut need_sync = false;
 
         if let Some(view) = updates.view {
-            self.resize(&view);
+            self.inner_resize(&view);
             need_sync = true;
         }
 
@@ -117,6 +117,11 @@ impl Gui {
         if need_sync {
             self.sync_with_engine(api);
         }
+    }
+
+    pub fn resize(&mut self, api: &LoomzApi, view: &RectF32) {
+        self.inner_resize(view);
+        self.sync_with_engine(api);
     }
 
     pub fn drain_events<'a, E: IntoGuiCallback>(&'a mut self) -> impl Iterator<Item=E> + 'a {
@@ -139,7 +144,7 @@ impl Gui {
         api.gui().update_gui(&self.inner_state.id, &self.inner_state.sprites);
     }
 
-    fn resize(&mut self, view: &RectF32) {
+    fn inner_resize(&mut self, view: &RectF32) {
         self.inner_state.base_view = *view;
         layout::compute(self);
     }

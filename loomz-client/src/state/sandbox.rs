@@ -30,8 +30,11 @@ impl LoomzClient {
             None => { return Ok(()); }
         };
 
+        let size = new_inputs.screen_size_value();
+
         if let Some(keystate) = new_inputs.keystate() {
-            if keystate.clicked(keys::ESC) {
+            if keystate.pressed(keys::ESC) {
+                self.menu.resize(&self.api, &rect(0.0, 0.0, size.width, size.height));
                 self.menu.toggle(&self.api, !self.menu.visible());
             }
         }
@@ -88,6 +91,8 @@ impl LoomzClient {
 
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32::from_size(screen_size);
+
+        self.menu.toggle(&self.api, false);
 
         self.menu.build_style(&self.api, |style| {
             style.root_layout(GuiLayoutType::VBox);

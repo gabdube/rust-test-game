@@ -14,9 +14,9 @@ pub mod keys {
 
     #[derive(Copy, Clone, PartialEq)]
     pub enum SingleKeyState {
-        Released,
+        Default,
         Pressed,
-        Clicked
+        Released
     }
 
     pub struct KeyState<'a> {
@@ -24,9 +24,15 @@ pub mod keys {
     }
 
     impl<'a> KeyState<'a> {
-        pub fn clicked(&self, key_code: u32) -> bool {
+        pub fn released(&self, key_code: u32) -> bool {
             self.guard.keys.get(&key_code)
-                .map(|key| *key == SingleKeyState::Clicked )
+                .map(|key| *key == SingleKeyState::Released )
+                .unwrap_or(false)
+        }
+
+        pub fn pressed(&self, key_code: u32) -> bool {
+            self.guard.keys.get(&key_code)
+                .map(|key| *key == SingleKeyState::Pressed )
                 .unwrap_or(false)
         }
     }
@@ -122,7 +128,7 @@ impl InnerInputBuffer {
     pub fn set_key(&mut self, key_code: u32, pressed: bool) {
         let state = match pressed {
             true => keys::SingleKeyState::Pressed,
-            false => keys::SingleKeyState::Clicked,
+            false => keys::SingleKeyState::Released,
         };
 
         self.keys.insert(key_code, state);
@@ -184,11 +190,11 @@ impl InputBuffer {
     pub fn clear_update_flags(&self) {
         let mut inputs = self.inputs();
 
-        // Toggle clicked keys to released state
+        // Toggle released keys to default state
         if inputs.update_flags.intersects(InputUpdateFlags::UPDATED_KEYSTATE) {
             for v in inputs.keys.values_mut() {
-                if *v == keys::SingleKeyState::Clicked {
-                    *v = keys::SingleKeyState::Released;
+                if *v == keys::SingleKeyState::Released {
+                    *v = keys::SingleKeyState::Default;
                 }
             }
         }
