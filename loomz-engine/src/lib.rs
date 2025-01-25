@@ -49,7 +49,7 @@ impl LoomzEngine {
 
     pub fn set_output(&mut self, display: RawDisplayHandle, window: RawWindowHandle, window_size: [u32; 2]) -> Result<(), CommonError> {
         self.core.set_output(display, window, window_size)?;
-        self.world.set_output(&self.core);
+        self.world.set_output(&mut self.core);
         self.gui.set_output(&self.core);
         self.render()?;
         self.core.ctx.device.device_wait_idle().unwrap();
@@ -58,7 +58,7 @@ impl LoomzEngine {
 
     pub fn resize_output(&mut self, width: u32, height: u32) -> Result<(), CommonError> {
         self.core.resize_output(width, height)?;
-        self.world.rebuild(&self.core);
+        self.world.rebuild(&mut self.core);
         self.gui.rebuild(&self.core);
         Ok(())
     }
@@ -75,7 +75,7 @@ impl LoomzEngine {
         match self.core.acquire_frame()? {
             AcquireReturn::Invalid => {},
             AcquireReturn::Rebuild => {
-                self.world.rebuild(&self.core);
+                self.world.rebuild(&mut self.core);
                 self.gui.rebuild(&self.core);
             },
             AcquireReturn::Render => {

@@ -16,6 +16,6 @@ layout (push_constant) uniform ScreenInfo {
 void main() {
     outColor = inColor;
 
-    vec2 positions = (inPos / vec2(screen_width, screen_height)) * 2.0;
+    vec2 positions = ((inPos / vec2(screen_width, screen_height)) * 2.0) - vec2(1.0);
     gl_Position = vec4(positions, 0.0, 1.0);
 }

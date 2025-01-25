@@ -124,6 +124,7 @@ impl LoomzClient {
 
     fn load_library() -> Result<ClientLibrary, CommonError> {
         let lib_path = lib_path()?;
+
         let handle = unsafe { libloading::Library::new(lib_path) }
             .map_err(|err| system_err!("Failed to load client library: {err:?}") )?;
 

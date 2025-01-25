@@ -239,6 +239,11 @@ impl<V: Copy> VertexAlloc<V> {
             dbg!(self.vertex_capacity, vertex.len());
         }
 
+        if index.len() == 0 || vertex.len() == 0 {
+            dbg!("Warning tried to set an empty data set to vertex buffer");
+            return;
+        }
+
         let index_count = vk::DeviceSize::min(index.len() as _, self.index_capacity as _);
         let vertex_count = vk::DeviceSize::min(vertex.len() as _, self.vertex_capacity as _);
         let index_offset = self.index_offset();

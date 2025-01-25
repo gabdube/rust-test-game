@@ -156,7 +156,6 @@ impl super::WorldModule {
         pipeline.set_vertex_format::<WorldDebugVertex>(&vertex_fields);
         pipeline.set_pipeline_layout(pipeline_layout);
         pipeline.set_depth_testing(false);
-        pipeline.set_blending(false);
         pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
             polygon_mode: vk::PolygonMode::FILL,
             cull_mode: vk::CullModeFlags::NONE,
@@ -164,6 +163,20 @@ impl super::WorldModule {
             line_width: 1.0,
             ..Default::default()
         });
+        pipeline.blending(
+            &vk::PipelineColorBlendAttachmentState {
+                blend_enable: 0,
+                src_color_blend_factor: vk::BlendFactor::ONE,
+                dst_color_blend_factor: vk::BlendFactor::ZERO,
+                src_alpha_blend_factor: vk::BlendFactor::ONE,
+                dst_alpha_blend_factor: vk::BlendFactor::ZERO,
+                ..Default::default()
+            },
+            &vk::PipelineColorBlendStateCreateInfo {
+                attachment_count: 1,
+                ..Default::default()
+            }
+        );
 
         let info = &core.info;
         pipeline.set_sample_count(info.sample_count);
@@ -194,7 +207,7 @@ impl super::WorldModule {
         Ok(())
     }
 
-    pub(super) fn setup_vertex_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+    pub(super) fn setup_vertex_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let vertex_capacity = 4;
         let index_capacity = 6;
         self.resources.vertex = VertexAlloc::new(core, index_capacity, vertex_capacity)
@@ -213,6 +226,16 @@ impl super::WorldModule {
         Ok(())
     }
 
+    pub(super) fn setup_debug_vertex_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        let vertex_capacity = 1000;
+        let index_capacity = 1500;
+        
+        self.resources.debug_vertex = VertexAlloc::new(core, index_capacity, vertex_capacity)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create debug vertex alloc: {err}") )?;
+
+        Ok(())
+    }
+
     pub(super) fn setup_sprites_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {  
         let sprites_capacity = 100;
         self.data.sprites = StorageAlloc::new(core, sprites_capacity)
@@ -224,12 +247,19 @@ impl super::WorldModule {
     }
 
     pub(super) fn setup_render_data(&mut self) {
-        let render = &mut self.render;
+        let res = &self.resources;
 
-        render.pipeline_layout = self.resources.pipeline_layout;
-        render.vertex_buffer = [self.resources.vertex.buffer];
-        render.index_offset = self.resources.vertex.index_offset();
-        render.vertex_offset = self.resources.vertex.vertex_offset();
+        let render = &mut self.render;
+        render.pipeline_layout = res.pipeline_layout;
+        render.vertex_buffer = [res.vertex.buffer];
+        render.index_offset = res.vertex.index_offset();
+        render.vertex_offset = res.vertex.vertex_offset();
+
+        let render = &mut self.debug_render;
+        render.pipeline_layout = res.debug_pipeline_layout;
+        render.vertex_buffer = [res.debug_vertex.buffer];
+        render.index_offset = res.debug_vertex.index_offset();
+        render.vertex_offset = res.debug_vertex.vertex_offset();
     }
 
 }

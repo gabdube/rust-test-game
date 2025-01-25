@@ -10,6 +10,8 @@ pub mod keys {
 
     pub(super) type KeysCollection = FnvHashMap<u32, SingleKeyState>;
 
+    pub const _1: u32 = 6;
+    pub const _2: u32 = 7;
     pub const ESC: u32 = 114;
 
     #[derive(Copy, Clone, PartialEq)]

@@ -113,6 +113,8 @@ fn parse_keyboard_input(inputs: &mut InputBuffer, key: &winit::event::KeyEvent) 
         _ => 0,
     };
 
+    // println!("{:?}", key_code);
+
     inputs.set_key(key_code, key.state.is_pressed());
 }
 

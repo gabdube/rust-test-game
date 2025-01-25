@@ -1,3 +1,4 @@
+use bitflags::bitflags;
 use crate::PositionF32;
 use crate::assets::TextureId;
 use super::base::{Id, MessageQueue};
@@ -26,9 +27,18 @@ pub enum WorldActorUpdate {
     Flip(bool),
 }
 
+bitflags! {
+    #[derive(Copy, Clone, Default)]
+    pub struct WorldDebugFlags: u32 {
+        const SHOW_MAIN_GRID = 0b001;
+        const SHOW_SUB_GRID  = 0b010;
+    }
+}
+
 pub struct WorldApi {
     pub animations: MessageQueue<WorldAnimationId, WorldAnimation>,
     pub actors: MessageQueue<WorldActorId, WorldActorUpdate>,
+    pub debug: MessageQueue<(), WorldDebugFlags>,
 }
 
 impl WorldApi {
@@ -37,6 +47,7 @@ impl WorldApi {
         WorldApi {
             animations: MessageQueue::with_capacity(16),
             actors: MessageQueue::with_capacity(16),
+            debug: MessageQueue::with_capacity(8)
         }
     }
 
@@ -69,4 +80,11 @@ impl WorldApi {
         self.actors.read_values()
     }
 
+    pub fn toggle_debug(&self, debug: WorldDebugFlags) {
+        self.debug.push(&(), debug);
+    }
+
+    pub fn read_debug<'a>(&'a self) -> Option<impl Iterator<Item=((), WorldDebugFlags)> + 'a> {
+        self.debug.read_values()
+    }
 }

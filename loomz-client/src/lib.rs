@@ -8,7 +8,7 @@ mod state;
 
 use std::time::Instant;
 use loomz_shared::base_types::PositionF32;
-use loomz_shared::api::WorldActorId;
+use loomz_shared::api::{WorldActorId, WorldDebugFlags};
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
 
 #[derive(Default)]
@@ -32,8 +32,11 @@ struct ClientTiming {
     delta_ms: f64,
 }
 
-// repr(C) because I don't like the default fields alignment
-#[repr(C)]
+#[derive(Default)]
+struct DebugState {
+    world: WorldDebugFlags,
+}
+
 pub struct LoomzClient {
     api: LoomzApi,
     timing: ClientTiming,
@@ -45,6 +48,7 @@ pub struct LoomzClient {
     menu: gui::Gui,
     
     state: GameState,
+    debug_state: DebugState
 }
 
 impl LoomzClient {
@@ -66,6 +70,7 @@ impl LoomzClient {
             menu: gui::Gui::default(),
 
             state: GameState::Uninitialized,
+            debug_state: DebugState::default(),
         };
 
         client.animations.load(api)?;
@@ -105,6 +110,8 @@ impl LoomzClient {
             GameState::Sandbox => self.sandbox()?,
         }
 
+        self.update_debug_state();
+
         self.api.clear_inputs_update_flags();
 
         Ok(())
@@ -114,6 +121,27 @@ impl LoomzClient {
         let elapsed = self.timing.last.elapsed();
         self.timing.last = Instant::now();
         self.timing.delta_ms = elapsed.as_secs_f64();
+    }
+
+    fn update_debug_state(&mut self) {
+        use loomz_shared::inputs::keys;
+
+        if let Some(inputs) = self.api.read_inputs() {
+            if let Some(keystate) = inputs.keystate() {
+                let mut update_debug = false;
+                if keystate.pressed(keys::_1) {
+                    self.debug_state.world.toggle(WorldDebugFlags::SHOW_MAIN_GRID);
+                    update_debug = true;
+                }
+                if keystate.pressed(keys::_2) {
+                    self.debug_state.world.toggle(WorldDebugFlags::SHOW_SUB_GRID);
+                    update_debug = true;
+                }
+                if update_debug {
+                    self.api.world().toggle_debug(self.debug_state.world);
+                }
+            }
+        }
     }
 
     fn uninitialized(&mut self) -> Result<(), CommonError> {
