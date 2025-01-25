@@ -5,3 +5,4 @@ JSON;103;pawn_sprites;Pawn_Blue.json;
 JSON;104;warrior_sprites;Warrior_Blue.json;
 MSDF_FONT;105;bubblegum;BubblegumSans.png;BubblegumSans.bin;
 TEXTURE;106;gui;gui.ktx2;
+TEXTURE;107;terrain;test_terrain.ktx2;

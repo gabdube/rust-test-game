@@ -3,17 +3,94 @@ use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{backend_init_err, chain_err};
 use super::{WorldPushConstant, WorldVertex, WorldDebugVertex};
 
-const WORLD_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/world.vert.spv");
-const WORLD_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/world.frag.spv");
+const WORLD_TERRAIN_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_terrain.vert.spv");
+const WORLD_TERRAIN_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_terrain.frag.spv");
 
-const WORLD_DEBUG_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/debug.vert.spv");
-const WORLD_DEBUG_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/debug.frag.spv");
+const WORLD_ACTORS_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_actors.vert.spv");
+const WORLD_ACTORS_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_actors.frag.spv");
+
+const WORLD_DEBUG_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_debug.vert.spv");
+const WORLD_DEBUG_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_debug.frag.spv");
 
 
 impl super::WorldModule {
 
-    pub(super) fn setup_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+    pub(super) fn setup_terrain_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let ctx = &core.ctx;
+        let pipeline = &mut self.resources.pipelines.terrain;
+        let pipeline_layout = &mut self.resources.pipelines.terrain_layout;
+
+        // Pipeline layout
+        let constant_range = vk::PushConstantRange {
+            offset: 0,
+            size: ::std::mem::size_of::<WorldPushConstant>() as u32,
+            stage_flags: vk::ShaderStageFlags::VERTEX,
+        };
+
+        let pipeline_create_info = vk::PipelineLayoutCreateInfo {
+            set_layout_count: 0,
+            p_set_layouts: ::std::ptr::null(),
+            push_constant_range_count: 1,
+            p_push_constant_ranges: &constant_range,
+            ..Default::default()
+        };
+
+        *pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
+            .map_err(|err| backend_init_err!("Failed to create world terrain pipeline layout: {}", err) )?;
+
+        // Shader source
+        let modules = GraphicsShaderModules::new(ctx, WORLD_TERRAIN_VERT_SRC, WORLD_TERRAIN_FRAG_SRC)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute world terrain pipeline shader modules") )?;
+
+        // Pipeline
+        let vertex_fields = [
+            PipelineVertexFormat {
+                location: 0,
+                offset: 0,
+                format: vk::Format::R32G32_SFLOAT,
+            },
+            PipelineVertexFormat {
+                location: 1,
+                offset: 8,
+                format: vk::Format::R8G8B8A8_UNORM,
+            },
+        ];
+
+        pipeline.set_shader_modules(modules);
+        pipeline.set_vertex_format::<WorldDebugVertex>(&vertex_fields);
+        pipeline.set_pipeline_layout(*pipeline_layout);
+        pipeline.set_depth_testing(false);
+        pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
+            polygon_mode: vk::PolygonMode::FILL,
+            cull_mode: vk::CullModeFlags::NONE,
+            front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+            line_width: 1.0,
+            ..Default::default()
+        });
+        pipeline.blending(
+            &vk::PipelineColorBlendAttachmentState {
+                blend_enable: 0,
+                ..Default::default()
+            },
+            &vk::PipelineColorBlendStateCreateInfo {
+                attachment_count: 1,
+                ..Default::default()
+            }
+        );
+
+        let info = &core.info;
+        pipeline.set_sample_count(info.sample_count);
+        pipeline.set_color_attachment_format(info.color_format);
+        pipeline.set_depth_attachment_format(info.depth_format);
+
+
+        Ok(())
+    }
+
+    pub(super) fn setup_actors_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        let ctx = &core.ctx;
+        let pipeline = &mut self.resources.pipelines.actors;
+        let pipeline_layout = &mut self.resources.pipelines.actors_layout;
 
         // Descriptor set layouts
         let bindings_global = [
@@ -52,12 +129,12 @@ impl super::WorldModule {
             ..Default::default()
         };
 
-        let pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
+        *pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
             .map_err(|err| backend_init_err!("Failed to create pipeline layout: {}", err) )?;
         
 
         // Shader source
-        let modules = GraphicsShaderModules::new(ctx, WORLD_VERT_SRC, WORLD_FRAG_SRC)
+        let modules = GraphicsShaderModules::new(ctx, WORLD_ACTORS_VERT_SRC, WORLD_ACTORS_FRAG_SRC)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute world pipeline shader modules") )?;
 
         // Pipeline
@@ -69,14 +146,9 @@ impl super::WorldModule {
             },
         ];
 
-        self.resources.global_layout = layout_global;
-        self.resources.batch_layout = layout_batch;
-        self.resources.pipeline_layout = pipeline_layout;
-
-        let pipeline = &mut self.resources.pipeline;
         pipeline.set_shader_modules(modules);
         pipeline.set_vertex_format::<WorldVertex>(&vertex_fields);
-        pipeline.set_pipeline_layout(pipeline_layout);
+        pipeline.set_pipeline_layout(*pipeline_layout);
         pipeline.set_depth_testing(false);
         pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
             polygon_mode: vk::PolygonMode::FILL,
@@ -104,12 +176,17 @@ impl super::WorldModule {
         pipeline.set_sample_count(info.sample_count);
         pipeline.set_color_attachment_format(info.color_format);
         pipeline.set_depth_attachment_format(info.depth_format);
+
+        self.resources.global_layout = layout_global;
+        self.resources.batch_layout = layout_batch;
      
         Ok(())
     }
-
+    
     pub(super) fn setup_debug_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let ctx = &core.ctx;
+        let pipeline = &mut self.resources.pipelines.debug;
+        let pipeline_layout = &mut self.resources.pipelines.debug_layout;
 
         // Pipeline layout
         // The debug pipeline does not use any descriptor sets
@@ -127,8 +204,8 @@ impl super::WorldModule {
             ..Default::default()
         };
 
-        let pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
-            .map_err(|err| backend_init_err!("Failed to create debug pipeline layout: {}", err) )?;
+        *pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
+            .map_err(|err| backend_init_err!("Failed to create world debug pipeline layout: {}", err) )?;
         
 
         // Shader source
@@ -149,12 +226,9 @@ impl super::WorldModule {
             },
         ];
 
-        self.resources.debug_pipeline_layout = pipeline_layout;
-
-        let pipeline = &mut self.resources.debug_pipeline;
         pipeline.set_shader_modules(modules);
         pipeline.set_vertex_format::<WorldDebugVertex>(&vertex_fields);
-        pipeline.set_pipeline_layout(pipeline_layout);
+        pipeline.set_pipeline_layout(*pipeline_layout);
         pipeline.set_depth_testing(false);
         pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
             polygon_mode: vk::PolygonMode::FILL,
@@ -166,10 +240,6 @@ impl super::WorldModule {
         pipeline.blending(
             &vk::PipelineColorBlendAttachmentState {
                 blend_enable: 0,
-                src_color_blend_factor: vk::BlendFactor::ONE,
-                dst_color_blend_factor: vk::BlendFactor::ZERO,
-                src_alpha_blend_factor: vk::BlendFactor::ONE,
-                dst_alpha_blend_factor: vk::BlendFactor::ZERO,
                 ..Default::default()
             },
             &vk::PipelineColorBlendStateCreateInfo {
@@ -241,7 +311,7 @@ impl super::WorldModule {
         self.data.sprites = StorageAlloc::new(core, sprites_capacity)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create storage alloc: {err}") )?;
 
-        self.render.sprites = self.descriptors.write_sprite_buffer(&self.data.sprites)?;
+        self.render.actors.sprites = self.descriptors.write_sprite_buffer(&self.data.sprites)?;
 
         Ok(())
     }
@@ -249,14 +319,17 @@ impl super::WorldModule {
     pub(super) fn setup_render_data(&mut self) {
         let res = &self.resources;
 
-        let render = &mut self.render;
-        render.pipeline_layout = res.pipeline_layout;
+        let render = &mut self.render.terrain;
+        render.pipeline_layout = res.pipelines.terrain_layout;
+
+        let render = &mut self.render.actors;
+        render.pipeline_layout = res.pipelines.actors_layout;
         render.vertex_buffer = [res.vertex.buffer];
         render.index_offset = res.vertex.index_offset();
         render.vertex_offset = res.vertex.vertex_offset();
 
-        let render = &mut self.debug_render;
-        render.pipeline_layout = res.debug_pipeline_layout;
+        let render = &mut self.render.debug;
+        render.pipeline_layout = res.pipelines.debug_layout;
         render.vertex_buffer = [res.debug_vertex.buffer];
         render.index_offset = res.debug_vertex.index_offset();
         render.vertex_offset = res.debug_vertex.vertex_offset();

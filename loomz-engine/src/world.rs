@@ -1,5 +1,7 @@
 mod setup;
 mod batch;
+mod terrain;
+mod debug;
 
 use fnv::FnvHashMap;
 use std::{slice, sync::Arc, time::Instant, u32, usize};
@@ -60,18 +62,24 @@ pub struct WorldGridData {
     cell_size: f32,
 }
 
+struct WorldPipelines {
+    terrain: GraphicsPipeline,
+    actors: GraphicsPipeline,
+    debug: GraphicsPipeline,
+    terrain_layout: vk::PipelineLayout,
+    actors_layout: vk::PipelineLayout,
+    debug_layout: vk::PipelineLayout,
+}
+
 /// Graphics resources that are not accessed often
 struct WorldResources {
     assets: Arc<LoomzAssetsBundle>,
-    pipeline: GraphicsPipeline,
-    debug_pipeline: GraphicsPipeline,
+    pipelines: WorldPipelines,
     vertex: VertexAlloc<WorldVertex>,
     debug_vertex: VertexAlloc<WorldDebugVertex>,
     textures: FnvHashMap<TextureId, Texture>,
     global_layout: vk::DescriptorSetLayout,
     batch_layout: vk::DescriptorSetLayout,
-    pipeline_layout: vk::PipelineLayout,
-    debug_pipeline_layout: vk::PipelineLayout,
     grid_data: WorldGridData,
 }
 
@@ -106,26 +114,39 @@ struct WorldData {
     instances: Vec<WorldInstance>,
 }
 
+/// Data used when rendering the world debug info
 #[derive(Copy, Clone)]
 struct WorldDebugRender {
     pipeline_handle: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
     vertex_buffer: [vk::Buffer; 1],
-    push_constants: [WorldPushConstant; 1],
     vertex_offset: [vk::DeviceSize; 1],
     index_offset: vk::DeviceSize,
     index_count: u32,
 }
 
-/// Data used on rendering
+/// Data used when rendering the world terrain
 #[derive(Copy, Clone)]
-struct WorldRender {
+struct WorldTerrainRender {
+    pipeline_handle: vk::Pipeline,
+    pipeline_layout: vk::PipelineLayout,
+}
+
+/// Data used when rendering the world actors
+#[derive(Copy, Clone)]
+struct WorldActorRender {
     pipeline_handle: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
     vertex_buffer: [vk::Buffer; 1],
     vertex_offset: [vk::DeviceSize; 1],
     index_offset: vk::DeviceSize,
     sprites: vk::DescriptorSet,
+}
+
+struct WorldRender {
+    terrain: WorldTerrainRender,
+    actors: WorldActorRender,
+    debug: WorldDebugRender,
     push_constants: [WorldPushConstant; 1],
 }
 
@@ -134,7 +155,6 @@ pub(crate) struct WorldModule {
     descriptors: Box<WorldDescriptors>,
     data: Box<WorldData>,
     render: Box<WorldRender>,
-    debug_render: Box<WorldDebugRender>,
     batches: Vec<WorldBatch>,
     debug: WorldDebugFlags,
     update_batches: bool,
@@ -143,17 +163,15 @@ pub(crate) struct WorldModule {
 impl WorldModule {
 
     pub fn init(core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<Self, CommonError> {
+        
         let resources = WorldResources {
             assets: api.assets(),
-            pipeline: GraphicsPipeline::new(),
-            debug_pipeline: GraphicsPipeline::new(),
+            pipelines: WorldPipelines::default(),
             vertex: VertexAlloc::default(),
             debug_vertex: VertexAlloc::default(),
             textures: FnvHashMap::default(),
             global_layout: vk::DescriptorSetLayout::null(),
             batch_layout: vk::DescriptorSetLayout::null(),
-            pipeline_layout: vk::PipelineLayout::null(),
-            debug_pipeline_layout: vk::PipelineLayout::null(),
             grid_data: WorldGridData {
                 screen_size: size(0.0, 0.0),
                 cell_size: 64.0,
@@ -167,38 +185,19 @@ impl WorldModule {
             instances: Vec::with_capacity(16),
         };
 
-        let render = WorldRender {
-            pipeline_handle: vk::Pipeline::null(),
-            pipeline_layout: vk::PipelineLayout::null(),
-            vertex_buffer: [vk::Buffer::null()],
-            vertex_offset: [0],
-            index_offset: 0,
-            sprites: vk::DescriptorSet::null(),
-            push_constants: [WorldPushConstant::default(); 1],
-        };
-
-        let debug_render = WorldDebugRender {
-            pipeline_handle: vk::Pipeline::null(),
-            pipeline_layout: vk::PipelineLayout::null(),
-            vertex_buffer: [vk::Buffer::null()],
-            vertex_offset: [0],
-            index_offset: 0,
-            push_constants: [WorldPushConstant::default(); 1],
-            index_count: 0,
-        };
 
         let mut world = WorldModule {
             data: Box::new(data),
             resources: Box::new(resources),
-            render: Box::new(render),
-            debug_render: Box::new(debug_render),
+            render: Box::default(),
             batches: Vec::with_capacity(16),
             descriptors: Box::default(),
             debug: WorldDebugFlags::empty(),
             update_batches: false,
         };
 
-        world.setup_pipeline(core)?;
+        world.setup_terrain_pipeline(core)?;
+        world.setup_actors_pipeline(core)?;
         world.setup_debug_pipeline(core)?;
         world.setup_descriptors(core)?;
         world.setup_vertex_buffer(core)?;
@@ -206,13 +205,16 @@ impl WorldModule {
         world.setup_sprites_buffers(core)?;
         world.setup_render_data();
 
+        world.setup_test_world(core)?;
+
         Ok(world)
     }
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
         self.descriptors.allocator.destroy(core);
-        self.resources.pipeline.destroy(&core.ctx);
-        self.resources.debug_pipeline.destroy(&core.ctx);
+        self.resources.pipelines.terrain.destroy(&core.ctx);
+        self.resources.pipelines.actors.destroy(&core.ctx);
+        self.resources.pipelines.debug.destroy(&core.ctx);
         self.resources.vertex.free(core);
         self.resources.debug_vertex.free(core);
         self.data.sprites.free(core);
@@ -222,8 +224,9 @@ impl WorldModule {
         }
 
         let device = &core.ctx.device;
-        device.destroy_pipeline_layout(self.resources.debug_pipeline_layout);
-        device.destroy_pipeline_layout(self.resources.pipeline_layout);
+        device.destroy_pipeline_layout(self.resources.pipelines.terrain_layout);
+        device.destroy_pipeline_layout(self.resources.pipelines.actors_layout);
+        device.destroy_pipeline_layout(self.resources.pipelines.debug_layout);
         device.destroy_descriptor_set_layout(self.resources.global_layout);
         device.destroy_descriptor_set_layout(self.resources.batch_layout);
     }
@@ -244,11 +247,6 @@ impl WorldModule {
             screen_height: height,
         };
 
-        self.debug_render.push_constants[0] = WorldPushConstant {
-            screen_width: width,
-            screen_height: height,
-        };
-
         if !self.debug.is_empty() {
             self.build_debug_data(core);
         }
@@ -263,18 +261,23 @@ impl WorldModule {
     //
 
     pub fn write_pipeline_create_infos(&mut self, compiler: &mut PipelineCompiler) {
-        compiler.add_pipeline_info("world", &mut self.resources.pipeline);
-        compiler.add_pipeline_info("world_debug", &mut self.resources.debug_pipeline);
+        compiler.add_pipeline_info("world_terrain", &mut self.resources.pipelines.terrain);
+        compiler.add_pipeline_info("world_actors", &mut self.resources.pipelines.actors);
+        compiler.add_pipeline_info("world_debug", &mut self.resources.pipelines.debug);
     }
 
     pub fn set_pipeline_handle(&mut self, compiler: &PipelineCompiler) {
-        let mut handle = compiler.get_pipeline("world");
-        self.resources.pipeline.set_handle(handle);
-        self.render.pipeline_handle = handle;
+        let mut handle = compiler.get_pipeline("world_terrain");
+        self.resources.pipelines.terrain.set_handle(handle);
+        self.render.terrain.pipeline_handle = handle;
+        
+        handle = compiler.get_pipeline("world_actors");
+        self.resources.pipelines.actors.set_handle(handle);
+        self.render.actors.pipeline_handle = handle;
 
         handle = compiler.get_pipeline("world_debug");
-        self.resources.debug_pipeline.set_handle(handle);
-        self.debug_render.pipeline_handle = handle;
+        self.resources.pipelines.debug.set_handle(handle);
+        self.render.debug.pipeline_handle = handle;
     }
 
     //
@@ -287,22 +290,34 @@ impl WorldModule {
     }
 
     pub fn render(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
-        self.render_batches(ctx, cmd);
+        self.render_terrain(ctx, cmd);
+        self.render_actors(ctx, cmd);
 
         if !self.debug.is_empty() {
             self.render_debug_info(ctx, cmd);
         }
     }
 
-    fn render_batches(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
+    fn render_terrain(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
         const GRAPHICS: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
         let device = &ctx.device;
-        let render = *self.render;
+        let push = Self::push_values(&self.render.push_constants);
+        let render = self.render.terrain;
+
+        device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
+        device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push);
+    }
+
+    fn render_actors(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
+        const GRAPHICS: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
+        let device = &ctx.device;
+        let push = Self::push_values(&self.render.push_constants);
+        let render = self.render.actors;
 
         device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
         device.cmd_bind_index_buffer(cmd, render.vertex_buffer[0], render.index_offset, vk::IndexType::UINT32);
         device.cmd_bind_vertex_buffers(cmd, 0, &render.vertex_buffer, &render.vertex_offset);
-        device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, Self::push_values(&render.push_constants));
+        device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push);
         device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, GLOBAL_LAYOUT_INDEX, slice::from_ref(&render.sprites), &[]);
 
         for batch in self.batches.iter() {
@@ -315,7 +330,8 @@ impl WorldModule {
     fn render_debug_info(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
         const GRAPHICS: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
         let device = &ctx.device;
-        let render = *self.debug_render;
+        let push = Self::push_values(&self.render.push_constants);
+        let render = self.render.debug;
 
         if render.index_count == 0 {
             return;
@@ -324,7 +340,7 @@ impl WorldModule {
         device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
         device.cmd_bind_index_buffer(cmd, render.vertex_buffer[0], render.index_offset, vk::IndexType::UINT32);
         device.cmd_bind_vertex_buffers(cmd, 0, &render.vertex_buffer, &render.vertex_offset);
-        device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, Self::push_values(&render.push_constants));
+        device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push);
         device.cmd_draw_indexed(cmd, render.index_count, 1, 0, 0, 0);
     }
 
@@ -416,105 +432,6 @@ impl WorldModule {
         let new_id = animations.len() as u32;
         animations.push(animation);
         id.bind(new_id);
-    }
-
-    fn build_debug_data(&mut self, core: &mut LoomzEngineCore) {
-        use loomz_shared::{RectF32, rgb, rect};
-
-        let grid = self.resources.grid_data;
-        if grid.screen_size.width == 0.0 || grid.screen_size.height == 0.0 {
-            // Not yet fully initialized
-            return;
-        }
-
-        let write_indices = |index: &mut Vec<u32>, i: u32| {
-            index.push(i+0);
-            index.push(i+1);
-            index.push(i+2);
-            index.push(i+2);
-            index.push(i+3);
-            index.push(i+1);
-        };
-
-        let write_vertex = |vertex: &mut Vec<WorldDebugVertex>, rect: RectF32, color: RgbaU8, vertex_count: &mut u32| {
-            let [x1, y1, x2, y2] = rect.splat();
-            vertex.push(WorldDebugVertex { pos: [x1, y1], color });
-            vertex.push(WorldDebugVertex { pos: [x2, y1], color });
-            vertex.push(WorldDebugVertex { pos: [x1, y2], color });
-            vertex.push(WorldDebugVertex { pos: [x2, y2], color });
-            *vertex_count += 4;
-        };
-
-        let red = rgb(161, 0, 0);
-        let blue = rgb(0, 24, 104);
-        let half_size = grid.cell_size * 0.5;
-        let show_main = self.debug.contains(WorldDebugFlags::SHOW_MAIN_GRID);
-        let show_sub = self.debug.contains(WorldDebugFlags::SHOW_SUB_GRID);
-
-        let debug_vertex = &mut self.resources.debug_vertex;
-
-        let mut index = Vec::with_capacity(500);
-        let mut vertex = Vec::with_capacity(1000);
-        let mut index_count = 0;
-        let mut vertex_count = 0;
-
-        let mut line;
-
-        if show_main {
-            let mut x = 0.0;
-            let mut y = 0.0;
-            while x < grid.screen_size.width {
-                line = rect(x-0.5, 0.0, x+0.5, grid.screen_size.height);
-                write_indices(&mut index, vertex_count);
-                write_vertex(&mut vertex, line, red, &mut vertex_count);
-
-                x += grid.cell_size;
-                index_count += 6;
-            }
-    
-            while y < grid.screen_size.height {
-                line = rect(0.0, y-0.5, grid.screen_size.width, y+0.5);
-                write_indices(&mut index, vertex_count);
-                write_vertex(&mut vertex, line, red, &mut vertex_count);
-
-                y += grid.cell_size;
-                index_count += 6;
-            }
-        }
-
-        if show_sub {
-            let mut x = 0.0;
-            let mut y = 0.0;
-            while x < grid.screen_size.width {
-                line = rect(x+half_size-0.5, 0.0, x+half_size+0.5, grid.screen_size.height);
-                write_indices(&mut index, vertex_count);
-                write_vertex(&mut vertex, line, blue, &mut vertex_count);
-                
-                x += grid.cell_size;
-                index_count += 6;
-            }
-    
-            while y < grid.screen_size.height {
-                line = rect(0.0, y+half_size-0.5, grid.screen_size.width, y+half_size+0.5);
-                write_indices(&mut index, vertex_count);
-                write_vertex(&mut vertex, line, blue, &mut vertex_count);
-                
-                y += grid.cell_size;
-                index_count += 6;
-            }
-        }
-
-        debug_vertex.set_data(core, &index, &vertex);
-        self.debug_render.index_count = index_count;
-    }
-
-    fn toggle_debug(&mut self, core: &mut LoomzEngineCore) {
-        self.debug_render.index_count = 0;
-        if self.debug.is_empty() {
-            return;
-        }
-
-        self.build_debug_data(core);
     }
 
     fn api_update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
@@ -629,7 +546,6 @@ impl WorldDescriptors {
     }
 }
 
-
 impl From<WorldInstance> for SpriteData {
     fn from(instance: WorldInstance) -> Self {
         let size = instance.uv_size;
@@ -650,6 +566,48 @@ impl From<WorldInstance> for SpriteData {
             size,
             uv_offset,
             uv_size,
+        }
+    }
+}
+
+impl Default for WorldRender {
+    fn default() -> Self {
+        WorldRender {
+            terrain: WorldTerrainRender {
+                pipeline_handle: vk::Pipeline::null(),
+                pipeline_layout: vk::PipelineLayout::null(),
+            },
+            actors: WorldActorRender {
+                pipeline_handle: vk::Pipeline::null(),
+                pipeline_layout: vk::PipelineLayout::null(),
+                vertex_buffer: [vk::Buffer::null()],
+                vertex_offset: [0],
+                index_offset: 0,
+                sprites: vk::DescriptorSet::null(),
+            },
+            debug: WorldDebugRender {
+                pipeline_handle: vk::Pipeline::null(),
+                pipeline_layout: vk::PipelineLayout::null(),
+                vertex_buffer: [vk::Buffer::null()],
+                vertex_offset: [0],
+                index_offset: 0,
+                index_count: 0,
+            },
+
+            push_constants: [WorldPushConstant::default(); 1],
+        }
+    }
+}
+
+impl Default for WorldPipelines {
+    fn default() -> Self {
+        WorldPipelines {
+            terrain: GraphicsPipeline::new(),
+            actors: GraphicsPipeline::new(),
+            debug: GraphicsPipeline::new(),
+            terrain_layout: vk::PipelineLayout::null(),
+            actors_layout: vk::PipelineLayout::null(),
+            debug_layout: vk::PipelineLayout::null(),
         }
     }
 }

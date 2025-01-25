@@ -30,8 +30,9 @@ pub enum WorldActorUpdate {
 bitflags! {
     #[derive(Copy, Clone, Default)]
     pub struct WorldDebugFlags: u32 {
-        const SHOW_MAIN_GRID = 0b001;
-        const SHOW_SUB_GRID  = 0b010;
+        const SHOW_MAIN_GRID       = 0b0001;
+        const SHOW_SUB_GRID        = 0b0010;
+        const SHOW_MAIN_GRID_TYPES = 0b0100;
     }
 }
 

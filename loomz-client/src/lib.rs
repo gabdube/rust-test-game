@@ -129,12 +129,16 @@ impl LoomzClient {
         if let Some(inputs) = self.api.read_inputs() {
             if let Some(keystate) = inputs.keystate() {
                 let mut update_debug = false;
-                if keystate.pressed(keys::_1) {
+                if keystate.just_pressed(keys::_1) {
                     self.debug_state.world.toggle(WorldDebugFlags::SHOW_MAIN_GRID);
                     update_debug = true;
                 }
-                if keystate.pressed(keys::_2) {
+                if keystate.just_pressed(keys::_2) {
                     self.debug_state.world.toggle(WorldDebugFlags::SHOW_SUB_GRID);
+                    update_debug = true;
+                }
+                if keystate.just_pressed(keys::_3) {
+                    self.debug_state.world.toggle(WorldDebugFlags::SHOW_MAIN_GRID_TYPES);
                     update_debug = true;
                 }
                 if update_debug {

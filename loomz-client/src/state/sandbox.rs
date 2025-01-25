@@ -33,7 +33,7 @@ impl LoomzClient {
         let size = new_inputs.screen_size_value();
 
         if let Some(keystate) = new_inputs.keystate() {
-            if keystate.pressed(keys::ESC) {
+            if keystate.just_pressed(keys::ESC) {
                 self.menu.resize(&self.api, &rect(0.0, 0.0, size.width, size.height));
                 self.menu.toggle(&self.api, !self.menu.visible());
             }

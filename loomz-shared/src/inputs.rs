@@ -12,13 +12,15 @@ pub mod keys {
 
     pub const _1: u32 = 6;
     pub const _2: u32 = 7;
+    pub const _3: u32 = 8;
     pub const ESC: u32 = 114;
 
     #[derive(Copy, Clone, PartialEq)]
     pub enum SingleKeyState {
-        Default,
+        Released,
+        JustReleased,
         Pressed,
-        Released
+        JustPressed,
     }
 
     pub struct KeyState<'a> {
@@ -26,15 +28,15 @@ pub mod keys {
     }
 
     impl<'a> KeyState<'a> {
-        pub fn released(&self, key_code: u32) -> bool {
+        pub fn just_released(&self, key_code: u32) -> bool {
             self.guard.keys.get(&key_code)
-                .map(|key| *key == SingleKeyState::Released )
+                .map(|key| *key == SingleKeyState::JustReleased )
                 .unwrap_or(false)
         }
 
-        pub fn pressed(&self, key_code: u32) -> bool {
+        pub fn just_pressed(&self, key_code: u32) -> bool {
             self.guard.keys.get(&key_code)
-                .map(|key| *key == SingleKeyState::Pressed )
+                .map(|key| *key == SingleKeyState::JustPressed )
                 .unwrap_or(false)
         }
     }
@@ -129,8 +131,8 @@ impl InnerInputBuffer {
 
     pub fn set_key(&mut self, key_code: u32, pressed: bool) {
         let state = match pressed {
-            true => keys::SingleKeyState::Pressed,
-            false => keys::SingleKeyState::Released,
+            true => keys::SingleKeyState::JustPressed,
+            false => keys::SingleKeyState::JustReleased,
         };
 
         self.keys.insert(key_code, state);
@@ -195,8 +197,12 @@ impl InputBuffer {
         // Toggle released keys to default state
         if inputs.update_flags.intersects(InputUpdateFlags::UPDATED_KEYSTATE) {
             for v in inputs.keys.values_mut() {
-                if *v == keys::SingleKeyState::Released {
-                    *v = keys::SingleKeyState::Default;
+                let state = *v;
+                if state == keys::SingleKeyState::JustReleased {
+                    *v = keys::SingleKeyState::Released;
+                }
+                else if state == keys::SingleKeyState::JustPressed {
+                    *v = keys::SingleKeyState::Pressed;
                 }
             }
         }
