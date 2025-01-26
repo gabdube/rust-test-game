@@ -9,6 +9,7 @@ impl LoomzClient {
 
     pub(crate) fn init_sandbox(&mut self) -> Result<(), CommonError> {
         self.init_sandbox_gui()?;
+        self.api.world().toggle_world(true);
         self.state = GameState::Sandbox;
         Ok(())
     }

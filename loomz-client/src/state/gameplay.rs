@@ -10,6 +10,7 @@ impl LoomzClient {
     pub(crate) fn init_gameplay(&mut self) -> Result<(), CommonError> {
         self.init_gameplay_gui()?;
         self.init_player();
+        self.api.world().toggle_world(true);
         self.state = GameState::Game;
         Ok(())
     }

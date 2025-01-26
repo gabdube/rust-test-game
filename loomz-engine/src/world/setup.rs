@@ -1,6 +1,6 @@
 use loomz_engine_core::{LoomzEngineCore, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
 use loomz_shared::{CommonError, CommonErrorType};
-use loomz_shared::{backend_init_err, chain_err};
+use loomz_shared::{backend_init_err, assets_err, chain_err};
 use super::{WorldPushConstant, WorldVertex, WorldDebugVertex};
 
 const WORLD_TERRAIN_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_terrain.vert.spv");
@@ -19,8 +19,21 @@ impl super::WorldModule {
         let ctx = &core.ctx;
         let pipeline = &mut self.resources.pipelines.terrain;
         let pipeline_layout = &mut self.resources.pipelines.terrain_layout;
+        let global_layout = &mut self.resources.terrain_global_layout;
+
+        // Descriptor set layouts
+        let bindings_global = [
+            PipelineLayoutSetBinding {
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                stage_flags: vk::ShaderStageFlags::FRAGMENT,
+            },
+        ];
+        *global_layout = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
+            .map_err(|err| backend_init_err!("Failed to create globat descriptor set layout: {}", err) )?;
 
         // Pipeline layout
+        let layouts = [*global_layout,];
+
         let constant_range = vk::PushConstantRange {
             offset: 0,
             size: ::std::mem::size_of::<WorldPushConstant>() as u32,
@@ -28,8 +41,8 @@ impl super::WorldModule {
         };
 
         let pipeline_create_info = vk::PipelineLayoutCreateInfo {
-            set_layout_count: 0,
-            p_set_layouts: ::std::ptr::null(),
+            set_layout_count: layouts.len() as u32,
+            p_set_layouts: layouts.as_ptr(),
             push_constant_range_count: 1,
             p_push_constant_ranges: &constant_range,
             ..Default::default()
@@ -49,15 +62,10 @@ impl super::WorldModule {
                 offset: 0,
                 format: vk::Format::R32G32_SFLOAT,
             },
-            PipelineVertexFormat {
-                location: 1,
-                offset: 8,
-                format: vk::Format::R8G8B8A8_UNORM,
-            },
         ];
 
         pipeline.set_shader_modules(modules);
-        pipeline.set_vertex_format::<WorldDebugVertex>(&vertex_fields);
+        pipeline.set_vertex_format::<WorldVertex>(&vertex_fields);
         pipeline.set_pipeline_layout(*pipeline_layout);
         pipeline.set_depth_testing(false);
         pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
@@ -91,6 +99,8 @@ impl super::WorldModule {
         let ctx = &core.ctx;
         let pipeline = &mut self.resources.pipelines.actors;
         let pipeline_layout = &mut self.resources.pipelines.actors_layout;
+        let global_layout = &mut self.resources.actor_global_layout;
+        let batch_layout = &mut self.resources.actor_batch_layout;
 
         // Descriptor set layouts
         let bindings_global = [
@@ -100,7 +110,7 @@ impl super::WorldModule {
             },
         ];
         
-        let layout_global = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
+        *global_layout = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
             .map_err(|err| backend_init_err!("Failed to create global descriptor set layout: {}", err) )?;
 
         let bindings_batch = [
@@ -109,11 +119,11 @@ impl super::WorldModule {
                 stage_flags: vk::ShaderStageFlags::FRAGMENT,
             },
         ];
-        let layout_batch = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_batch)
+        *batch_layout = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_batch)
             .map_err(|err| backend_init_err!("Failed to create batch descriptor set layout: {}", err) )?;
 
         // Pipeline layout
-        let layouts = [layout_global, layout_batch];
+        let layouts = [*global_layout, *batch_layout];
 
         let constant_range = vk::PushConstantRange {
             offset: 0,
@@ -176,9 +186,6 @@ impl super::WorldModule {
         pipeline.set_sample_count(info.sample_count);
         pipeline.set_color_attachment_format(info.color_format);
         pipeline.set_depth_attachment_format(info.depth_format);
-
-        self.resources.global_layout = layout_global;
-        self.resources.batch_layout = layout_batch;
      
         Ok(())
     }
@@ -259,12 +266,17 @@ impl super::WorldModule {
     pub(super) fn setup_descriptors(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let allocations = [
             DescriptorsAllocation {
-                layout: self.resources.global_layout,
+                layout: self.resources.terrain_global_layout,
+                binding_types: &[vk::DescriptorType::COMBINED_IMAGE_SAMPLER],
+                count: 1,
+            },
+            DescriptorsAllocation {
+                layout: self.resources.actor_global_layout,
                 binding_types: &[vk::DescriptorType::STORAGE_BUFFER],
                 count: 1,
             },
             DescriptorsAllocation {
-                layout: self.resources.batch_layout,
+                layout: self.resources.actor_batch_layout,
                 binding_types: &[vk::DescriptorType::COMBINED_IMAGE_SAMPLER],
                 count: 10,
             },
@@ -311,7 +323,18 @@ impl super::WorldModule {
         self.data.sprites = StorageAlloc::new(core, sprites_capacity)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create storage alloc: {err}") )?;
 
-        self.render.actors.sprites = self.descriptors.write_sprite_buffer(&self.data.sprites)?;
+        self.render.actors.sprites_set = self.descriptors.write_sprite_buffer(&self.data.sprites)?;
+
+        Ok(())
+    }
+
+    pub(super) fn setup_terrain_sampler(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        let terrain_id = self.resources.assets.texture_id_by_name("terrain")
+            .ok_or_else(|| assets_err!("Failed to find terrain asset") )?;
+
+        let view = self.fetch_texture_view(core, terrain_id)?;
+
+        self.render.terrain.terrain_set = self.descriptors.write_terrain_texture(view)?;
 
         Ok(())
     }
@@ -321,6 +344,9 @@ impl super::WorldModule {
 
         let render = &mut self.render.terrain;
         render.pipeline_layout = res.pipelines.terrain_layout;
+        render.vertex_buffer = [res.vertex.buffer];
+        render.index_offset = res.vertex.index_offset();
+        render.vertex_offset = res.vertex.vertex_offset();
 
         let render = &mut self.render.actors;
         render.pipeline_layout = res.pipelines.actors_layout;

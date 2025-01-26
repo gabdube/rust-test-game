@@ -5,7 +5,7 @@ use super::{WorldModule, WorldDebugVertex};
 
 impl WorldModule {
     pub(super) fn build_debug_data(&mut self, core: &mut LoomzEngineCore) {
-        let grid = self.resources.grid_data;
+        let grid = self.resources.grid_params;
         if grid.screen_size.width == 0.0 || grid.screen_size.height == 0.0 {
             // Not yet fully initialized
             return;

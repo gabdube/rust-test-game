@@ -29,17 +29,22 @@ pub enum WorldActorUpdate {
 
 bitflags! {
     #[derive(Copy, Clone, Default)]
-    pub struct WorldDebugFlags: u32 {
+    pub struct WorldDebugFlags: u8 {
         const SHOW_MAIN_GRID       = 0b0001;
         const SHOW_SUB_GRID        = 0b0010;
         const SHOW_MAIN_GRID_TYPES = 0b0100;
     }
 }
 
+pub enum WorldUpdate {
+    DebugFlags(WorldDebugFlags),
+    ShowWorld(bool)
+}
+
 pub struct WorldApi {
     pub animations: MessageQueue<WorldAnimationId, WorldAnimation>,
     pub actors: MessageQueue<WorldActorId, WorldActorUpdate>,
-    pub debug: MessageQueue<(), WorldDebugFlags>,
+    pub general: MessageQueue<(), WorldUpdate>,
 }
 
 impl WorldApi {
@@ -48,7 +53,7 @@ impl WorldApi {
         WorldApi {
             animations: MessageQueue::with_capacity(16),
             actors: MessageQueue::with_capacity(16),
-            debug: MessageQueue::with_capacity(8)
+            general: MessageQueue::with_capacity(8)
         }
     }
 
@@ -82,10 +87,14 @@ impl WorldApi {
     }
 
     pub fn toggle_debug(&self, debug: WorldDebugFlags) {
-        self.debug.push(&(), debug);
+        self.general.push(&(), WorldUpdate::DebugFlags(debug));
     }
 
-    pub fn read_debug<'a>(&'a self) -> Option<impl Iterator<Item=((), WorldDebugFlags)> + 'a> {
-        self.debug.read_values()
+    pub fn toggle_world(&self, visible: bool) {
+        self.general.push(&(), WorldUpdate::ShowWorld(visible));
+    }
+
+    pub fn read_general<'a>(&'a self) -> Option<impl Iterator<Item=((), WorldUpdate)> + 'a> {
+        self.general.read_values()
     }
 }

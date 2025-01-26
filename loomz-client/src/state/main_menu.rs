@@ -9,6 +9,7 @@ impl LoomzClient {
 
     pub(crate) fn init_main_menu(&mut self) -> Result<(), CommonError> {
         self.init_main_menu_menu()?;
+        self.api.world().toggle_world(false);
         self.state = GameState::MainMenu;
 
         Ok(())
