@@ -88,7 +88,7 @@ impl Animations {
         let world = api.world();
 
         let json_source = assets.json_by_name(asset_name).ok_or_else(|| assets_err!("Failed to find json {asset_name:?}") )?;
-        let json: serde_json::Value = serde_json::from_str(json_source).map_err(|err| assets_err!("Failed to parse json: {err:?}") )?;
+        let json: serde_json::Value = serde_json::from_str(&json_source).map_err(|err| assets_err!("Failed to parse json: {err:?}") )?;
 
         let texture_asset_name = json["asset"].as_str().unwrap_or("");
         let texture_id = assets.texture_id_by_name(texture_asset_name).ok_or_else(|| assets_err!("Failed to find texture asset {texture_asset_name:?}") )?;

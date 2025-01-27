@@ -43,6 +43,7 @@ struct KtxHeader {
 
 
 /// A KTX file raw content
+#[derive(Clone)]
 pub struct KtxFile {
     pub(crate) data: Box<[u8]>,
 }

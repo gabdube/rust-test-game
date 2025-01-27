@@ -1,15 +1,10 @@
 use loomz_engine_core::{LoomzEngineCore, alloc::VertexAlloc, descriptors::*, pipelines::*};
-use loomz_shared::{CommonError, CommonErrorType};
+use loomz_shared::{CommonError, CommonErrorType, LoomzApi};
 use loomz_shared::{backend_init_err, chain_err};
 use super::{GuiPushConstant, GuiVertex};
 
-const GUI_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/gui.vert.spv");
-const GUI_COMPONENT_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/gui_component.frag.spv");
-const GUI_TEXT_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/gui_text.frag.spv");
-
-
 impl super::GuiModule {
-    pub(super) fn setup_pipelines(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+    pub(super) fn setup_pipelines(&mut self, core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<(), CommonError> {
         let ctx = &core.ctx;
 
         // Descriptor set layouts
@@ -41,10 +36,18 @@ impl super::GuiModule {
         
 
         // Shader source
-        let component_modules = GraphicsShaderModules::new(ctx, GUI_VERT_SRC, GUI_COMPONENT_FRAG_SRC)
+        self.resources.image_pipeline_id = api.assets_ref().shader_id_by_name("gui_component")
+            .ok_or_else(|| backend_init_err!("Failed to find gui_component shader") )?;
+
+        let shader = api.assets_ref().shader(self.resources.image_pipeline_id).unwrap();
+        let component_modules = GraphicsShaderModules::new(ctx, &shader.vert, &shader.frag)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute gui component pipeline shader modules") )?;
 
-        let text_modules = GraphicsShaderModules::new(ctx, GUI_VERT_SRC, GUI_TEXT_FRAG_SRC)
+        self.resources.text_pipeline_id = api.assets_ref().shader_id_by_name("gui_text")
+            .ok_or_else(|| backend_init_err!("Failed to find gui_text shader") )?;
+
+        let text_shader = api.assets_ref().shader(self.resources.text_pipeline_id).unwrap();
+        let text_modules = GraphicsShaderModules::new(ctx, &text_shader.vert, &text_shader.frag)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute gui text pipeline shader modules") )?;
 
         // Pipeline
@@ -142,4 +145,8 @@ impl super::GuiModule {
         render.index_offset = self.data.vertex_alloc.index_offset();
         render.vertex_offset = self.data.vertex_alloc.vertex_offset();
     }
+    
+    pub(super) fn reload_shaders(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore, shader_id: loomz_shared::ShaderId) {
+    }
+    
 }

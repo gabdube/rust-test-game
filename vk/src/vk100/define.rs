@@ -1123,7 +1123,9 @@ pub struct VertexInputAttributeDescription {
     pub offset: u32,
 }
 
+
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct PipelineVertexInputStateCreateInfo {
     pub s_type: StructureType,
     pub p_next: *const c_void,
@@ -1148,6 +1150,7 @@ impl Default for PipelineVertexInputStateCreateInfo {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct PipelineInputAssemblyStateCreateInfo {
     pub s_type: StructureType,
     pub p_next: *const c_void,
@@ -1169,6 +1172,7 @@ impl Default for PipelineInputAssemblyStateCreateInfo {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct PipelineTessellationStateCreateInfo {
     pub s_type: StructureType,
     pub p_next: *const c_void,
@@ -1187,6 +1191,7 @@ impl Default for PipelineTessellationStateCreateInfo {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct PipelineViewportStateCreateInfo {
     pub s_type: StructureType,
     pub p_next: *const c_void,
@@ -1248,6 +1253,7 @@ impl Default for PipelineRasterizationStateCreateInfo {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct PipelineMultisampleStateCreateInfo {
     pub s_type: StructureType,
     pub p_next: *const c_void,
@@ -1276,7 +1282,7 @@ impl Default for PipelineMultisampleStateCreateInfo {
 }
 
 #[repr(C)]
-#[derive(Default)]
+#[derive(Copy, Clone, Default)]
 pub struct StencilOpState {
     pub fail_op: StencilOp,
     pub pass_op: StencilOp,
@@ -1288,6 +1294,7 @@ pub struct StencilOpState {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct PipelineDepthStencilStateCreateInfo {
     pub s_type: StructureType,
     pub p_next: *const c_void,
@@ -1384,6 +1391,7 @@ impl Default for PipelineColorBlendStateCreateInfo {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct PipelineDynamicStateCreateInfo {
     pub s_type: StructureType,
     pub p_next: *const c_void,

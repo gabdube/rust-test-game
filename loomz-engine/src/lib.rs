@@ -64,6 +64,7 @@ impl LoomzEngine {
     }
 
     pub fn update(&mut self) -> Result<(), CommonError> {
+        self.reload_assets()?;
         self.world.update(&self.api, &mut self.core)?;
         self.gui.update(&self.api, &mut self.core)?;
         Ok(())
@@ -146,6 +147,22 @@ impl LoomzEngine {
         }
     }
 
+    fn reload_assets(&mut self) -> Result<(), CommonError> {
+        let assets = match self.api.assets_ref().changed_assets() {
+            Some(assets) => assets,
+            None => { return Ok(()); }
+        };
+
+        let api = &self.api;
+        let core = &mut self.core;
+        
+        core.ctx.device.device_wait_idle().unwrap();
+
+        self.world.reload_assets(api, core, &assets)?;
+        self.gui.reload_assets(api, core, &assets);
+
+        Ok(())
+    }
 }
 
 unsafe impl Send for LoomzEngine {}

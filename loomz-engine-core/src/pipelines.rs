@@ -19,6 +19,7 @@ pub struct PipelineVertexFormat {
 }
 
 
+#[derive(Copy, Clone)]
 struct GraphicsPipelineBuildInfo {
     modules: GraphicsShaderModules,
 
@@ -55,6 +56,7 @@ struct GraphicsPipelineBuildInfo {
     blending_enabled: bool,
 }
 
+#[derive(Clone)]
 pub struct GraphicsPipeline {
     build: Box<GraphicsPipelineBuildInfo>,
     handle: vk::Pipeline,

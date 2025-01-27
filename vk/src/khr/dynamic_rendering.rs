@@ -96,6 +96,7 @@ impl ::std::default::Default for RenderingInfo {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct PipelineRenderingCreateInfo {
     pub s_type: StructureType,
     pub p_next: *const c_void,

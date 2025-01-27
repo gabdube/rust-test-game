@@ -4,7 +4,7 @@ mod batch;
 use fnv::FnvHashMap;
 use std::{slice, sync::Arc};
 use loomz_shared::api::{LoomzApi, GuiId, GuiSprite};
-use loomz_shared::assets::{LoomzAssetsBundle, AssetId, MsdfFontId, TextureId};
+use loomz_shared::assets::{LoomzAssetsBundle, AssetId, MsdfFontId, TextureId, ShaderId};
 use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{assets_err, backend_err, chain_err};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
@@ -38,6 +38,8 @@ struct GuiResources {
     image_pipeline: GraphicsPipeline,
     batch_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
+    text_pipeline_id: ShaderId,
+    image_pipeline_id: ShaderId,
 }
 
 #[derive(Default)]
@@ -101,6 +103,8 @@ impl GuiModule {
             text_pipeline: GraphicsPipeline::new(),
             image_pipeline: GraphicsPipeline::new(),
             textures: FnvHashMap::default(),
+            image_pipeline_id: ShaderId(0),
+            text_pipeline_id: ShaderId(0),
         };
         
         let render = GuiRender {
@@ -127,7 +131,7 @@ impl GuiModule {
             update_batches: false,
         };
 
-        gui.setup_pipelines(core)?;
+        gui.setup_pipelines(core, api)?;
         gui.setup_vertex_buffers(core)?;
         gui.setup_descriptors(core)?;
         gui.setup_render_data();
@@ -312,6 +316,15 @@ impl GuiModule {
     //
     // Data
     //
+
+    pub fn reload_assets(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore, assets: &Vec<AssetId>) {
+        for &assets_id in assets.iter() {
+            match assets_id {
+                AssetId::ShaderId(shader_id) => self.reload_shaders(api, core, shader_id),
+                _ => {}
+            }
+        }
+    }
 
     fn fetch_font_texture_view(core: &mut LoomzEngineCore, resources: &mut GuiResources, font_id: MsdfFontId) -> Result<vk::ImageView, CommonError> {
         let asset_id = AssetId::MsdfFont(font_id);

@@ -5,7 +5,14 @@ edition = "2021"
 
 [features]
 default = []
+
+# Allow hot reloading for the game logic code
 hot-reload = ["libloading", "notify", "loomz-client/hot-reload"]
+
+# Watch for assets change on disk and notice the engine when they change
+reload-assets = ["loomz-shared/reload-assets"]
+
+# Runs the windowing, the game logic, and the rendering on different threads
 multithreading = ["parking_lot"]
 
 [dependencies]

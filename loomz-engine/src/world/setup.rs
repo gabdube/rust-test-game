@@ -1,38 +1,51 @@
 use loomz_engine_core::{LoomzEngineCore, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
-use loomz_shared::{CommonError, CommonErrorType};
+use loomz_shared::{CommonError, CommonErrorType, LoomzApi};
 use loomz_shared::{backend_init_err, assets_err, chain_err};
+use loomz_engine_core::VulkanContext;
 use super::{WorldPushConstant, WorldVertex, WorldDebugVertex};
-
-const WORLD_TERRAIN_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_terrain.vert.spv");
-const WORLD_TERRAIN_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_terrain.frag.spv");
-
-const WORLD_ACTORS_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_actors.vert.spv");
-const WORLD_ACTORS_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_actors.frag.spv");
-
-const WORLD_DEBUG_VERT_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_debug.vert.spv");
-const WORLD_DEBUG_FRAG_SRC: &[u8] = include_bytes!("../../../assets/shaders/world_debug.frag.spv");
 
 
 impl super::WorldModule {
 
-    pub(super) fn setup_terrain_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let ctx = &core.ctx;
-        let pipeline = &mut self.resources.pipelines.terrain;
-        let pipeline_layout = &mut self.resources.pipelines.terrain_layout;
-        let global_layout = &mut self.resources.terrain_global_layout;
+    pub(super) fn setup_pipelines(&mut self, core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<(), CommonError> {
+        self.setup_descriptor_set_layouts(&core.ctx)?;
+        self.setup_pipeline_layouts(&core.ctx)?;
+        Self::setup_terrain_pipeline(core, api, &mut self.resources.pipelines.terrain)?;
+        Self::setup_actors_pipeline(core, api, &mut self.resources.pipelines.actors)?;
+        Self::setup_debug_pipeline(core, api, &mut self.resources.pipelines.debug)?;
+        Ok(())
+    }
 
-        // Descriptor set layouts
+    fn setup_descriptor_set_layouts(&mut self, ctx: &VulkanContext) -> Result<(), CommonError> {
         let bindings_global = [
             PipelineLayoutSetBinding {
                 descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
                 stage_flags: vk::ShaderStageFlags::FRAGMENT,
             },
         ];
-        *global_layout = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
-            .map_err(|err| backend_init_err!("Failed to create globat descriptor set layout: {}", err) )?;
 
-        // Pipeline layout
-        let layouts = [*global_layout,];
+        self.resources.terrain_global_layout = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
+            .map_err(|err| backend_init_err!("Failed to create terrain global descriptor set layout: {}", err) )?;
+
+        self.resources.actor_batch_layout = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
+            .map_err(|err| backend_init_err!("Failed to create actors batch descriptor set layout: {}", err) )?;
+
+        let bindings_global = [
+            PipelineLayoutSetBinding {
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                stage_flags: vk::ShaderStageFlags::VERTEX,
+            },
+        ];
+
+        self.resources.actor_global_layout =  PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
+            .map_err(|err| backend_init_err!("Failed to create actors global descriptor set layout: {}", err) )?;
+
+        Ok(())
+    }
+
+    fn setup_pipeline_layouts(&mut self, ctx: &VulkanContext) -> Result<(), CommonError> {
+        // Terrain
+        let layouts = [self.resources.terrain_global_layout,];
 
         let constant_range = vk::PushConstantRange {
             offset: 0,
@@ -48,12 +61,62 @@ impl super::WorldModule {
             ..Default::default()
         };
 
-        *pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
-            .map_err(|err| backend_init_err!("Failed to create world terrain pipeline layout: {}", err) )?;
+        self.resources.pipelines.terrain.layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
+            .map_err(|err| backend_init_err!("Failed to build the terrain pipeline layout: {}", err) )?;
+        
+        // Actors
+        let layouts = [self.resources.actor_global_layout, self.resources.actor_batch_layout];
+
+        let constant_range = vk::PushConstantRange {
+            offset: 0,
+            size: ::std::mem::size_of::<WorldPushConstant>() as u32,
+            stage_flags: vk::ShaderStageFlags::VERTEX,
+        };
+
+        let pipeline_create_info = vk::PipelineLayoutCreateInfo {
+            set_layout_count: layouts.len() as u32,
+            p_set_layouts: layouts.as_ptr(),
+            push_constant_range_count: 1,
+            p_push_constant_ranges: &constant_range,
+            ..Default::default()
+        };
+
+        self.resources.pipelines.actors.layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
+            .map_err(|err| backend_init_err!("Failed to build the actor pipeline layout: {}", err) )?;
+
+
+        // Debug
+        let constant_range = vk::PushConstantRange {
+            offset: 0,
+            size: ::std::mem::size_of::<WorldPushConstant>() as u32,
+            stage_flags: vk::ShaderStageFlags::VERTEX,
+        };
+
+        let pipeline_create_info = vk::PipelineLayoutCreateInfo {
+            set_layout_count: 0,
+            p_set_layouts: ::std::ptr::null(),
+            push_constant_range_count: 1,
+            p_push_constant_ranges: &constant_range,
+            ..Default::default()
+        };
+
+        self.resources.pipelines.debug.layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
+            .map_err(|err| backend_init_err!("Failed to create world debug pipeline layout: {}", err) )?;
+    
+        Ok(())
+    }
+
+    fn setup_terrain_pipeline(core: &mut LoomzEngineCore, api: &LoomzApi, world_pipeline: &mut super::WorldPipeline) -> Result<(), CommonError> {
+        let ctx = &core.ctx;
+        let pipeline = &mut world_pipeline.pipeline;
 
         // Shader source
-        let modules = GraphicsShaderModules::new(ctx, WORLD_TERRAIN_VERT_SRC, WORLD_TERRAIN_FRAG_SRC)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute world terrain pipeline shader modules") )?;
+        world_pipeline.id = api.assets_ref().shader_id_by_name("world_terrain")
+            .ok_or_else(|| backend_init_err!("Failed to find world terrain shader") )?;
+
+        let shader = api.assets_ref().shader(world_pipeline.id).unwrap();
+        let modules = GraphicsShaderModules::new(ctx, &shader.vert, &shader.frag)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to build the world terrain pipeline shader modules") )?;
 
         // Pipeline
         let vertex_fields = [
@@ -66,7 +129,7 @@ impl super::WorldModule {
 
         pipeline.set_shader_modules(modules);
         pipeline.set_vertex_format::<WorldVertex>(&vertex_fields);
-        pipeline.set_pipeline_layout(*pipeline_layout);
+        pipeline.set_pipeline_layout(world_pipeline.layout);
         pipeline.set_depth_testing(false);
         pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
             polygon_mode: vk::PolygonMode::FILL,
@@ -91,61 +154,20 @@ impl super::WorldModule {
         pipeline.set_color_attachment_format(info.color_format);
         pipeline.set_depth_attachment_format(info.depth_format);
 
-
         Ok(())
     }
 
-    pub(super) fn setup_actors_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+    fn setup_actors_pipeline(core: &mut LoomzEngineCore, api: &LoomzApi, world_pipeline: &mut super::WorldPipeline) -> Result<(), CommonError> {
         let ctx = &core.ctx;
-        let pipeline = &mut self.resources.pipelines.actors;
-        let pipeline_layout = &mut self.resources.pipelines.actors_layout;
-        let global_layout = &mut self.resources.actor_global_layout;
-        let batch_layout = &mut self.resources.actor_batch_layout;
-
-        // Descriptor set layouts
-        let bindings_global = [
-            PipelineLayoutSetBinding {
-                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
-                stage_flags: vk::ShaderStageFlags::VERTEX,
-            },
-        ];
-        
-        *global_layout = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
-            .map_err(|err| backend_init_err!("Failed to create global descriptor set layout: {}", err) )?;
-
-        let bindings_batch = [
-            PipelineLayoutSetBinding {
-                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                stage_flags: vk::ShaderStageFlags::FRAGMENT,
-            },
-        ];
-        *batch_layout = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_batch)
-            .map_err(|err| backend_init_err!("Failed to create batch descriptor set layout: {}", err) )?;
-
-        // Pipeline layout
-        let layouts = [*global_layout, *batch_layout];
-
-        let constant_range = vk::PushConstantRange {
-            offset: 0,
-            size: ::std::mem::size_of::<WorldPushConstant>() as u32,
-            stage_flags: vk::ShaderStageFlags::VERTEX,
-        };
-
-        let pipeline_create_info = vk::PipelineLayoutCreateInfo {
-            set_layout_count: layouts.len() as u32,
-            p_set_layouts: layouts.as_ptr(),
-            push_constant_range_count: 1,
-            p_push_constant_ranges: &constant_range,
-            ..Default::default()
-        };
-
-        *pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
-            .map_err(|err| backend_init_err!("Failed to create pipeline layout: {}", err) )?;
-        
+        let pipeline = &mut world_pipeline.pipeline;
 
         // Shader source
-        let modules = GraphicsShaderModules::new(ctx, WORLD_ACTORS_VERT_SRC, WORLD_ACTORS_FRAG_SRC)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute world pipeline shader modules") )?;
+        world_pipeline.id = api.assets_ref().shader_id_by_name("world_actors")
+            .ok_or_else(|| backend_init_err!("Failed to find world actors shader") )?;
+
+        let shader = api.assets_ref().shader(world_pipeline.id).unwrap();
+        let modules = GraphicsShaderModules::new(ctx, &shader.vert, &shader.frag)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to build world actors pipeline shader modules") )?;
 
         // Pipeline
         let vertex_fields = [
@@ -158,7 +180,7 @@ impl super::WorldModule {
 
         pipeline.set_shader_modules(modules);
         pipeline.set_vertex_format::<WorldVertex>(&vertex_fields);
-        pipeline.set_pipeline_layout(*pipeline_layout);
+        pipeline.set_pipeline_layout(world_pipeline.layout);
         pipeline.set_depth_testing(false);
         pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
             polygon_mode: vk::PolygonMode::FILL,
@@ -189,35 +211,18 @@ impl super::WorldModule {
      
         Ok(())
     }
-    
-    pub(super) fn setup_debug_pipeline(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+
+    fn setup_debug_pipeline(core: &mut LoomzEngineCore, api: &LoomzApi, world_pipeline: &mut super::WorldPipeline) -> Result<(), CommonError> {
         let ctx = &core.ctx;
-        let pipeline = &mut self.resources.pipelines.debug;
-        let pipeline_layout = &mut self.resources.pipelines.debug_layout;
-
-        // Pipeline layout
-        // The debug pipeline does not use any descriptor sets
-        let constant_range = vk::PushConstantRange {
-            offset: 0,
-            size: ::std::mem::size_of::<WorldPushConstant>() as u32,
-            stage_flags: vk::ShaderStageFlags::VERTEX,
-        };
-
-        let pipeline_create_info = vk::PipelineLayoutCreateInfo {
-            set_layout_count: 0,
-            p_set_layouts: ::std::ptr::null(),
-            push_constant_range_count: 1,
-            p_push_constant_ranges: &constant_range,
-            ..Default::default()
-        };
-
-        *pipeline_layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
-            .map_err(|err| backend_init_err!("Failed to create world debug pipeline layout: {}", err) )?;
-        
+        let pipeline = &mut world_pipeline.pipeline;
 
         // Shader source
-        let modules = GraphicsShaderModules::new(ctx, WORLD_DEBUG_VERT_SRC, WORLD_DEBUG_FRAG_SRC)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to compute world debug pipeline shader modules") )?;
+        world_pipeline.id = api.assets_ref().shader_id_by_name("world_debug")
+            .ok_or_else(|| backend_init_err!("Failed to find world debug shader") )?;
+
+        let shader = api.assets_ref().shader(world_pipeline.id).unwrap();
+        let modules = GraphicsShaderModules::new(ctx, &shader.vert, &shader.frag)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to build world debug pipeline shader modules") )?;
 
         // Pipeline
         let vertex_fields = [
@@ -235,7 +240,7 @@ impl super::WorldModule {
 
         pipeline.set_shader_modules(modules);
         pipeline.set_vertex_format::<WorldDebugVertex>(&vertex_fields);
-        pipeline.set_pipeline_layout(*pipeline_layout);
+        pipeline.set_pipeline_layout(world_pipeline.layout);
         pipeline.set_depth_testing(false);
         pipeline.rasterization(&vk::PipelineRasterizationStateCreateInfo {
             polygon_mode: vk::PolygonMode::FILL,
@@ -343,22 +348,72 @@ impl super::WorldModule {
         let res = &self.resources;
 
         let render = &mut self.render.terrain;
-        render.pipeline_layout = res.pipelines.terrain_layout;
+        render.pipeline_layout = res.pipelines.terrain.layout;
         render.vertex_buffer = [res.vertex.buffer];
         render.index_offset = res.vertex.index_offset();
         render.vertex_offset = res.vertex.vertex_offset();
 
         let render = &mut self.render.actors;
-        render.pipeline_layout = res.pipelines.actors_layout;
+        render.pipeline_layout = res.pipelines.actors.layout;
         render.vertex_buffer = [res.vertex.buffer];
         render.index_offset = res.vertex.index_offset();
         render.vertex_offset = res.vertex.vertex_offset();
 
         let render = &mut self.render.debug;
-        render.pipeline_layout = res.pipelines.debug_layout;
+        render.pipeline_layout = res.pipelines.debug.layout;
         render.vertex_buffer = [res.debug_vertex.buffer];
         render.index_offset = res.debug_vertex.index_offset();
         render.vertex_offset = res.debug_vertex.vertex_offset();
     }
+
+    pub(super) fn reload_shaders(
+        &mut self,
+        api: &LoomzApi,
+        core: &mut LoomzEngineCore,
+        shader_id: loomz_shared::ShaderId
+    ) -> Result<(), CommonError> {
+        let terrain_id = self.resources.pipelines.terrain.id;
+        let actors_id = self.resources.pipelines.actors.id;
+        let debug_id = self.resources.pipelines.debug.id;
+        
+        let shader = api.assets_ref().shader(shader_id)
+            .ok_or_else(|| assets_err!("Failed to find shader by ID") )?;
+
+        let modules = GraphicsShaderModules::new(&core.ctx, &shader.vert, &shader.frag)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to reload shader module") )?;
+
+        let mut new_pipeline = 
+            if shader_id == terrain_id     { self.resources.pipelines.terrain.pipeline.clone() }
+            else if shader_id == actors_id { self.resources.pipelines.actors.pipeline.clone() }
+            else if shader_id == debug_id  { self.resources.pipelines.debug.pipeline.clone() }
+            else { return Ok(()); };
+
+        new_pipeline.set_shader_modules(modules);
+
+        let pipeline_info = [new_pipeline.create_info()];
+        let mut pipeline_handle = [vk::Pipeline::null()];
+        core.ctx.device.create_graphics_pipelines(vk::PipelineCache::default(), &pipeline_info, &mut pipeline_handle)
+            .map_err(|err| backend_init_err!("Failed to recompile create pipelines: {:?}", err) )?;
+
+        new_pipeline.set_handle(pipeline_handle[0]);
+
+        if shader_id == terrain_id { 
+            ::std::mem::swap(&mut self.resources.pipelines.terrain.pipeline, &mut new_pipeline);
+            self.render.terrain.pipeline_handle = pipeline_handle[0];
+        }
+        else if shader_id == actors_id { 
+            ::std::mem::swap(&mut self.resources.pipelines.actors.pipeline, &mut new_pipeline);
+            self.render.actors.pipeline_handle = pipeline_handle[0];
+        }
+        else if shader_id == debug_id  { 
+            ::std::mem::swap(&mut self.resources.pipelines.debug.pipeline, &mut new_pipeline);
+            self.render.debug.pipeline_handle = pipeline_handle[0];
+        }
+
+        new_pipeline.destroy(&core.ctx);
+
+        Ok(())
+    }
+
 
 }

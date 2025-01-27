@@ -28,6 +28,7 @@ pub struct ComputedGlyph {
     pub texcoord: RectF32,
 }
 
+#[derive(Clone)]
 pub struct MsdfFontData {
     pub info: AtlasInfo,
     pub glyphs: Vec<AtlasGlyph>,

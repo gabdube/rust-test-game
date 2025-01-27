@@ -7,7 +7,7 @@ use fnv::FnvHashMap;
 use bitflags::bitflags;
 use std::{slice, sync::Arc, time::Instant, u32, usize};
 use loomz_shared::api::{LoomzApi, WorldAnimationId, WorldAnimation, WorldActorId, WorldActorUpdate,  WorldUpdate, WorldDebugFlags};
-use loomz_shared::assets::{LoomzAssetsBundle, TextureId};
+use loomz_shared::assets::{LoomzAssetsBundle, TextureId, ShaderId, AssetId};
 use loomz_shared::{CommonError, CommonErrorType, SizeF32, PositionF32, RgbaU8, size};
 use loomz_shared::{assets_err, backend_err, chain_err};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
@@ -71,13 +71,17 @@ pub struct WorldGridParams {
     cell_size: f32,
 }
 
+struct WorldPipeline {
+    pipeline: GraphicsPipeline,
+    layout: vk::PipelineLayout,
+    id: ShaderId,
+}
+
+#[derive(Default)]
 struct WorldPipelines {
-    terrain: GraphicsPipeline,
-    actors: GraphicsPipeline,
-    debug: GraphicsPipeline,
-    terrain_layout: vk::PipelineLayout,
-    actors_layout: vk::PipelineLayout,
-    debug_layout: vk::PipelineLayout,
+    terrain: WorldPipeline,
+    actors: WorldPipeline,
+    debug: WorldPipeline,
 }
 
 /// Graphics resources that are not accessed often (not every frame)
@@ -185,7 +189,6 @@ pub(crate) struct WorldModule {
 impl WorldModule {
 
     pub fn init(core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<Self, CommonError> {
-        
         let resources = WorldResources {
             assets: api.assets(),
             pipelines: WorldPipelines::default(),
@@ -218,9 +221,7 @@ impl WorldModule {
             flags: WorldFlags::SHOW_WORLD,
         };
 
-        world.setup_terrain_pipeline(core)?;
-        world.setup_actors_pipeline(core)?;
-        world.setup_debug_pipeline(core)?;
+        world.setup_pipelines(core, api)?;
         world.setup_descriptors(core)?;
         world.setup_vertex_buffer(core)?;
         world.setup_debug_vertex_buffer(core)?;
@@ -235,21 +236,20 @@ impl WorldModule {
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
         self.descriptors.allocator.destroy(core);
-        self.resources.pipelines.terrain.destroy(&core.ctx);
-        self.resources.pipelines.actors.destroy(&core.ctx);
-        self.resources.pipelines.debug.destroy(&core.ctx);
-        self.resources.vertex.free(core);
-        self.resources.debug_vertex.free(core);
         self.data.sprites.free(core);
 
         for texture in self.resources.textures.values() {
             core.destroy_texture(*texture);
         }
 
+        self.resources.pipelines.terrain.destroy(core);
+        self.resources.pipelines.actors.destroy(core);
+        self.resources.pipelines.debug.destroy(core);
+
+        self.resources.vertex.free(core);
+        self.resources.debug_vertex.free(core);
+
         let device = &core.ctx.device;
-        device.destroy_pipeline_layout(self.resources.pipelines.terrain_layout);
-        device.destroy_pipeline_layout(self.resources.pipelines.actors_layout);
-        device.destroy_pipeline_layout(self.resources.pipelines.debug_layout);
         device.destroy_descriptor_set_layout(self.resources.terrain_global_layout);
         device.destroy_descriptor_set_layout(self.resources.actor_global_layout);
         device.destroy_descriptor_set_layout(self.resources.actor_batch_layout);
@@ -285,22 +285,22 @@ impl WorldModule {
     //
 
     pub fn write_pipeline_create_infos(&mut self, compiler: &mut PipelineCompiler) {
-        compiler.add_pipeline_info("world_terrain", &mut self.resources.pipelines.terrain);
-        compiler.add_pipeline_info("world_actors", &mut self.resources.pipelines.actors);
-        compiler.add_pipeline_info("world_debug", &mut self.resources.pipelines.debug);
+        compiler.add_pipeline_info("world_terrain", &mut self.resources.pipelines.terrain.pipeline);
+        compiler.add_pipeline_info("world_actors", &mut self.resources.pipelines.actors.pipeline);
+        compiler.add_pipeline_info("world_debug", &mut self.resources.pipelines.debug.pipeline);
     }
 
     pub fn set_pipeline_handle(&mut self, compiler: &PipelineCompiler) {
         let mut handle = compiler.get_pipeline("world_terrain");
-        self.resources.pipelines.terrain.set_handle(handle);
+        self.resources.pipelines.terrain.pipeline.set_handle(handle);
         self.render.terrain.pipeline_handle = handle;
         
         handle = compiler.get_pipeline("world_actors");
-        self.resources.pipelines.actors.set_handle(handle);
+        self.resources.pipelines.actors.pipeline.set_handle(handle);
         self.render.actors.pipeline_handle = handle;
 
         handle = compiler.get_pipeline("world_debug");
-        self.resources.pipelines.debug.set_handle(handle);
+        self.resources.pipelines.debug.pipeline.set_handle(handle);
         self.render.debug.pipeline_handle = handle;
     }
 
@@ -544,6 +544,17 @@ impl WorldModule {
     //
     // Data
     //
+
+    pub fn reload_assets(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore, assets: &Vec<AssetId>) -> Result<(), CommonError> {
+        for &assets_id in assets.iter() {
+            match assets_id {
+                AssetId::ShaderId(shader_id) => self.reload_shaders(api, core, shader_id)?,
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
    
     fn fetch_texture_view(&mut self, core: &mut LoomzEngineCore, id: TextureId) -> Result<vk::ImageView, CommonError> {
         if let Some(texture) = self.resources.textures.get(&id) {
@@ -584,6 +595,13 @@ impl WorldDescriptors {
 
     pub fn reset_batch_layout(&mut self) {
         self.allocator.reset_layout::<ACTOR_BATCH_LAYOUT_ID >();
+    }
+}
+
+impl WorldPipeline {
+    fn destroy(self, core: &mut LoomzEngineCore) {
+        self.pipeline.destroy(&core.ctx);
+        core.ctx.device.destroy_pipeline_layout(self.layout);
     }
 }
 
@@ -644,15 +662,12 @@ impl Default for WorldRender {
     }
 }
 
-impl Default for WorldPipelines {
+impl Default for WorldPipeline {
     fn default() -> Self {
-        WorldPipelines {
-            terrain: GraphicsPipeline::new(),
-            actors: GraphicsPipeline::new(),
-            debug: GraphicsPipeline::new(),
-            terrain_layout: vk::PipelineLayout::null(),
-            actors_layout: vk::PipelineLayout::null(),
-            debug_layout: vk::PipelineLayout::null(),
+        WorldPipeline {
+            pipeline: GraphicsPipeline::new(),
+            layout: vk::PipelineLayout::null(),
+            id: ShaderId(0)
         }
     }
 }
