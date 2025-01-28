@@ -159,7 +159,7 @@ impl LoomzEngine {
         core.ctx.device.device_wait_idle().unwrap();
 
         self.world.reload_assets(api, core, &assets)?;
-        self.gui.reload_assets(api, core, &assets);
+        self.gui.reload_assets(api, core, &assets)?;
 
         Ok(())
     }

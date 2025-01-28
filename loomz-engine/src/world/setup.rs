@@ -375,6 +375,12 @@ impl super::WorldModule {
         let terrain_id = self.resources.pipelines.terrain.id;
         let actors_id = self.resources.pipelines.actors.id;
         let debug_id = self.resources.pipelines.debug.id;
+
+        let mut new_pipeline = 
+            if shader_id == terrain_id     { self.resources.pipelines.terrain.pipeline.clone() }
+            else if shader_id == actors_id { self.resources.pipelines.actors.pipeline.clone() }
+            else if shader_id == debug_id  { self.resources.pipelines.debug.pipeline.clone() }
+            else { return Ok(()); };
         
         let shader = api.assets_ref().shader(shader_id)
             .ok_or_else(|| assets_err!("Failed to find shader by ID") )?;
@@ -382,18 +388,12 @@ impl super::WorldModule {
         let modules = GraphicsShaderModules::new(&core.ctx, &shader.vert, &shader.frag)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to reload shader module") )?;
 
-        let mut new_pipeline = 
-            if shader_id == terrain_id     { self.resources.pipelines.terrain.pipeline.clone() }
-            else if shader_id == actors_id { self.resources.pipelines.actors.pipeline.clone() }
-            else if shader_id == debug_id  { self.resources.pipelines.debug.pipeline.clone() }
-            else { return Ok(()); };
-
         new_pipeline.set_shader_modules(modules);
 
         let pipeline_info = [new_pipeline.create_info()];
         let mut pipeline_handle = [vk::Pipeline::null()];
         core.ctx.device.create_graphics_pipelines(vk::PipelineCache::default(), &pipeline_info, &mut pipeline_handle)
-            .map_err(|err| backend_init_err!("Failed to recompile create pipelines: {:?}", err) )?;
+            .map_err(|err| backend_init_err!("Failed to recompile world pipelines: {:?}", err) )?;
 
         new_pipeline.set_handle(pipeline_handle[0]);
 

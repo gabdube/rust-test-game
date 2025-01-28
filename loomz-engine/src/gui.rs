@@ -317,13 +317,20 @@ impl GuiModule {
     // Data
     //
 
-    pub fn reload_assets(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore, assets: &Vec<AssetId>) {
+    pub fn reload_assets(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore, assets: &Vec<AssetId>) -> Result<(), CommonError> {
         for &assets_id in assets.iter() {
             match assets_id {
-                AssetId::ShaderId(shader_id) => self.reload_shaders(api, core, shader_id),
+                AssetId::ShaderId(shader_id) => {
+                    // If a gui shader is reloaded, we need to rebuild all the gui batches
+                    self.reload_shaders(api, core, shader_id)?;
+                    batch::build(core, self)?;
+                    self.update_batches = false;
+                },
                 _ => {}
             }
         }
+
+        Ok(())
     }
 
     fn fetch_font_texture_view(core: &mut LoomzEngineCore, resources: &mut GuiResources, font_id: MsdfFontId) -> Result<vk::ImageView, CommonError> {

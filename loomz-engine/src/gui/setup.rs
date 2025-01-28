@@ -1,6 +1,6 @@
 use loomz_engine_core::{LoomzEngineCore, alloc::VertexAlloc, descriptors::*, pipelines::*};
 use loomz_shared::{CommonError, CommonErrorType, LoomzApi};
-use loomz_shared::{backend_init_err, chain_err};
+use loomz_shared::{backend_init_err, assets_err, chain_err};
 use super::{GuiPushConstant, GuiVertex};
 
 impl super::GuiModule {
@@ -146,7 +146,40 @@ impl super::GuiModule {
         render.vertex_offset = self.data.vertex_alloc.vertex_offset();
     }
     
-    pub(super) fn reload_shaders(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore, shader_id: loomz_shared::ShaderId) {
+    pub(super) fn reload_shaders(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore, shader_id: loomz_shared::ShaderId) -> Result<(), CommonError> {
+        let text_id = self.resources.text_pipeline_id;
+        let image_id = self.resources.image_pipeline_id;
+
+        let mut new_pipeline = 
+            if shader_id == text_id       { self.resources.text_pipeline.clone() }
+            else if shader_id == image_id { self.resources.image_pipeline.clone() }
+            else { return Ok(()) };
+
+        let shader = api.assets_ref().shader(shader_id)
+            .ok_or_else(|| assets_err!("Failed to find shader by ID") )?;
+
+        let modules = GraphicsShaderModules::new(&core.ctx, &shader.vert, &shader.frag)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to reload shader module") )?;
+      
+        new_pipeline.set_shader_modules(modules);
+
+        let pipeline_info = [new_pipeline.create_info()];
+        let mut pipeline_handle = [vk::Pipeline::null()];
+        core.ctx.device.create_graphics_pipelines(vk::PipelineCache::default(), &pipeline_info, &mut pipeline_handle)
+            .map_err(|err| backend_init_err!("Failed to recompile gui pipelines: {:?}", err) )?;
+
+        new_pipeline.set_handle(pipeline_handle[0]);
+
+        if shader_id == text_id { 
+            ::std::mem::swap(&mut self.resources.text_pipeline, &mut new_pipeline);
+        }
+        else if shader_id == image_id {
+            ::std::mem::swap(&mut self.resources.image_pipeline, &mut new_pipeline);
+        }
+
+        new_pipeline.destroy(&core.ctx);
+
+        Ok(())
     }
     
 }
