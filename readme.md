@@ -32,6 +32,15 @@ cargo run -p loomz --release
 
 Running the program without `release` will enable the Vulkan validation layers.
 
+## Using multithreading
+
+With this option, `loomz`, `loomz-client`, and `loomz-engine` will run on different threads. Without it, they will all run on one thread. Multithreading works will all other
+features. 
+
+```rust
+cargo run -p loomz  --features multithreading
+```
+
 ## Using assets reloading
 
 You can enable assets reloading at runtime. Only shaders can be reloaded for now
@@ -42,14 +51,20 @@ cargo run -p loomz  --features reload-assets
 
 ## Using hot reloading
 
-This project support hot reloading for the game client code (aka the loomz-client). 
+This project support hot reloading for the game client code (aka the `loomz-client`). However you need to conifure a few things before enabling the feature:
 
 1. Add `dylib` to the crate-type in list `loomz-client/Cargo.toml`
 1. **When** using release mode, comment out `panic = "abort"` in `./Cargo.toml`
 2. Build client code with the hot-reload feature using `cargo build -p loomz-client --features hot-reload`
 3. Run the main app with the hot-reloading feature: `cargo run -p loomz --features hot-reload`
 4. Rebuild the client code with the command from step 3 when needed
-5. You will see the message `CLIENT RELOADED` in the main app console when the new library was reloaded
+5. You will see the message `CLIENT RELOADED` in the main app console when the new library is reloaded
+
+Command: 
+```rust
+cargo run -p loomz  --features hot-reload
+```
+
 
 ## Tooling
 

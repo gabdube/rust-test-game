@@ -75,7 +75,7 @@ impl LoomzClient {
 
         client.animations.load(api)?;
 
-        client.init_sandbox()?;
+        client.init_main_menu()?;
 
         Ok(client)
     }
