@@ -1,6 +1,6 @@
 ## Instructions
 
-Rust test game (codename Loomz), is a game / game-engine built from scratch, with minimal dependencies, using the Rust programming language and Vulkan for the graphics. The goal of this project is to create a light, powerful, and reusable template for game developement.
+Rust test game (codename Loomz), is a game / game-engine built from scratch, with minimal dependencies, using the Rust programming language and Vulkan for the graphics. The goal of this project is to create a light, powerful, and reusable template for game development.
 
 The project has been tested on Windows and Linux. MacOs will soon be supported as soon as I figure what's wrong with MoltenVk on my setup.
 
@@ -51,7 +51,7 @@ cargo run -p loomz  --features reload-assets
 
 ## Using hot reloading
 
-This project support hot reloading for the game client code (aka the `loomz-client`). However you need to conifure a few things before enabling the feature:
+This project support hot reloading for the game client code (aka the `loomz-client`). However, you need to configure a few things before enabling the feature:
 
 1. Add `dylib` to the crate-type in list `loomz-client/Cargo.toml`
 1. **When** using release mode, comment out `panic = "abort"` in `./Cargo.toml`
