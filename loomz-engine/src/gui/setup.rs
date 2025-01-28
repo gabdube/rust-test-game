@@ -160,7 +160,7 @@ impl super::GuiModule {
 
         let modules = GraphicsShaderModules::new(&core.ctx, &shader.vert, &shader.frag)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to reload shader module") )?;
-      
+
         new_pipeline.set_shader_modules(modules);
 
         let pipeline_info = [new_pipeline.create_info()];

@@ -223,9 +223,7 @@ impl WorldModule {
 
         world.setup_pipelines(core, api)?;
         world.setup_descriptors(core)?;
-        world.setup_vertex_buffer(core)?;
-        world.setup_debug_vertex_buffer(core)?;
-        world.setup_sprites_buffers(core)?;
+        world.setup_buffers(core)?;
         world.setup_terrain_sampler(core)?;
         world.setup_render_data();
 

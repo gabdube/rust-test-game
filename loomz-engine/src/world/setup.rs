@@ -294,7 +294,15 @@ impl super::WorldModule {
         Ok(())
     }
 
-    pub(super) fn setup_vertex_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+    pub(super) fn setup_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        self.setup_vertex_buffer(core)?;
+        self.setup_terrain_buffer(core)?;
+        self.setup_sprites_buffers(core)?;
+        self.setup_debug_vertex_buffer(core)?;
+        Ok(())
+    }
+
+    fn setup_vertex_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let vertex_capacity = 4;
         let index_capacity = 6;
         self.resources.vertex = VertexAlloc::new(core, index_capacity, vertex_capacity)
@@ -313,22 +321,27 @@ impl super::WorldModule {
         Ok(())
     }
 
-    pub(super) fn setup_debug_vertex_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let vertex_capacity = 1000;
-        let index_capacity = 1500;
-        
-        self.resources.debug_vertex = VertexAlloc::new(core, index_capacity, vertex_capacity)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create debug vertex alloc: {err}") )?;
+    fn setup_terrain_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
 
         Ok(())
     }
-
-    pub(super) fn setup_sprites_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {  
+    
+    fn setup_sprites_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {  
         let sprites_capacity = 100;
         self.data.sprites = StorageAlloc::new(core, sprites_capacity)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create storage alloc: {err}") )?;
 
         self.render.actors.sprites_set = self.descriptors.write_sprite_buffer(&self.data.sprites)?;
+
+        Ok(())
+    }
+
+    fn setup_debug_vertex_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        let vertex_capacity = 1000;
+        let index_capacity = 1500;
+        
+        self.resources.debug_vertex = VertexAlloc::new(core, index_capacity, vertex_capacity)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create debug vertex alloc: {err}") )?;
 
         Ok(())
     }
