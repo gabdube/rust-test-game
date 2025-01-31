@@ -75,7 +75,7 @@ impl LoomzClient {
 
         client.animations.load(api)?;
 
-        client.init_main_menu()?;
+        client.init_sandbox()?;
 
         Ok(client)
     }
@@ -106,7 +106,7 @@ impl LoomzClient {
         match self.state {
             GameState::Uninitialized => self.uninitialized()?,
             GameState::MainMenu => self.main_menu()?,
-            GameState::Game => self.gameplay(),
+            GameState::Game => self.gameplay()?,
             GameState::Sandbox => self.sandbox()?,
         }
 

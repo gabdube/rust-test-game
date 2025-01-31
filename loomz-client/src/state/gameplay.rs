@@ -1,9 +1,13 @@
 use loomz_shared::api::WorldActorId;
 use loomz_shared::base_types::{PositionF64, PositionF32, rect};
-use loomz_shared::inputs::InputBuffer;
+use loomz_shared::inputs::keys;
 use loomz_shared::CommonError;
 use crate::animations::PawnAnimationType;
 use crate::{GameState, LoomzClient, Player};
+
+const RETURN_GAMEPLAY: u64 = 300;
+const EXIT_GAMEPLAY: u64 = 301;
+
 
 impl LoomzClient {
 
@@ -15,19 +19,49 @@ impl LoomzClient {
         Ok(())
     }
 
-    pub(crate) fn gameplay(&mut self) {
-        if let Some(new_input) = self.api.read_inputs() {
-           self.gameplay_inputs(new_input);
+    pub(crate) fn gameplay(&mut self) -> Result<(), CommonError> {
+        self.gameplay_updates();
+
+        if self.menu.visible() {
+            self.gameplay_gui_updates();
+            self.gameplay_gui_events()?;
+        } else {
+            self.gameplay_loop();
         }
 
-        self.gameplay_loop();
+        Ok(())
     }
 
-    fn gameplay_inputs(&mut self, new_inputs: InputBuffer) {
-        let mut gui_updates = crate::gui::GuiUpdates::default();
+    fn gameplay_updates(&mut self) {
+        let new_inputs = match self.api.read_inputs() {
+            Some(inputs) => inputs,
+            None => { return; }
+        };
+
+        let size = new_inputs.screen_size_value();
+
+        if let Some(keystate) = new_inputs.keystate() {
+            if keystate.just_pressed(keys::ESC) {
+                self.menu.resize(&self.api, &rect(0.0, 0.0, size.width, size.height));
+                self.menu.toggle(&self.api, !self.menu.visible());
+            }
+        }
 
         if let Some(cursor_position) = new_inputs.cursor_position() {
             self.target_position = cursor_position.as_f32();
+        }
+
+    }
+
+    fn gameplay_gui_updates(&mut self) {
+        let new_inputs = match self.api.read_inputs() {
+            Some(inputs) => inputs,
+            None => { return; }
+        };
+
+        let mut gui_updates = crate::gui::GuiUpdates::default();
+
+        if let Some(cursor_position) = new_inputs.cursor_position() {
             gui_updates.cursor_position = Some(cursor_position.as_f32());
         }
 
@@ -42,12 +76,34 @@ impl LoomzClient {
         self.menu.update(&self.api, &gui_updates);
     }
 
+    fn gameplay_gui_events(&mut self) -> Result<(), CommonError> {
+        let mut ret_gameplay = false;
+        let mut exit_gameplay = false;
+
+        for event in self.menu.drain_events() {
+            match event {
+                RETURN_GAMEPLAY => { ret_gameplay = true },
+                EXIT_GAMEPLAY => { exit_gameplay = true; },
+                _ => {}
+            }
+        }
+
+        if ret_gameplay {
+            self.menu.toggle(&self.api, false);
+        } else if exit_gameplay {
+            self.destroy_gameplay_state();
+            self.init_main_menu()?;
+        }
+
+        Ok(())
+    }
+
     fn gameplay_loop(&mut self) {
         let world = self.api.world();
         let position = self.player.position;
         let target = self.target_position;
 
-        if position.out_of_range(target, 2.0) {
+        if position.out_of_range(target, 16.0) {
             let speed = 200.0 * self.timing.delta_ms;
             let angle = f32::atan2(target.y - position.y, target.x - position.x) as f64;
             let speed_x = speed * f64::cos(angle);
@@ -96,20 +152,38 @@ impl LoomzClient {
     }
 
     fn init_gameplay_gui(&mut self) -> Result<(), CommonError> {
-        use crate::gui::GuiLayoutType::VBox;
+        use crate::gui::{GuiLayoutType, GuiLabelCallback};
 
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32::from_size(screen_size);
 
+        self.menu.toggle(&self.api, false);
+
         self.menu.build_style(&self.api, |style| {
-            style.root_layout(VBox);
+            style.root_layout(GuiLayoutType::VBox);
+            super::shared::main_panel_style(style);
         })?;
 
-        self.menu.build(&self.api, &view, |_gui| {
+        self.menu.build(&self.api, &view, |gui| {
+            gui.layout(GuiLayoutType::VBox);
+            gui.layout_item(400.0, 300.0);
+            gui.frame("main_panel_style", |gui| {
+                gui.layout_item(300.0, 100.0);
 
+                gui.label_callback(GuiLabelCallback::Click, RETURN_GAMEPLAY);
+                gui.label("Continue", "menu_item");
+
+                gui.label_callback(GuiLabelCallback::Click, EXIT_GAMEPLAY);
+                gui.label("Exit", "menu_item");
+            });
         })?;
 
         Ok(())
+    }
+
+    fn destroy_gameplay_state(&mut self) {
+        self.api.world().destroy_actor(&self.player.id);
+        self.player = Player::default();
     }
 
 }

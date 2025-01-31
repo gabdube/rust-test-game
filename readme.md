@@ -51,7 +51,7 @@ cargo run -p loomz  --features reload-assets
 
 ## Using hot reloading
 
-This project support hot reloading for the game client code (aka the `loomz-client`). However, you need to configure a few things before enabling the feature:
+This project support hot reloading for the game client code (aka `loomz-client`). However, you need to configure a few things before enabling the feature:
 
 1. Add `dylib` to the crate-type in list `loomz-client/Cargo.toml`
 1. **When** using release mode, comment out `panic = "abort"` in `./Cargo.toml`
@@ -68,7 +68,7 @@ cargo run -p loomz  --features hot-reload
 
 ## Tooling
 
-Most assets needs to be preprocessed before being usable in this project. This is done using 3rd party sofware and the `loomz-tool`
+Most assets needs to be preprocessed before being usable in this project. This is done using 3rd party sofware and `loomz-tool`
 
 Dependencies:
 

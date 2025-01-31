@@ -46,7 +46,7 @@ pub struct DescriptorSetsCollection {
 */
 pub struct DescriptorsAllocator<const C: usize> {
     pool: vk::DescriptorPool,
-    collections: Option<Box<[DescriptorSetsCollection; C]>>,
+    collections: Option<[DescriptorSetsCollection; C]>,
     updates: Option<Arc<Mutex<VulkanDescriptorSubmit>>>,
 }
 
@@ -66,7 +66,7 @@ impl<const C: usize> DescriptorsAllocator<C> where
         let mut pool = vk::DescriptorPool::null();
         Self::create_descriptor_pool(core, max_sets, &pool_sizes[0..pool_size_count], &mut pool)?;
 
-        let mut collections: Box<[DescriptorSetsCollection; C]> = Box::default();
+        let mut collections: [DescriptorSetsCollection; C] = Default::default();
         Self::allocate_collections(core, pool, allocations, &mut collections)?;
 
         let alloc = DescriptorsAllocator {

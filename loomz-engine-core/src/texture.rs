@@ -185,7 +185,6 @@ impl LoomzEngineCore {
         staging.image_barrier_prepare.push(barrier);
 
         // Transfer finalize
-        // TODO: Support
         barrier = vk::ImageMemoryBarrier2 {
             image,
             old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,

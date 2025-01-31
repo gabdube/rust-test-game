@@ -1,8 +1,6 @@
 use loomz_shared::api::{LoomzApi, WorldAnimationId};
 use loomz_shared::{assets_err, CommonError};
 
-const ANIMATION_INTERVAL: f32 = 1.0 / 16.0; // 16fps
-
 #[derive(Default, Copy, Clone, PartialEq)]
 pub enum PawnAnimationType {
     #[default]
@@ -117,8 +115,7 @@ impl Animations {
                 padding,
                 x, y,
                 sprite_width, sprite_height,
-                last_frame: sprite_count - 1,
-                interval: ANIMATION_INTERVAL
+                last_frame: (sprite_count - 1) as u8,
             };
 
             world.create_animation(id, animation);

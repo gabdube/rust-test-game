@@ -17,14 +17,14 @@ pub struct WorldAnimation {
     pub y: f32,
     pub sprite_width: f32,
     pub sprite_height: f32,
-    pub last_frame: u32,
-    pub interval: f32,
+    pub last_frame: u8,
 }
 
 pub enum WorldActorUpdate {
     Position(PositionF32),
     Animation(WorldAnimationId),
     Flip(bool),
+    Destroy,
 }
 
 bitflags! {
@@ -68,6 +68,10 @@ impl WorldApi {
     pub fn create_actor(&self, id: &WorldActorId, position: PositionF32, animation_id: &WorldAnimationId) {
         self.actors.push(id, WorldActorUpdate::Position(position));
         self.actors.push(id, WorldActorUpdate::Animation(animation_id.clone()));
+    }
+
+    pub fn destroy_actor(&self, id: &WorldActorId) {
+        self.actors.push(id, WorldActorUpdate::Destroy);
     }
 
     pub fn update_actor_position(&self, id: &WorldActorId, position: PositionF32) {

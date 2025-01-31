@@ -3,7 +3,7 @@ mod batch;
 
 use fnv::FnvHashMap;
 use std::{slice, sync::Arc};
-use loomz_shared::api::{LoomzApi, GuiId, GuiSprite};
+use loomz_shared::api::{LoomzApi, GuiSprite};
 use loomz_shared::assets::{LoomzAssetsBundle, AssetId, MsdfFontId, TextureId, ShaderId};
 use loomz_shared::{CommonError, CommonErrorType};
 use loomz_shared::{assets_err, backend_err, chain_err};
@@ -66,6 +66,7 @@ struct GuiViewSprite {
 
 struct GuiView {
     sprites: Vec<GuiViewSprite>,
+    id: u32,
     visible: bool,
 }
 
@@ -219,18 +220,15 @@ impl GuiModule {
     // Updates
     //
 
-    fn create_gui(&mut self, id: GuiId) -> usize {
-        let guis = &mut self.data.gui;
-        let next_id = guis.len();
-
-        guis.push(GuiView {
+    fn create_gui(&mut self, id: u32) -> usize {
+        let index = self.data.gui.len();
+        self.data.gui.push(GuiView {
             sprites: Vec::new(),
+            id,
             visible: true,
         });
 
-        id.bind(next_id as u32);
-
-        next_id
+        index
     }
 
     fn update_gui_sprites<'a>(&mut self, core: &mut LoomzEngineCore, index: usize, sprites: &'a [GuiSprite]) -> Result<(), CommonError> {
@@ -285,12 +283,13 @@ impl GuiModule {
         
         if let Some(updates) = api.gui().gui_updates() {
             for (id, update) in updates {
-                let index = id.bound_value()
+                let id = id.value();
+                let index = self.data.gui.iter().position(|gui| gui.id == id )
                     .unwrap_or_else(|| self.create_gui(id) );
 
                 match update {
                     GuiApiUpdate::ToggleGui(visible) => {
-                       self.toggle_gui_visibility(index, visible)?;
+                        self.toggle_gui_visibility(index, visible)?;
                     },
                     GuiApiUpdate::UpdateSprites(sprites) => {
                         self.update_gui_sprites(core, index, sprites)?;

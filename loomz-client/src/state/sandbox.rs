@@ -67,18 +67,18 @@ impl LoomzClient {
     }
 
     fn sandbox_gui_events(&mut self) -> Result<(), CommonError> {
-        let mut cont_sandbox = false;
+        let mut ret_sandbox = false;
         let mut exit_sandbox = false;
 
         for event in self.menu.drain_events() {
             match event {
-                RETURN_SANDBOX => { cont_sandbox = true },
+                RETURN_SANDBOX => { ret_sandbox = true },
                 EXIT_SANDBOX => { exit_sandbox = true; },
                 _ => {}
             }
         }
 
-        if cont_sandbox {
+        if ret_sandbox {
             self.menu.toggle(&self.api, false);
         } else if exit_sandbox {
             self.init_main_menu()?;

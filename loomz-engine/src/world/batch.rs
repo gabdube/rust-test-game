@@ -1,11 +1,13 @@
 use loomz_shared::CommonError;
-use super::{WorldModule, WorldBatch, WorldInstance, WorldDescriptors};
+use loomz_engine_core::descriptors::DescriptorsAllocator;
+use super::{WorldModule, WorldBatch, data::WorldActorData, ACTOR_BATCH_LAYOUT_ID, LAYOUT_COUNT};
 
 pub(super) struct WorldBatcher<'a> {
     current_view: vk::ImageView,
     batches: &'a mut Vec<WorldBatch>,
-    instances: &'a mut [WorldInstance],
-    descriptors: &'a mut WorldDescriptors,
+    instances: &'a [WorldActorData],
+    descriptors: &'a mut DescriptorsAllocator<LAYOUT_COUNT>,
+    sampler: vk::Sampler,
     instance_index: usize,
     batch_index: usize,
 }
@@ -15,20 +17,24 @@ impl<'a> WorldBatcher<'a> {
     pub(super) fn build(world: &'a mut WorldModule) -> Result<(), CommonError> {
         let mut batcher = WorldBatcher {
             current_view: vk::ImageView::null(),
-            batches: &mut world.batches,
-            instances: &mut world.data.instances,
-            descriptors: &mut world.descriptors,
+            batches: &mut world.render.actors.batches,
+            instances: &world.data.actors_data,
+            descriptors: &mut world.resources.descriptors,
+            sampler: world.resources.default_sampler,
             instance_index: 0,
             batch_index: 0,
         };
 
-        batcher.descriptors.reset_batch_layout();
-        batcher.batches.clear();
-
+        batcher.reset_batches();
         batcher.first_batch()?;
         batcher.remaining_batches()?;
 
         Ok(())
+    }
+
+    fn reset_batches(&mut self) {
+        self.descriptors.reset_layout::<ACTOR_BATCH_LAYOUT_ID>();
+        self.batches.clear();
     }
 
     fn first_batch(&mut self) -> Result<(), CommonError> {
@@ -76,7 +82,15 @@ impl<'a> WorldBatcher<'a> {
     }
 
     fn next_batch(&mut self, image_view: vk::ImageView) -> Result<(), CommonError> {
-        let set = self.descriptors.write_batch_texture(image_view)?;
+        use loomz_engine_core::descriptors::DescriptorWriteBinding;
+
+        let set = self.descriptors.write_set::<ACTOR_BATCH_LAYOUT_ID>(&[
+            DescriptorWriteBinding::from_image_and_sampler(
+                image_view,
+                self.sampler,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
+            )
+        ])?;
 
         self.current_view = image_view;
         self.batches.push(WorldBatch {

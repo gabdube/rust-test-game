@@ -1,74 +1,66 @@
-use std::sync::{Arc, atomic::{AtomicU32, Ordering}};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::marker::PhantomData;
 use parking_lot::Mutex;
 use crate::store::{StoreAndLoad, SaveFileReaderBase, SaveFileWriterBase};
 
 /// ID that ties data between the client and the engine
 pub struct Id<T> {
-    value: Arc<AtomicU32>,
+    value: u32,
     _t: PhantomData<T>
 }
 
 impl<T> Id<T> {
     pub fn new() -> Self {
+        static COUNTER: AtomicU32 = AtomicU32::new(1);
         Id {
-            value: Arc::new(AtomicU32::new(u32::MAX)),
+            value: COUNTER.fetch_add(1, Ordering::Relaxed),
             _t: PhantomData,
         }
     }
 
     #[inline]
-    pub fn bind(&self, val: u32) {
-        self.value.store(val, Ordering::SeqCst);
-    }
-
-    #[inline]
-    pub fn is_unbound(&self) -> bool {
-        self.value.load(Ordering::SeqCst) == u32::MAX
-    }
-
-    #[inline]
     pub fn value(&self) -> u32 {
-        self.value.load(Ordering::SeqCst)
-    }
-
-    #[inline]
-    pub fn bound_value(&self) -> Option<usize> {
-        let value = self.value.load(Ordering::SeqCst) as usize;
-        match value == (u32::MAX as usize) {
-            true => None,
-            false => Some(value)
-        }
+        self.value
     }
 }
 
 impl<T> StoreAndLoad for Id<T> {
     fn load(reader: &mut SaveFileReaderBase) -> Self {
         Id {
-            value: Arc::new(AtomicU32::new(reader.read_u32())),
+            value: reader.read_u32(),
             _t: PhantomData,
         }
     }
 
     fn store(&self, writer: &mut SaveFileWriterBase) {
-        writer.write_u32(self.value.load(Ordering::Relaxed));
+        writer.write_u32(self.value);
     }
 }
 
 impl<T> Default for Id<T> {
     fn default() -> Self {
-        Self::new()
+        Id::new()
     }
 }
 
 impl<T> Clone for Id<T> {
     fn clone(&self) -> Self {
         Id {
-            value: self.value.clone(),
+            value: self.value,
             _t: PhantomData
         }
     }
 }
+
+impl<T> Copy for Id<T> {
+}
+
+impl<T> ::std::fmt::Debug for Id<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ID({})", self.value)
+    }
+}
+
 
 struct InnerBuffer<ID, T> {
     length: usize,
