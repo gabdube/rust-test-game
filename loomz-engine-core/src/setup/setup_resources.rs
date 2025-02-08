@@ -203,7 +203,7 @@ fn setup_uniforms_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGl
     let host_type_index = crate::helpers::fetch_memory_index(instance, ctx.device.physical_device, flags, flags)
         .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for uniforms") )?;
 
-    let uniforms_size = KB*10;
+    let uniforms_size = KB*100;
     let default_alloc_capacity = 16;
 
     resources.uniforms_alloc = HostVisibleAlloc::new(&ctx.device, uniforms_size, default_alloc_capacity, host_type_index)

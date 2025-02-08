@@ -1,5 +1,5 @@
 use bitflags::bitflags;
-use crate::{RectF32, PositionF32, rect};
+use crate::{RectF32, PositionF32, PositionU32, SizeU32, rect};
 use crate::assets::TextureId;
 use super::base::{Id, MessageQueue, MessageQueueEx};
 
@@ -35,19 +35,30 @@ pub enum TerrainType {
     Water,
 }
 
+impl TerrainType {
+    pub const fn names() -> &'static [&'static str] {
+        &[
+            "grass",
+            "sand",
+            "water",
+        ]
+    }
+}
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct WorldTerrainChunk {
+    pub position: PositionU32,
     pub view: RectF32,
     pub cells: TerrainChunk<TerrainType>,
 }
 
 impl WorldTerrainChunk {
-    pub fn new(x: usize, y: usize) -> Self {
+    pub fn new(chunk_x: usize, chunk_y: usize) -> Self {
         let stride_px = (TERRAIN_CHUNK_SIZE as f32) * (TERRAIN_CELL_SIZE_PX as f32);
-        let [x, y] = [x as f32, y as f32];
-        let [x, y] = [x * stride_px, y * stride_px];
+        let [x, y] = [(chunk_x as f32) * stride_px, (chunk_y as f32) * stride_px];
         WorldTerrainChunk {
+            position: PositionU32 { x: chunk_x as u32, y: chunk_y as u32 },
             view: rect(x, y, x+stride_px, y+stride_px),
             cells: Default::default()
         }
@@ -76,6 +87,7 @@ pub enum WorldUpdate {
     DebugFlags(WorldDebugFlags),
     ShowWorld(bool),
     WorldView(RectF32),
+    WorldSize(SizeU32),
     WorldTerrain(&'static [WorldTerrainChunk])
 }
 
@@ -136,8 +148,14 @@ impl WorldApi {
         self.general.push(&(), WorldUpdate::ShowWorld(visible));
     }
 
+    /// Sets the world view (in pixels)
     pub fn set_world_view(&self, view: RectF32) {
         self.general.push(&(), WorldUpdate::WorldView(view))
+    }
+
+    /// Sets the world size (in cells)
+    pub fn set_world_size(&self, size: SizeU32) {
+        self.general.push(&(), WorldUpdate::WorldSize(size));
     }
 
     pub fn update_terrain(&self, chunk: &WorldTerrainChunk) {

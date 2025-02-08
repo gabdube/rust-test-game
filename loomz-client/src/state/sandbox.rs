@@ -67,7 +67,7 @@ impl LoomzClient {
         self.menu.update(&self.api, &gui_updates);
     }
 
-    fn sandbox_gui_events(&mut self) -> Result<(), CommonError> {
+    fn sandbox_gui_events(&mut self) -> Result<(), CommonError> { 
         let mut ret_sandbox = false;
         let mut exit_sandbox = false;
 

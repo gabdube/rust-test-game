@@ -1,12 +1,23 @@
+use bitflags::bitflags;
 use loomz_shared::api::{TerrainType, WorldTerrainChunk, TERRAIN_CHUNK_SIZE};
 use loomz_shared::{LoomzApi, RectF32, SizeU32, rect};
 
+bitflags! {
+    #[derive(Copy, Clone, Default)]
+    struct TerrainUpdateFlags: u8 {
+        const UPDATE_VIEW       = 0b0001;
+        const UPDATE_SIZE       = 0b0010;
+    }
+}
 
 pub struct Terrain {
-    pub batches: Vec<WorldTerrainChunk>,
-    pub batches_updates: Vec<usize>,     // Indices of the batches that were updated 
-    pub view: RectF32,
-    pub size: SizeU32,
+    /// Terrain cells
+    batches: Vec<WorldTerrainChunk>,
+    /// Indices of the batches that were updated 
+    batches_updates: Vec<usize>,    
+    view: RectF32,
+    size: SizeU32,
+    flags: TerrainUpdateFlags,
 }
 
 impl Terrain {
@@ -17,6 +28,7 @@ impl Terrain {
             batches_updates: Vec::with_capacity(16),
             view: RectF32::default(),
             size: SizeU32::default(),
+            flags: TerrainUpdateFlags::empty(),
         }
     }
 
@@ -29,6 +41,7 @@ impl Terrain {
         let batch_y = ((height as usize) + (TERRAIN_CHUNK_SIZE-1)) / TERRAIN_CHUNK_SIZE;
         self.batches.clear();
         self.batches_updates.clear();
+        self.flags = TerrainUpdateFlags::UPDATE_SIZE;
 
         for y in 0..batch_y {
             for x in 0..batch_x {
@@ -40,6 +53,7 @@ impl Terrain {
 
     pub fn set_view(&mut self, x: f32, y: f32, width: f32, height: f32) {
         self.view = rect(x, y, x+width, y+height);
+        self.flags = TerrainUpdateFlags::UPDATE_VIEW;
     }
 
     // Copy cells into the target rect. Cells buffer must match the rect
@@ -100,7 +114,13 @@ impl Terrain {
         let view = self.view;
         let world = api.world();
 
-        world.set_world_view(view);
+        if self.flags.contains(TerrainUpdateFlags::UPDATE_SIZE) {
+            world.set_world_size(self.size);
+        }
+
+        if self.flags.contains(TerrainUpdateFlags::UPDATE_VIEW) {
+            world.set_world_view(view);
+        }
 
         for &batch_index in self.batches_updates.iter() {
             let batch = &self.batches[batch_index];
@@ -110,6 +130,7 @@ impl Terrain {
         }
 
         self.batches_updates.clear();
+        self.flags = TerrainUpdateFlags::empty();
     }
 
 }

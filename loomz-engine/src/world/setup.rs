@@ -1,8 +1,9 @@
 use loomz_engine_core::{LoomzEngineCore, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
-use loomz_shared::{CommonError, CommonErrorType, LoomzApi};
-use loomz_shared::{backend_init_err, assets_err, chain_err};
 use loomz_engine_core::VulkanContext;
-use super::{WorldPushConstant, WorldVertex, WorldDebugVertex};
+use loomz_shared::api::TERRAIN_CHUNK_SIZE;
+use loomz_shared::{CommonError, CommonErrorType, LoomzApi, TerrainType};
+use loomz_shared::{backend_init_err, assets_err, chain_err};
+use super::{WorldPushConstant, WorldVertex, WorldDebugVertex, data::TerrainSpriteData};
 
 
 impl super::WorldModule {
@@ -273,7 +274,7 @@ impl super::WorldModule {
         let allocations = [
             DescriptorsAllocation {
                 layout: pipelines.terrain_global_layout,
-                binding_types: &[vk::DescriptorType::COMBINED_IMAGE_SAMPLER],
+                binding_types: &[vk::DescriptorType::STORAGE_BUFFER, vk::DescriptorType::COMBINED_IMAGE_SAMPLER],
                 count: 1,
             },
             DescriptorsAllocation {
@@ -323,6 +324,15 @@ impl super::WorldModule {
     }
 
     fn setup_terrain_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        use super::TERRAIN_GLOBAL_LAYOUT_ID;
+
+        let sprites_capacity = TERRAIN_CHUNK_SIZE * TERRAIN_CHUNK_SIZE * 8;
+        // self.data.terrain_sprites = StorageAlloc::new(core, sprites_capacity)
+        //     .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create terrain sprites storage alloc: {err}") )?;
+
+        // self.render.terrain.terrain_set = self.resources.descriptors.write_set::<TERRAIN_GLOBAL_LAYOUT_ID>(&[
+        //     DescriptorWriteBinding::from_storage_buffer(&self.data.terrain_sprites)
+        // ])?;
 
         Ok(())
     }
@@ -351,11 +361,11 @@ impl super::WorldModule {
         Ok(())
     }
 
-    pub(super) fn setup_terrain_sampler(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+    fn setup_terrain_sampler(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         use super::TERRAIN_GLOBAL_LAYOUT_ID;
         
         let terrain_id = self.resources.assets.texture_id_by_name("terrain")
-            .ok_or_else(|| assets_err!("Failed to find terrain asset") )?;
+            .ok_or_else(|| assets_err!("Failed to find terrain texture asset") )?;
 
         let view = Self::fetch_texture_view(core, &mut self.resources, terrain_id)?;
 
@@ -363,6 +373,45 @@ impl super::WorldModule {
             DescriptorWriteBinding::from_image_and_sampler(view, self.resources.default_sampler, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
         ])?;
 
+        Ok(())
+    }
+
+    fn load_terrain_tilemap(&mut self) -> Result<(), CommonError> {
+        let tilemap = &mut self.data.terrain_tilemap;
+
+        let terrain_json_source = self.resources.assets.json_by_name("terrain_sprites")
+            .ok_or_else(|| assets_err!("Failed to find terrain json asset") )?;
+
+        let terrain_json: serde_json::Value = serde_json::from_str(&terrain_json_source)
+            .map_err(|err| assets_err!("Failed to parse json: {err:?}") )?;
+
+        let obj = terrain_json.as_object()
+            .ok_or_else(|| assets_err!("Failed to parse json. terrain_json is not an object") )?;
+
+        for &key in TerrainType::names() {
+            let tile_info = obj.get(key)
+                .and_then(|v| v.as_object() )
+                .ok_or_else(|| assets_err!("Failed to find tilemap key \"{key}\"") )?;
+
+            let uv_x = tile_info.get("uv_x")
+                .and_then(|v| v.as_f64() )
+                .unwrap_or(0.0) as f32;
+
+            let uv_y = tile_info.get("uv_y")
+                .and_then(|v| v.as_f64() )
+                .unwrap_or(0.0) as f32;
+
+            tilemap.push(TerrainSpriteData {
+                uv_offset: [uv_x, uv_y]
+            });
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn setup_terrain_tilemap(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        self.setup_terrain_sampler(core)?;
+        self.load_terrain_tilemap()?;
         Ok(())
     }
 

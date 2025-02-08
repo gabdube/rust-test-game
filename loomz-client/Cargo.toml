@@ -15,5 +15,6 @@ hot-reload = []
 unicode-segmentation = "1.12"
 serde_json = "1.0"
 fnv = "1.0.3"
+bitflags = "2.6.0"
 
 loomz-shared = { path = "../loomz-shared" }

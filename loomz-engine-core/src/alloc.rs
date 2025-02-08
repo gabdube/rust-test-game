@@ -340,7 +340,7 @@ impl<V: Copy> StorageAlloc<V> {
     }
 
     pub fn write_data(&mut self, index: usize, data: V) {
-        assert!(index < self.capacity, "Tried to write data outside of allocated storage");
+        assert!(index < self.capacity, "Tried to write data outside of allocated storage: ({} > {}) ", index, self.capacity);
         assert!(self.mapped_data.is_some(), "Buffer data is not mapped");
         let mapped_data_ptr = self.mapped_data.unwrap();
         

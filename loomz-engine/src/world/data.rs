@@ -1,6 +1,9 @@
 use std::time::Instant;
-use loomz_shared::api::{WorldActorId, WorldAnimationId, WorldAnimation, WorldActorUpdate, WorldTerrainChunk, TerrainChunk};
-use loomz_shared::{CommonError, PositionF32, RectF32, backend_err};
+use loomz_shared::api::{
+    WorldActorId, WorldAnimationId, WorldAnimation, WorldActorUpdate, WorldTerrainChunk,
+    TerrainChunk, TERRAIN_CHUNK_SIZE, TERRAIN_CELL_SIZE_PX
+};
+use loomz_shared::{CommonError, PositionF32, SizeU32, RectF32, rect, backend_err};
 use loomz_engine_core::{LoomzEngineCore, alloc::StorageAlloc};
 
 #[repr(C)]
@@ -32,14 +35,21 @@ pub(super) struct WorldActorData {
     pub flipped: bool,
 }
 
-
-pub(super) struct WorldTerrainSprite {
-
+pub(super) struct WorldTerrainChunkData {
+    pub view: RectF32,
+    pub cells: Box<TerrainChunk<TerrainSpriteData>>,
 }
 
-pub(super) struct WorldTerrainChunkData {
-    pub position: PositionF32,
-    pub cells: Box<TerrainChunk<TerrainSpriteData>>,
+impl WorldTerrainChunkData {
+    fn new(x: usize, y: usize) -> Self {
+        let stride_px = (TERRAIN_CHUNK_SIZE as f32) * (TERRAIN_CELL_SIZE_PX as f32);
+        let [x, y] = [x as f32, y as f32];
+        let [x, y] = [x * stride_px, y * stride_px];
+        WorldTerrainChunkData {
+            view: rect(x, y, x+stride_px, y+stride_px),
+            cells: Default::default()
+        }
+    }
 }
 
 /// World data to be rendered on screen
@@ -53,6 +63,8 @@ pub(super) struct WorldData {
     pub actors_data: Vec<WorldActorData>,
     pub actors_sprites: StorageAlloc<ActorSpriteData>,
 
+    pub terrain_tilemap: Vec<TerrainSpriteData>,
+    pub terrain_size: SizeU32,
     pub terrain_chunks: Vec<WorldTerrainChunkData>,
     pub terrain_sprites: StorageAlloc<TerrainSpriteData>,
 }
@@ -161,12 +173,69 @@ impl super::WorldModule {
     // Terrain
     //
 
-    pub(super) fn update_terrain_from_batch(&mut self, core: &mut LoomzEngineCore, chunk: &WorldTerrainChunk) {
-        println!("TODO update_terrain_from_batch");
+    pub(super) fn set_world_size(&mut self, size: SizeU32) {
+        let data = &mut self.data;
+        data.terrain_size = size;
+        data.terrain_chunks.clear();
+
+        let batch_x = ((size.width as usize) + (TERRAIN_CHUNK_SIZE-1)) / TERRAIN_CHUNK_SIZE;
+        let batch_y = ((size.height as usize) + (TERRAIN_CHUNK_SIZE-1)) / TERRAIN_CHUNK_SIZE;
+
+        for y in 0..batch_y {
+            for x in 0..batch_x {
+                data.terrain_chunks.push(WorldTerrainChunkData::new(x, y))
+            }
+        }
     }
 
-    pub(super) fn copy_terrain_cells(&mut self, core: &mut LoomzEngineCore) {
-        println!("TODO copy_terrain_cells");
+    pub(super) fn copy_terrain_batch(&mut self, chunk: &WorldTerrainChunk) -> Result<(), CommonError> {
+        let data = &mut self.data;
+
+        let x = chunk.position.x as usize;
+        let y = chunk.position.y as usize;
+        let chunk_index = (y * TERRAIN_CHUNK_SIZE) + x;
+
+        let chunk_data = data.terrain_chunks.get_mut(chunk_index)
+            .ok_or_else(|| backend_err!("Tried to update a chunk outside of the terrain range") )?;
+
+        if chunk_data.view != chunk.view {
+            return Err(backend_err!("Mismatch between client chunk and engine chunk"));
+        }
+
+        let tiles = &data.terrain_tilemap;
+
+        for row in 0..TERRAIN_CHUNK_SIZE {
+            let row_type = &chunk.cells[row];
+            let row_data = &mut chunk_data.cells[row];
+            for (data, cell_type) in row_data.iter_mut().zip(row_type) {
+                *data = tiles.get(*cell_type as usize)
+                    .copied()
+                    .unwrap_or_default();
+            } 
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn generate_terrain_cells(&mut self, core: &mut LoomzEngineCore) {
+        let data = &mut self.data;
+
+        let sprites = &mut data.terrain_sprites;
+        let mut sprites_offset = 0;
+
+        let view = data.world_view;
+        // for chunk in data.terrain_chunks.iter() {
+        //     if !view.intersects(&chunk.view) {
+        //         continue;
+        //     }
+
+        //     for row in chunk.cells.iter() {
+        //         for &cell in row.iter() {
+        //             sprites.write_data(sprites_offset, cell);
+        //             sprites_offset += 1;
+        //         }
+        //     }
+        // }
     }
 
 }
@@ -206,6 +275,8 @@ impl Default for WorldData {
             actors_data: Vec::with_capacity(16),
             actors_sprites: StorageAlloc::default(),
 
+            terrain_tilemap: Vec::with_capacity(4),
+            terrain_size: SizeU32::default(),
             terrain_chunks: Vec::with_capacity(16),
             terrain_sprites: StorageAlloc::default(),
         }

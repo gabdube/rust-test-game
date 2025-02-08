@@ -6,6 +6,7 @@ TEXTURE;terrain;test_terrain.ktx2;
 
 JSON;pawn_sprites;Pawn_Blue.json;
 JSON;warrior_sprites;Warrior_Blue.json;
+JSON;terrain_sprites;terrain.json;
 
 MSDF_FONT;bubblegum;BubblegumSans.png;BubblegumSans.bin;
 

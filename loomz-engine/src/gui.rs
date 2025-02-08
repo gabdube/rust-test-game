@@ -386,9 +386,7 @@ impl PartialEq for GuiViewSprite {
     }
 }
 
-impl Eq for GuiViewSprite {
-
-}
+impl Eq for GuiViewSprite { }
 
 impl PartialOrd for GuiViewSprite {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {

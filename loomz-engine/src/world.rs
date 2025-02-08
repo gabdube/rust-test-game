@@ -186,7 +186,7 @@ impl WorldModule {
         world.setup_pipelines(core, api)?;
         world.setup_descriptors(core)?;
         world.setup_buffers(core)?;
-        world.setup_terrain_sampler(core)?;
+        world.setup_terrain_tilemap(core)?;
         world.setup_render_data();
 
         Ok(world)
@@ -376,15 +376,19 @@ impl WorldModule {
             for (_, update) in messages {
                 match update {
                     WorldUpdate::ShowWorld(visible) => { self.flags.set(WorldFlags::SHOW_WORLD, visible); },
-                    WorldUpdate::WorldView(view) => { self.set_view_offset(view); }
+                    WorldUpdate::WorldView(view) => { self.set_view_offset(view); },
+                    WorldUpdate::WorldSize(size) => { 
+                        self.set_world_size(size);
+                        self.flags |= WorldFlags::UPDATE_TERRAIN;
+                    },
+                    WorldUpdate::WorldTerrain(chunk) => {
+                        self.copy_terrain_batch(&chunk[0])?;
+                        self.flags |= WorldFlags::UPDATE_TERRAIN;
+                    },
                     WorldUpdate::DebugFlags(flags) => {
                         self.debug = flags;
                         self.toggle_debug(core);
                     },
-                    WorldUpdate::WorldTerrain(chunk) => {
-                        self.update_terrain_from_batch(core, &chunk[0]);
-                        self.flags |= WorldFlags::UPDATE_TERRAIN;
-                    }
                 }
             }
         }
@@ -426,7 +430,7 @@ impl WorldModule {
         }
 
         if self.flags.contains(WorldFlags::UPDATE_TERRAIN) {
-            self.copy_terrain_cells(core);
+            self.generate_terrain_cells(core);
             self.flags.remove(WorldFlags::UPDATE_TERRAIN);
         }
 

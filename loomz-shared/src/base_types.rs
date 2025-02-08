@@ -1,7 +1,7 @@
 use std::ops::{Mul, AddAssign};
 
 /// Technically an AABB
-#[derive(Copy, Clone, Default, Debug)]
+#[derive(Copy, Clone, PartialEq, Default, Debug)]
 pub struct RectF32 {
     pub left: f32,
     pub top: f32,
@@ -120,6 +120,12 @@ impl From<u32> for RgbaU8 {
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Default, Debug, PartialEq)]
+pub struct PositionU32 {
+    pub x: u32,
+    pub y: u32,
+}
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
