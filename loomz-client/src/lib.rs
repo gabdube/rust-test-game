@@ -1,10 +1,10 @@
 mod store;
 mod gui;
-
 mod animations;
-use animations::{Animations, PawnAnimationType};
-
+mod terrain;
 mod state;
+
+use animations::{Animations, PawnAnimationType};
 
 use std::time::Instant;
 use loomz_shared::base_types::PositionF32;
@@ -46,6 +46,8 @@ pub struct LoomzClient {
     target_position: PositionF32,
 
     menu: gui::Gui,
+
+    terrain: terrain::Terrain,
     
     state: GameState,
     debug_state: DebugState
@@ -68,6 +70,8 @@ impl LoomzClient {
             target_position: PositionF32::default(),
 
             menu: gui::Gui::default(),
+
+            terrain: terrain::Terrain::init(),
 
             state: GameState::Uninitialized,
             debug_state: DebugState::default(),

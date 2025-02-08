@@ -3,7 +3,7 @@ use sync_data::LoomzMultithreadedShared;
 
 use std::thread::{JoinHandle, sleep};
 use std::time::Duration;
-use loomz_shared::{system_err, CommonError, LoomzApi};
+use loomz_shared::{CommonError, LoomzApi, SizeF32, system_err};
 use loomz_engine::LoomzEngine;
 use winit::window::Window;
 use crate::LoomzClient;
@@ -15,6 +15,7 @@ pub struct LoomzApplicationSetup {
     client: LoomzClient,
     engine: LoomzEngine,
     last_error: Option<CommonError>,
+    initial_window_size: SizeF32,
 }
 
 pub struct LoomzApplicationRuntime {
@@ -37,7 +38,8 @@ pub enum LoomzApplication {
 impl LoomzApplication {
 
     pub fn init() -> Result<Self, CommonError> {
-        let api = LoomzApi::init()?;
+        let initial_window_size = SizeF32 { width: 1200.0, height: 900.0 };
+        let api = LoomzApi::init(initial_window_size)?;
         let client = LoomzClient::init(&api)?;
         let engine = LoomzEngine::init(&api)?;
 
@@ -47,6 +49,7 @@ impl LoomzApplication {
             client,
             engine,
             last_error: None,
+            initial_window_size
         };
 
         Ok(LoomzApplication::Setup(Some(Box::new(setup))))
@@ -84,6 +87,18 @@ impl LoomzApplication {
         });
 
         Ok(())
+    }
+
+    pub fn initial_window_size(&self) -> SizeF32 {
+        match self {
+            LoomzApplication::Setup(Some(setup)) => {
+                setup.initial_window_size
+            },
+            LoomzApplication::Runtime(run) => {
+                SizeF32::default()
+            },
+            _ => unreachable!(),
+        }
     }
 
     pub fn set_window(&mut self, window: Window) -> Result<(), CommonError> {
@@ -130,8 +145,6 @@ impl LoomzApplication {
     }
 
     pub fn redraw(&mut self) -> Result<(), CommonError> {
-        self.window().request_redraw();
-
         match self {
             Self::Runtime(run) => {
                 run.shared.last_error()
@@ -202,6 +215,8 @@ fn client_loop(client: LoomzClient, shared: LoomzMultithreadedShared) {
             break;
         }
 
+        // Without sleeping, the client thread will flood the engine thread
+        // There is a better way to do this (todo)
         sleep(Duration::from_millis(4));
     }
 }

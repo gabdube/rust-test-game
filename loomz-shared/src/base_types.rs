@@ -1,5 +1,6 @@
 use std::ops::{Mul, AddAssign};
 
+/// Technically an AABB
 #[derive(Copy, Clone, Default, Debug)]
 pub struct RectF32 {
     pub left: f32,
@@ -67,6 +68,19 @@ impl RectF32 {
     pub const fn is_point_inside(&self, point: PositionF32) -> bool {
         let [x, y] = point.splat();
         x >= self.left && y >= self.top && x < self.right && y < self.bottom
+    }
+
+    #[inline]
+    pub fn intersects(&self, other: &Self) -> bool {
+        if self.right < other.left || other.right < self.left {
+            return false
+        }
+
+        if self.bottom < other.top || other.bottom < self.top {
+            return false
+        }
+
+        true
     }
 
 }
@@ -163,6 +177,13 @@ impl Mul<f64> for PositionF64 {
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, PartialEq, Debug)]
+pub struct SizeU32 {
+    pub width: u32,
+    pub height: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub struct SizeF32 {
     pub width: f32,
     pub height: f32,
@@ -173,6 +194,10 @@ impl SizeF32 {
     pub const fn splat(&self) -> [f32; 2] {
         [self.width, self.height]
     }
+}
+
+pub const fn pos(x: f32, y: f32) -> PositionF32 {
+    PositionF32 { x, y }
 }
 
 pub const fn rect(left: f32, top: f32, right: f32, bottom: f32) -> RectF32 {

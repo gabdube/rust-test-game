@@ -7,8 +7,10 @@ layout (location = 0) in vec2 inPos;
 layout (location = 0) out vec2 outPos;
 
 layout (push_constant) uniform ScreenInfo {
-    layout(offset=0) float screen_width;
-    layout(offset=4) float screen_height;
+    layout(offset=0)  float screen_width;
+    layout(offset=4)  float screen_height;
+    layout(offset=8)  float view_x;
+    layout(offset=12) float view_y;
 };
 
 void main() {

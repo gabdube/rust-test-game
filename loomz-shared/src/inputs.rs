@@ -80,14 +80,14 @@ struct InnerInputBuffer {
 
 impl InnerInputBuffer {
 
-    fn new() -> Self {
+    fn new(screen_size: SizeF32) -> Self {
         InnerInputBuffer {
             update_flags: InputUpdateFlags::empty(),
             cursor_position_old: PositionF64 { x: 0.0, y: 0.0 },
             cursor_position: PositionF64 { x: 0.0, y: 0.0 },
             mouse_buttons_old: MouseButtonState::empty(),
             mouse_buttons: MouseButtonState::empty(),
-            screen_size: SizeF32 { width: 0.0, height: 0.0 },
+            screen_size,
             keys: keys::KeysCollection::default()
         }
     }
@@ -153,9 +153,9 @@ pub struct InputBuffer {
 
 impl InputBuffer {
 
-    pub fn new() -> Self {
+    pub fn new(screen_size: SizeF32) -> Self {
         InputBuffer {
-            inner: Arc::new(Mutex::new(InnerInputBuffer::new()))
+            inner: Arc::new(Mutex::new(InnerInputBuffer::new(screen_size)))
         }
     }
 

@@ -1,7 +1,6 @@
 mod setup;
 mod data;
 mod batch;
-mod terrain;
 mod debug;
 
 use fnv::FnvHashMap;
@@ -9,7 +8,7 @@ use bitflags::bitflags;
 use std::{slice, sync::Arc, u32, usize};
 use loomz_shared::api::{LoomzApi, WorldUpdate, WorldDebugFlags};
 use loomz_shared::assets::{LoomzAssetsBundle, TextureId, ShaderId, AssetId};
-use loomz_shared::{CommonError, CommonErrorType, SizeF32, RgbaU8, size, assets_err, chain_err};
+use loomz_shared::{assets_err, chain_err, size, CommonError, CommonErrorType, RectF32, RgbaU8, SizeF32};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
 use super::pipeline_compiler::PipelineCompiler;
 
@@ -32,7 +31,8 @@ bitflags! {
     #[derive(Copy, Clone, Default)]
     pub struct WorldFlags: u8 {
         const SHOW_WORLD     = 0b0001;
-        const UPDATE_BATCHES = 0b0010;
+        const UPDATE_ACTORS  = 0b0010;
+        const UPDATE_TERRAIN = 0b0100;
     }
 }
 
@@ -41,6 +41,8 @@ bitflags! {
 pub struct WorldPushConstant {
     pub screen_width: f32,
     pub screen_height: f32,
+    pub view_offset_x: f32,
+    pub view_offset_y: f32,
 }
 
 #[repr(C)]
@@ -54,15 +56,6 @@ pub struct WorldVertex {
 pub struct WorldDebugVertex {
     pub pos: [f32; 2],
     pub color: RgbaU8,
-}
-
-#[repr(C)]
-#[derive(Default, Copy, Clone)]
-pub struct SpriteData {
-    pub offset: [f32; 2],
-    pub size: [f32; 2],
-    pub uv_offset: [f32; 2],
-    pub uv_size: [f32; 2],
 }
 
 #[repr(C)]
@@ -196,8 +189,6 @@ impl WorldModule {
         world.setup_terrain_sampler(core)?;
         world.setup_render_data();
 
-        world.setup_test_world(core)?;
-
         Ok(world)
     }
 
@@ -233,10 +224,8 @@ impl WorldModule {
 
         self.resources.grid_params.screen_size = size(width, height);
 
-        self.render.push_constants[0] = WorldPushConstant {
-            screen_width: width,
-            screen_height: height,
-        };
+        self.render.push_constants[0].screen_width = width;
+        self.render.push_constants[0].screen_height = height;
 
         if !self.debug.is_empty() {
             self.build_debug_data(core);
@@ -362,6 +351,14 @@ impl WorldModule {
         Ok(texture.view)
     }
 
+    fn set_view_offset(&mut self, view: RectF32) {
+        let push = &mut self.render.push_constants[0];
+        push.view_offset_x = view.left;
+        push.view_offset_y = view.top;
+
+        self.data.world_view = view;
+    }
+
     fn api_update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         if let Some(animations) = api.world().read_animations() {
             for (id, animation) in animations {
@@ -378,26 +375,27 @@ impl WorldModule {
         if let Some(messages) = api.world().read_general() {
             for (_, update) in messages {
                 match update {
-                    WorldUpdate::DebugFlags(flags) => { self.debug = flags; },
-                    WorldUpdate::ShowWorld(visible) => { self.flags.set(WorldFlags::SHOW_WORLD, visible); }
+                    WorldUpdate::ShowWorld(visible) => { self.flags.set(WorldFlags::SHOW_WORLD, visible); },
+                    WorldUpdate::WorldView(view) => { self.set_view_offset(view); }
+                    WorldUpdate::DebugFlags(flags) => {
+                        self.debug = flags;
+                        self.toggle_debug(core);
+                    },
+                    WorldUpdate::WorldTerrain(chunk) => {
+                        self.update_terrain_from_batch(core, &chunk[0]);
+                        self.flags |= WorldFlags::UPDATE_TERRAIN;
+                    }
                 }
             }
-
-            self.toggle_debug(core);
         }
 
         Ok(())
     }
 
-    fn animation_update(&mut self) {
-        const ANIMATION_INTERVAL: f32 = 1.0 / 16.0; // 16fps
-        if self.data.last_animation_tick.elapsed().as_secs_f32() < ANIMATION_INTERVAL {
-            return;
-        }
-
+    fn animation_update(&mut self) { 
         self.data.last_animation_tick = ::std::time::Instant::now();
 
-        for actor in self.data.actors_data.iter_mut() {
+        for (index, actor) in self.data.actors_data.iter_mut().enumerate() {
             let animation = match &mut actor.animation {
                 Some(animation) => animation,
                 None => { continue; }
@@ -408,16 +406,28 @@ impl WorldModule {
             if actor.current_frame > animation.last_frame {
                 actor.current_frame = 0;
             }
+
+            self.data.actors_sprites.write_data(index, actor.sprite_data());
         }
     }
     
     pub fn update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        self.api_update(api, core)?;
-        self.animation_update();
+        const ANIMATION_INTERVAL: f32 = 1.0 / 16.0; // 16fps
 
-        if self.flags.contains(WorldFlags::UPDATE_BATCHES) {
-            batch::WorldBatcher::build(self)?;
-            self.flags.remove(WorldFlags::UPDATE_BATCHES);
+        self.api_update(api, core)?;
+
+        if self.data.last_animation_tick.elapsed().as_secs_f32() > ANIMATION_INTERVAL {
+            self.animation_update();
+        }
+
+        if self.flags.contains(WorldFlags::UPDATE_ACTORS) {
+            batch::WorldBatcher::batch_all(self)?;
+            self.flags.remove(WorldFlags::UPDATE_ACTORS);
+        }
+
+        if self.flags.contains(WorldFlags::UPDATE_TERRAIN) {
+            self.copy_terrain_cells(core);
+            self.flags.remove(WorldFlags::UPDATE_TERRAIN);
         }
 
         Ok(())

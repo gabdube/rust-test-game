@@ -105,8 +105,9 @@ mod tests {
     fn test_layout() {
         set_dir();
  
-        let api = LoomzApi::init().unwrap();
-        let view = RectF32 { left: 0.0, top: 0.0, right: 1000.0, bottom: 1000.0 };
+        let view_size = SizeF32 { width: 1000.0, height: 1000.0 };
+        let api = LoomzApi::init(view_size).unwrap();
+        let view = RectF32 { left: 0.0, top: 0.0, right: view_size.width, bottom: view_size.height };
         let mut gui = Gui::default();
 
         let style_result = gui.build_style(&api, |style| {

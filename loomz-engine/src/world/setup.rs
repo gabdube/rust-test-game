@@ -326,7 +326,7 @@ impl super::WorldModule {
 
         Ok(())
     }
-    
+
     fn setup_sprites_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         use super::ACTOR_GLOBAL_LAYOUT_ID;
 

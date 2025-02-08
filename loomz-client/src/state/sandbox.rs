@@ -9,6 +9,7 @@ impl LoomzClient {
 
     pub(crate) fn init_sandbox(&mut self) -> Result<(), CommonError> {
         self.init_sandbox_gui()?;
+        self.init_sandbox_terrain()?;
         self.api.world().toggle_world(true);
         self.state = GameState::Sandbox;
         Ok(())
@@ -114,6 +115,15 @@ impl LoomzClient {
             });
         })?;
 
+        Ok(())
+    }
+
+    fn init_sandbox_terrain(&mut self) -> Result<(), CommonError> {
+        let screen_size = self.api.inputs().screen_size_value();
+        self.terrain.set_view(0.0, 0.0, screen_size.width, screen_size.height);
+        self.terrain.set_world_size(64, 32);
+        // self.terrain.set_cells(0, 0, 4, 4, &[loomz_shared::api::TerrainType::Sand; 16]);
+        self.terrain.sync(&self.api);
         Ok(())
     }
 

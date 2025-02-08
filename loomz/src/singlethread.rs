@@ -1,13 +1,11 @@
-use loomz_shared::{CommonError, LoomzApi};
+use loomz_shared::{CommonError, LoomzApi, SizeF32};
 use loomz_engine::LoomzEngine;
 use winit::window::Window;
 use crate::LoomzClient;
 
 /**
-    The single threaded container works by synchronously
-
-       * calling `update` on the client and the engine
-       * calling `render` on the engine
+    The single threaded container works by calling synchronously the updates function 
+    on the engine and the client, then calling engine render on redraw.
     
     Window resized are using a callback from the windowing module
 */
@@ -17,12 +15,14 @@ pub struct LoomzApplication {
     client: LoomzClient,
     engine: LoomzEngine,
     last_error: Option<CommonError>,
+    initial_window_size: SizeF32
 }
 
 impl LoomzApplication {
 
     pub fn init() -> Result<Self, CommonError> {
-        let api = LoomzApi::init()?;
+        let initial_window_size = SizeF32 { width: 1200.0, height: 900.0 };
+        let api = LoomzApi::init(initial_window_size)?;
         let client = LoomzClient::init(&api)?;
         let engine = LoomzEngine::init(&api)?;
 
@@ -32,6 +32,7 @@ impl LoomzApplication {
             client,
             engine,
             last_error: None,
+            initial_window_size
         };
 
         Ok(app)
@@ -43,6 +44,10 @@ impl LoomzApplication {
 
     pub fn exit(self) {
         self.engine.destroy();
+    }
+
+    pub fn initial_window_size(&self) -> SizeF32 {
+        self.initial_window_size
     }
 
     pub fn set_window(&mut self, window: Window) -> Result<(), CommonError> {

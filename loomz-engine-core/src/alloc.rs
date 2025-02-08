@@ -282,8 +282,14 @@ impl<V: Copy> Default for VertexAlloc<V> {
     }
 }
 
-/// A buffer holding data used for gpu storage buffer
-/// Backed by host visible memory
+
+/** 
+    A buffer holding data used for gpu storage buffer. Backed by host visible memory.
+
+    TODO (improvement): Storing the buffer and the buffer offset in the struct doesn't make much
+    sense because we only need the mapped_data and capacity for 99% of operations (aka write_data).
+    Buffer and offset could be moved into the engine core to save 16 bytes of memory.
+*/
 pub struct StorageAlloc<V: Copy> {
     buffer: vk::Buffer,
     offset: vk::DeviceSize,

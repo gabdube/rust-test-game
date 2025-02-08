@@ -12,8 +12,10 @@ struct SpriteData {
 };
 
 layout (push_constant) uniform ScreenInfo {
-    layout(offset=0) float screen_width;
-    layout(offset=4) float screen_height;
+    layout(offset=0)  float screen_width;
+    layout(offset=4)  float screen_height;
+    layout(offset=8)  float view_x;
+    layout(offset=12) float view_y;
 };
 
 layout (std430, set=0, binding=0) readonly buffer SpriteDataBuffer {
@@ -22,6 +24,7 @@ layout (std430, set=0, binding=0) readonly buffer SpriteDataBuffer {
 
 void main() {
     SpriteData data = sprites[gl_InstanceIndex];
+    data.position.xy += vec2(view_x, view_x);
 
     vec4 texcoord = data.texture_coordinates;
     outUv = vec2(

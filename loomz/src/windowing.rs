@@ -9,7 +9,8 @@ use super::LoomzApplication;
 
 impl<'a> ApplicationHandler for LoomzApplication {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let window = match create_window(event_loop) {
+        let size = self.initial_window_size();
+        let window = match create_window(event_loop, size) {
             Ok(window) => window,
             Err(e) => {
                 self.set_last_error(e);
@@ -76,10 +77,10 @@ impl<'a> ApplicationHandler for LoomzApplication {
 
 }
 
-fn create_window(event_loop: &ActiveEventLoop) -> Result<Window, CommonError> {
+fn create_window(event_loop: &ActiveEventLoop, window_size: loomz_shared::SizeF32) -> Result<Window, CommonError> {
     let window_attr = Window::default_attributes()
         .with_title("Loomz App")
-        .with_inner_size(winit::dpi::PhysicalSize::new(1200, 900))
+        .with_inner_size(winit::dpi::PhysicalSize::new(window_size.width, window_size.height))
         .with_visible(false);
 
     event_loop.create_window(window_attr)

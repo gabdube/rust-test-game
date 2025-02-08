@@ -14,7 +14,7 @@ pub(super) struct WorldBatcher<'a> {
 
 impl<'a> WorldBatcher<'a> {
 
-    pub(super) fn build(world: &'a mut WorldModule) -> Result<(), CommonError> {
+    pub(super) fn batch_all(world: &'a mut WorldModule) -> Result<(), CommonError> {
         let mut batcher = WorldBatcher {
             current_view: vk::ImageView::null(),
             batches: &mut world.render.actors.batches,

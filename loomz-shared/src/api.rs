@@ -11,7 +11,7 @@ pub use gui::*;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crate::assets::LoomzAssetsBundle;
 use crate::inputs::InputBuffer;
-use crate::CommonError;
+use crate::{CommonError, SizeF32};
 
 struct InnerInputs {
     buffer: InputBuffer,
@@ -33,13 +33,13 @@ pub struct LoomzApi {
 
 impl LoomzApi {
 
-    pub fn init() -> Result<Self, CommonError> {
+    pub fn init(screen_size: SizeF32) -> Result<Self, CommonError> {
         let assets = LoomzAssetsBundle::load()?;
         let world = WorldApi::init();
         let gui = GuiApi::init();
 
         let inputs = InnerInputs {
-            buffer: InputBuffer::new(),
+            buffer: InputBuffer::new(screen_size),
             new_inputs: AtomicBool::new(false),
             exit: AtomicBool::new(false),
         };
