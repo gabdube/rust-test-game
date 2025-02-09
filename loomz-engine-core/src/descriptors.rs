@@ -1,37 +1,10 @@
-use std::sync::Arc;
-use parking_lot::Mutex;
 use loomz_shared::{backend_err, CommonError};
-use crate::alloc::StorageAlloc;
-use crate::{LoomzEngineCore, VulkanDescriptorSubmit};
+use crate::LoomzEngineCore;
 
 pub struct DescriptorsAllocation<'a> {
     pub layout: vk::DescriptorSetLayout,
     pub binding_types: &'a [vk::DescriptorType],
     pub count: u32,
-}
-
-#[derive(Copy, Clone)]
-pub enum DescriptorWriteBinding {
-    Image { image_view: vk::ImageView, sampler: vk::Sampler, image_layout: vk::ImageLayout },
-    Buffer { buffer: vk::Buffer, offset: vk::DeviceSize, range: vk::DeviceSize },
-}
-
-impl DescriptorWriteBinding {
-    pub fn from_storage_buffer<T: Copy>(buffer: &StorageAlloc<T>) -> Self {
-        DescriptorWriteBinding::Buffer { 
-            buffer: buffer.handle(),
-            offset: buffer.offset(),
-            range: buffer.bytes_range(),
-        }
-    }
-
-    pub fn from_image_and_sampler(image_view: vk::ImageView, sampler: vk::Sampler, image_layout: vk::ImageLayout) -> Self {
-        DescriptorWriteBinding::Image {
-            image_view,
-            sampler,
-            image_layout,
-        }
-    }
 }
 
 /// A collection of preallocated descriptor set in a [DescriptorsAllocator]
@@ -47,7 +20,6 @@ pub struct DescriptorSetsCollection {
 pub struct DescriptorsAllocator<const C: usize> {
     pool: vk::DescriptorPool,
     collections: Option<[DescriptorSetsCollection; C]>,
-    updates: Option<Arc<Mutex<VulkanDescriptorSubmit>>>,
 }
 
 impl<const C: usize> DescriptorsAllocator<C> where
@@ -72,7 +44,6 @@ impl<const C: usize> DescriptorsAllocator<C> where
         let alloc = DescriptorsAllocator {
             pool,
             collections: Some(collections),
-            updates: Some(Arc::clone(&core.descriptors))
         };
 
         Ok(alloc)
@@ -92,52 +63,23 @@ impl<const C: usize> DescriptorsAllocator<C> where
         collections[C2 as usize].next = 0;
     }
 
-    /// Writes and returns a new descriptor set from the layout at index `C2`
+    /// Return the next set in the descriptor set allocation for layout `C2`, or return None if they were all already allocated
     /// Layout must be within `C` collections bounds.
-    /// Bindings type must match the layout bindings.
-    /// Returns a backend error if not more sets can be allocated
-    pub fn write_set<const C2: u32>(&mut self, binding_writes: &[DescriptorWriteBinding]) -> Result<vk::DescriptorSet, CommonError> {
+    pub fn get_set<const C2: u32>(&mut self) -> Option<vk::DescriptorSet> {
         assert!((C2 as usize) < C, "Descriptor alloc was created with {} layouts but access to index {} was requested", C, C2);
         assert!(self.collections.is_some(), "Descriptor alloc was not initialized");
-
-        let updates = self.updates.as_ref().unwrap();
-        let mut updates_guard = updates.lock();
 
         let collections = self.collections.as_mut().unwrap();
         let collection = &mut collections[C2 as usize];
         if collection.next == collection.sets.len() {
-            return Err(backend_err!("No more descriptor sets in layout {C2}"));
+            return None
         }
 
         let set = collection.sets[collection.next];
-        for (binding_id, binding_write) in binding_writes.iter().enumerate() {
-            match *binding_write {
-                DescriptorWriteBinding::Buffer { buffer, offset, range } => {
-                    updates_guard.write_buffer(
-                        set,
-                        buffer,
-                        offset,
-                        range,
-                        binding_id as u32,
-                        collection.binding_types[binding_id],
-                    );
-                },
-                DescriptorWriteBinding::Image { image_view, sampler, image_layout } => {
-                    updates_guard.write_image(
-                        set,
-                        image_view,
-                        sampler,
-                        image_layout,
-                        binding_id as u32,
-                        collection.binding_types[binding_id],
-                    );
-                }
-            }
-        }
 
         collection.next += 1;
 
-        Ok(set)
+        Some(set)
     }
 
     //
@@ -242,7 +184,6 @@ impl<const C: usize> Default for DescriptorsAllocator<C> {
         DescriptorsAllocator {
             pool: vk::DescriptorPool::null(),
             collections: None,
-            updates: None,
         }
     }
 }

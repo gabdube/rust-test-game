@@ -12,6 +12,7 @@ use super::pipeline_compiler::PipelineCompiler;
 
 const LAYOUT_COUNT: usize = 1;
 const BATCH_LAYOUT_INDEX: u32 = 0;
+const BATCH_TEXTURE_BINDING: u32 = 0;
 
 const PUSH_STAGE_FLAGS: vk::ShaderStageFlags = vk::ShaderStageFlags::VERTEX;
 const PUSH_SIZE: u32 = size_of::<GuiPushConstant>() as u32;
@@ -31,36 +32,29 @@ pub struct GuiVertex {
     pub color: [u8; 4],
 }
 
+struct GuiTexture {
+    texture: Texture,
+    descriptor_set: vk::DescriptorSet,
+}
+
+/// Static resources used by the gui module
 struct GuiResources {
     assets: Arc<LoomzAssetsBundle>,
-    textures: FnvHashMap<AssetId, Texture>,
     text_pipeline: GraphicsPipeline,
     image_pipeline: GraphicsPipeline,
     batch_layout: vk::DescriptorSetLayout,
     pipeline_layout: vk::PipelineLayout,
     text_pipeline_id: ShaderId,
     image_pipeline_id: ShaderId,
-}
 
-#[derive(Default)]
-struct GuiDescriptor {
     default_sampler: vk::Sampler,
-    allocator: DescriptorsAllocator<LAYOUT_COUNT>
-}
-
-/// Data used on rendering
-#[derive(Copy, Clone)]
-struct GuiRender {
-    pipeline_layout: vk::PipelineLayout,
-    vertex_buffer: vk::Buffer,
-    index_offset: vk::DeviceSize,
-    vertex_offset: [vk::DeviceSize; 1],
-    push_constants: [GuiPushConstant; 1],
+    textures: FnvHashMap<AssetId, GuiTexture>,
+    descriptors_allocator: DescriptorsAllocator<LAYOUT_COUNT>,
 }
 
 #[derive(Copy, Clone)]
 struct GuiViewSprite {
-    image_view: vk::ImageView,
+    descriptor_set: vk::DescriptorSet,
     sprite: GuiSprite
 }
 
@@ -70,11 +64,12 @@ struct GuiView {
     visible: bool,
 }
 
+/// Generic gui data not yet formatted for rendering 
 struct GuiData {
-    vertex_alloc: VertexAlloc<GuiVertex>,
     gui: Vec<GuiView>,
     indices: Vec<u32>,
     vertex: Vec<GuiVertex>,
+    vertex_alloc: VertexAlloc<GuiVertex>,
 }
 
 #[derive(Copy, Clone, Default)]
@@ -85,12 +80,20 @@ pub struct GuiBatch {
     first_index: u32,
 }
 
+/// Data used on rendering
+struct GuiRender {
+    pipeline_layout: vk::PipelineLayout,
+    vertex_buffer: vk::Buffer,
+    index_offset: vk::DeviceSize,
+    vertex_offset: [vk::DeviceSize; 1],
+    push_constants: [GuiPushConstant; 1],
+    batches: Vec<GuiBatch>,
+}
+
 pub(crate) struct GuiModule {
     resources: Box<GuiResources>,
-    descriptors: Box<GuiDescriptor>,
     data: Box<GuiData>,
     render: Box<GuiRender>,
-    batches: Vec<GuiBatch>,
     update_batches: bool,
 }
 
@@ -99,13 +102,24 @@ impl GuiModule {
     pub fn init(core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<Self, CommonError> {
         let resources = GuiResources {
             assets: api.assets(),
-            batch_layout: vk::DescriptorSetLayout::null(),
-            pipeline_layout: vk::PipelineLayout::null(),
             text_pipeline: GraphicsPipeline::new(),
             image_pipeline: GraphicsPipeline::new(),
-            textures: FnvHashMap::default(),
+
+            batch_layout: vk::DescriptorSetLayout::null(),
+            pipeline_layout: vk::PipelineLayout::null(),
             image_pipeline_id: ShaderId(0),
             text_pipeline_id: ShaderId(0),
+           
+            textures: FnvHashMap::default(),
+            descriptors_allocator: DescriptorsAllocator::default(),
+            default_sampler: vk::Sampler::null(),
+        };
+
+        let data = GuiData {
+            gui: Vec::with_capacity(4),
+            vertex: Vec::new(),
+            indices: Vec::new(),
+            vertex_alloc: VertexAlloc::default(),
         };
         
         let render = GuiRender {
@@ -114,21 +128,13 @@ impl GuiModule {
             index_offset: 0,
             vertex_offset: [0],
             push_constants: [GuiPushConstant::default(); 1],
+            batches: Vec::with_capacity(16),
         };
 
-        let data = GuiData {
-            vertex_alloc: VertexAlloc::default(),
-            gui: Vec::with_capacity(4),
-            vertex: vec![GuiVertex::default(); 500],
-            indices: vec![0; 1000],
-        };
-        
         let mut gui = GuiModule {
             resources: Box::new(resources),
-            descriptors: Box::default(),
-            render: Box::new(render),
             data: Box::new(data),
-            batches: Vec::with_capacity(16),
+            render: Box::new(render),
             update_batches: false,
         };
 
@@ -141,16 +147,17 @@ impl GuiModule {
     }
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
-        self.descriptors.allocator.destroy(core);
+        self.data.vertex_alloc.free(core);
+
+        self.resources.descriptors_allocator.destroy(core);
         self.resources.text_pipeline.destroy(&core.ctx);
         self.resources.image_pipeline.destroy(&core.ctx);
-        self.data.vertex_alloc.free(core);
 
         core.ctx.device.destroy_pipeline_layout(self.resources.pipeline_layout);
         core.ctx.device.destroy_descriptor_set_layout(self.resources.batch_layout);
 
-        for texture in self.resources.textures.values() {
-            core.destroy_texture(*texture);
+        for gui_texture in self.resources.textures.values() {
+            core.destroy_texture(gui_texture.texture);
         }
     }
 
@@ -196,7 +203,7 @@ impl GuiModule {
         const GRAPHICS: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
 
         let device = &ctx.device;
-        let render = *self.render;
+        let render = &self.render;
 
         device.cmd_bind_index_buffer(cmd, render.vertex_buffer, render.index_offset, vk::IndexType::UINT32);
         device.cmd_bind_vertex_buffers(cmd, 0, slice::from_ref(&render.vertex_buffer), &render.vertex_offset);
@@ -204,7 +211,7 @@ impl GuiModule {
 
         let mut last_pipeline = vk::Pipeline::null();
 
-        for batch in self.batches.iter() {
+        for batch in render.batches.iter() {
             // improvement: Try to use one pipeline for all of the GUI rendering
             if last_pipeline != batch.pipeline {
                 device.cmd_bind_pipeline(cmd, GRAPHICS, batch.pipeline);
@@ -233,10 +240,7 @@ impl GuiModule {
 
     fn update_gui_sprites<'a>(&mut self, core: &mut LoomzEngineCore, index: usize, sprites: &'a [GuiSprite]) -> Result<(), CommonError> {
         let gui = match self.data.gui.get_mut(index) {
-            Some(gui) => {
-                
-                gui
-            },
+            Some(gui) => gui,
             None => {
                 return Err(backend_err!("Tried to fetch gui at index {}, but it does not exits", index));
             } 
@@ -249,13 +253,13 @@ impl GuiModule {
         }
 
         for &sprite in sprites.iter() {
-            let image_view = match sprite.ty {
-                loomz_shared::GuiSpriteType::Image(texture_id) => Self::fetch_texture_id(core, &mut self.resources, texture_id)?,
-                loomz_shared::GuiSpriteType::Font(font_id) => Self::fetch_font_texture_view(core, &mut self.resources, font_id)?
+            let descriptor_set = match sprite.ty {
+                loomz_shared::GuiSpriteType::Image(texture_id) => Self::fetch_texture_descriptor_set(core, &mut self.resources, texture_id)?,
+                loomz_shared::GuiSpriteType::Font(font_id) => Self::fetch_font_texture_descriptor_set(core, &mut self.resources, font_id)?
             };
 
             gui.sprites.push(GuiViewSprite {
-                image_view,
+                descriptor_set,
                 sprite
             }); 
         }
@@ -332,27 +336,42 @@ impl GuiModule {
         Ok(())
     }
 
-    fn fetch_font_texture_view(core: &mut LoomzEngineCore, resources: &mut GuiResources, font_id: MsdfFontId) -> Result<vk::ImageView, CommonError> {
+    fn fetch_font_texture_descriptor_set(core: &mut LoomzEngineCore, resources: &mut GuiResources, font_id: MsdfFontId) -> Result<vk::DescriptorSet, CommonError> {
         let asset_id = AssetId::MsdfFont(font_id);
         if let Some(texture) = resources.textures.get(&asset_id) {
-            return Ok(texture.view);
+            return Ok(texture.descriptor_set);
         }
 
         let texture_asset = resources.assets.font(font_id)
             .ok_or_else(|| assets_err!("Unkown asset with ID {font_id:?}") )?;
 
         let texture = core.create_texture_from_font_asset(&texture_asset)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from font asset") )?;
 
-        resources.textures.insert(asset_id, texture);
+        let descriptor_set = resources.descriptors_allocator.get_set::<BATCH_LAYOUT_INDEX>()
+            .ok_or_else(|| backend_err!("No more descriptor set in gui batch layout pool") )?;
 
-        Ok(texture.view)
+        core.descriptors.write_image(
+            descriptor_set,
+            texture.view,
+            resources.default_sampler,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            BATCH_TEXTURE_BINDING,
+            vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        );
+
+        resources.textures.insert(asset_id, GuiTexture {
+            texture,
+            descriptor_set
+        });
+
+        Ok(descriptor_set)
     }
 
-    fn fetch_texture_id(core: &mut LoomzEngineCore, resources: &mut GuiResources, texture_id: TextureId) -> Result<vk::ImageView, CommonError> {
+    fn fetch_texture_descriptor_set(core: &mut LoomzEngineCore, resources: &mut GuiResources, texture_id: TextureId) -> Result<vk::DescriptorSet, CommonError> {
         let asset_id = AssetId::Texture(texture_id);
         if let Some(texture) = resources.textures.get(&asset_id) {
-            return Ok(texture.view);
+            return Ok(texture.descriptor_set);
         }
         
         let texture_asset = resources.assets.texture(texture_id)
@@ -361,28 +380,31 @@ impl GuiModule {
         let texture = core.create_texture_from_asset(&texture_asset)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
 
-        resources.textures.insert(asset_id, texture);
+        let descriptor_set = resources.descriptors_allocator.get_set::<BATCH_LAYOUT_INDEX>()
+            .ok_or_else(|| backend_err!("No more descriptor set in gui batch layout pool") )?;
 
-        Ok(texture.view)
+        core.descriptors.write_image(
+            descriptor_set,
+            texture.view,
+            resources.default_sampler,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            BATCH_TEXTURE_BINDING,
+            vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        );
+
+        resources.textures.insert(asset_id, GuiTexture {
+            texture,
+            descriptor_set
+        });
+
+        Ok(descriptor_set)
     }
 
-}
-
-impl GuiDescriptor {
-    pub fn write_batch_texture(&mut self, image_view: vk::ImageView) -> Result<vk::DescriptorSet, CommonError> {
-        self.allocator.write_set::<BATCH_LAYOUT_INDEX>(&[
-            DescriptorWriteBinding::from_image_and_sampler(image_view, self.default_sampler, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-        ])
-    }
-
-    pub fn reset_batch_layout(&mut self) {
-        self.allocator.reset_layout::<BATCH_LAYOUT_INDEX>();
-    }
 }
 
 impl PartialEq for GuiViewSprite {
     fn eq(&self, other: &Self) -> bool {
-        self.image_view == other.image_view
+        self.descriptor_set == other.descriptor_set
     }
 }
 
@@ -390,7 +412,7 @@ impl Eq for GuiViewSprite { }
 
 impl PartialOrd for GuiViewSprite {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.image_view.partial_cmp(&other.image_view)
+        self.descriptor_set.partial_cmp(&other.descriptor_set)
     }
 }
 

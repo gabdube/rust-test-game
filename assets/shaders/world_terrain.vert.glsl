@@ -35,5 +35,5 @@ void main() {
     vec4 positions = (data.position / vec4(screen_width, screen_height, screen_width, screen_height)) * 2.0;
     float x = (positions.x - 1.0) + (inPos.x * positions.z);
     float y = (positions.y - 1.0) + (inPos.y * positions.w);
-    gl_Position = vec4(x, y, 0.0, 1.0);
+    gl_Position = vec4(inPos, 0.0, 1.0);
 }

@@ -18,7 +18,12 @@ impl super::WorldModule {
     }
 
     fn setup_descriptor_set_layouts(ctx: &VulkanContext, pipelines: &mut super::WorldPipelines) -> Result<(), CommonError> {
+        // Terrain
         let bindings_global = [
+            PipelineLayoutSetBinding {
+                descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
+                stage_flags: vk::ShaderStageFlags::VERTEX,
+            },
             PipelineLayoutSetBinding {
                 descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
                 stage_flags: vk::ShaderStageFlags::FRAGMENT,
@@ -27,6 +32,14 @@ impl super::WorldModule {
 
         pipelines.terrain_global_layout = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
             .map_err(|err| backend_init_err!("Failed to create terrain global descriptor set layout: {}", err) )?;
+
+        // Actors
+        let bindings_global = [
+            PipelineLayoutSetBinding {
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                stage_flags: vk::ShaderStageFlags::FRAGMENT,
+            },
+        ];
 
         pipelines.actor_batch_layout = PipelineLayoutSetBinding::build_descriptor_set_layout(&ctx.device, &bindings_global)
             .map_err(|err| backend_init_err!("Failed to create actors batch descriptor set layout: {}", err) )?;
@@ -84,7 +97,6 @@ impl super::WorldModule {
 
         pipelines.actors.layout = ctx.device.create_pipeline_layout(&pipeline_create_info)
             .map_err(|err| backend_init_err!("Failed to build the actor pipeline layout: {}", err) )?;
-
 
         // Debug
         let constant_range = vk::PushConstantRange {
@@ -298,8 +310,8 @@ impl super::WorldModule {
 
     pub(super) fn setup_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         self.setup_vertex_buffer(core)?;
-        self.setup_terrain_buffer(core)?;
-        self.setup_sprites_buffers(core)?;
+        self.setup_terrain_sprites_buffer(core)?;
+        self.setup_actor_sprites_buffers(core)?;
         self.setup_debug_vertex_buffer(core)?;
         Ok(())
     }
@@ -323,30 +335,32 @@ impl super::WorldModule {
         Ok(())
     }
 
-    fn setup_terrain_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        use super::TERRAIN_GLOBAL_LAYOUT_ID;
-
+    fn setup_terrain_sprites_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let sprites_capacity = TERRAIN_CHUNK_SIZE * TERRAIN_CHUNK_SIZE * 8;
-        // self.data.terrain_sprites = StorageAlloc::new(core, sprites_capacity)
-        //     .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create terrain sprites storage alloc: {err}") )?;
-
-        // self.render.terrain.terrain_set = self.resources.descriptors.write_set::<TERRAIN_GLOBAL_LAYOUT_ID>(&[
-        //     DescriptorWriteBinding::from_storage_buffer(&self.data.terrain_sprites)
-        // ])?;
+        self.data.terrain_sprites = StorageAlloc::new(core, sprites_capacity)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create terrain sprites storage alloc: {err}") )?;
 
         Ok(())
     }
 
-    fn setup_sprites_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+    fn setup_actor_sprites_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         use super::ACTOR_GLOBAL_LAYOUT_ID;
 
         let sprites_capacity = 100;
         self.data.actors_sprites = StorageAlloc::new(core, sprites_capacity)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create sprites storage alloc: {err}") )?;
 
-        self.render.actors.sprites_set = self.resources.descriptors.write_set::<ACTOR_GLOBAL_LAYOUT_ID>(&[
-            DescriptorWriteBinding::from_storage_buffer(&self.data.actors_sprites)
-        ])?;
+        self.render.actors.sprites_set = self.resources.descriptors.get_set::<ACTOR_GLOBAL_LAYOUT_ID>()
+            .ok_or_else(|| backend_init_err!("Failed to fetch actors global descriptor set") )?;
+
+        core.descriptors.write_buffer(
+            self.render.actors.sprites_set,
+            self.data.actors_sprites.handle(),
+            0,
+            self.data.actors_sprites.bytes_range(),
+            super::ACTOR_SPRITE_BUFFER_BINDING_INDEX,
+            vk::DescriptorType::STORAGE_BUFFER
+        );
 
         Ok(())
     }
@@ -361,18 +375,10 @@ impl super::WorldModule {
         Ok(())
     }
 
-    fn setup_terrain_sampler(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        use super::TERRAIN_GLOBAL_LAYOUT_ID;
-        
-        let terrain_id = self.resources.assets.texture_id_by_name("terrain")
-            .ok_or_else(|| assets_err!("Failed to find terrain texture asset") )?;
-
-        let view = Self::fetch_texture_view(core, &mut self.resources, terrain_id)?;
-
-        self.render.terrain.terrain_set = self.resources.descriptors.write_set::<TERRAIN_GLOBAL_LAYOUT_ID>(&[
-            DescriptorWriteBinding::from_image_and_sampler(view, self.resources.default_sampler, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-        ])?;
-
+    pub(super) fn setup_terrain_tilemap(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        self.load_terrain_tilemap()?;
+        self.load_terrain_texture(core)?;
+        self.setup_terrain_descriptor_set(core)?;
         Ok(())
     }
 
@@ -409,9 +415,51 @@ impl super::WorldModule {
         Ok(())
     }
 
-    pub(super) fn setup_terrain_tilemap(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        self.setup_terrain_sampler(core)?;
-        self.load_terrain_tilemap()?;
+    fn load_terrain_texture(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        let texture_id = self.resources.assets.texture_id_by_name("terrain")
+            .ok_or_else(|| assets_err!("Terrain texture asset was not found") )?;
+
+        let texture_asset = self.resources.assets.texture(texture_id)
+            .ok_or_else(|| unreachable!("Presence validated by call to texture_id_by_name") )?;
+
+        let texture = core.create_texture_from_asset(&texture_asset)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
+
+        self.resources.terrain_texture = Some(texture);
+
+        Ok(())
+    }
+
+    fn setup_terrain_descriptor_set(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        use super::TERRAIN_GLOBAL_LAYOUT_ID;
+
+        let image_view = self.resources.terrain_texture
+            .map(|t| t.view )
+            .ok_or_else(|| unreachable!("Texture presence validated in load_terrain_texture") )?;
+
+        let descriptor_set = self.resources.descriptors.get_set::<TERRAIN_GLOBAL_LAYOUT_ID>()
+            .ok_or_else(|| backend_init_err!("Failed to fetch terrain global descriptor set") )?;
+
+        core.descriptors.write_buffer(
+            descriptor_set,
+            self.data.terrain_sprites.handle(),
+            0,
+            self.data.terrain_sprites.bytes_range(),
+            super::TERRAIN_SPRITE_BUFFER_BINDING_INDEX,
+            vk::DescriptorType::STORAGE_BUFFER
+        );
+      
+        core.descriptors.write_image(
+            descriptor_set,
+            image_view,
+            self.resources.default_sampler,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            super::TERRAIN_SAMPLER_BINDING_INDEX,
+            vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        );
+
+        self.render.terrain.terrain_set = descriptor_set;
+
         Ok(())
     }
 

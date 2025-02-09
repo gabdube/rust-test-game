@@ -113,7 +113,10 @@ impl super::GuiModule {
     pub(super) fn setup_vertex_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let vertex_capacity = 500;
         let index_capacity = 1000;
-        self.data.vertex_alloc = VertexAlloc::new(core, index_capacity, vertex_capacity)
+
+        self.data.indices = vec![0; index_capacity];
+        self.data.vertex = vec![GuiVertex::default(); vertex_capacity];
+        self.data.vertex_alloc = VertexAlloc::new(core, index_capacity as u32, vertex_capacity as u32)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create vertex alloc: {err}") )?;
 
         Ok(())
@@ -130,8 +133,9 @@ impl super::GuiModule {
             },
         ];
 
-        self.descriptors.default_sampler = core.resources.linear_sampler;
-        self.descriptors.allocator = DescriptorsAllocator::new(core, &allocations)
+        let resources = &mut self.resources;
+        resources.default_sampler = core.resources.linear_sampler;
+        resources.descriptors_allocator = DescriptorsAllocator::new(core, &allocations)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to prellocate descriptor sets") )?;
 
         Ok(())

@@ -44,7 +44,7 @@ impl LoomzEngineCore {
         let raw_format = (asset.image_info.color_type, asset.image_info.bit_depth);
         let format = match raw_format {
             (png::ColorType::Rgba, png::BitDepth::Eight) => vk::Format::R8G8B8A8_UNORM,
-            _ => { return Err(unimplemented_err!("Image format {raw_format:?} not supported")); }
+            _ => { return Err(unimplemented_err!("Image format {raw_format:?} not supported for font assets")); }
         };
 
         let extent = vk::Extent3D {

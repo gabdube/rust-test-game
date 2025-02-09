@@ -3,7 +3,7 @@ use loomz_shared::api::{
     WorldActorId, WorldAnimationId, WorldAnimation, WorldActorUpdate, WorldTerrainChunk,
     TerrainChunk, TERRAIN_CHUNK_SIZE, TERRAIN_CELL_SIZE_PX
 };
-use loomz_shared::{CommonError, PositionF32, SizeU32, RectF32, rect, backend_err};
+use loomz_shared::{CommonError, CommonErrorType, TextureId, PositionF32, SizeU32, RectF32, rect, backend_err, assets_err, chain_err};
 use loomz_engine_core::{LoomzEngineCore, alloc::StorageAlloc};
 
 #[repr(C)]
@@ -28,7 +28,7 @@ pub(super) struct WorldAnimationWithId {
 
 #[derive(Copy, Clone, Default)]
 pub(super) struct WorldActorData {
-    pub image_view: vk::ImageView,
+    pub descriptor_set: vk::DescriptorSet,
     pub animation: Option<WorldAnimation>,
     pub position: PositionF32,
     pub current_frame: u8,
@@ -95,6 +95,43 @@ impl super::WorldModule {
     // Actors
     //
 
+    fn fetch_texture_descriptor_set(
+        core: &mut LoomzEngineCore,
+        resources: &mut super::WorldResources,
+        texture_id: TextureId
+    ) -> Result<vk::DescriptorSet, CommonError> {
+        use super::{ACTOR_BATCH_LAYOUT_ID, ACTOR_SAMPLER_BINDING_INDEX};
+
+        if let Some(texture) = resources.textures.get(&texture_id) {
+            return Ok(texture.descriptor_set);
+        }
+
+        let texture_asset = resources.assets.texture(texture_id)
+            .ok_or_else(|| assets_err!("Unkown asset with ID {texture_id:?}") )?;
+
+        let texture = core.create_texture_from_asset(&texture_asset)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
+
+        let descriptor_set = resources.descriptors.get_set::<ACTOR_BATCH_LAYOUT_ID>()
+            .ok_or_else(|| backend_err!("No more descriptor set in actor batch layout pool") )?;
+
+        core.descriptors.write_image(
+            descriptor_set,
+            texture.view,
+            resources.default_sampler,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            ACTOR_SAMPLER_BINDING_INDEX,
+            vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        );
+
+        resources.textures.insert(texture_id, super::WorldTexture {
+            texture,
+            descriptor_set,
+        });
+
+        Ok(descriptor_set)
+    }
+
     fn create_actor(&mut self, id: u32) -> usize {
         let index = self.data.actors_ids.len();
         self.data.actors_ids.push(id);
@@ -108,7 +145,7 @@ impl super::WorldModule {
         match actor.animation.as_mut() {
             Some(old_animation) => {
                 if animation.texture_id != old_animation.texture_id {
-                    actor.image_view = Self::fetch_texture_view(core, &mut self.resources, animation.texture_id)?;
+                    actor.descriptor_set = Self::fetch_texture_descriptor_set(core, &mut self.resources, animation.texture_id)?;
                     self.flags |= super::WorldFlags::UPDATE_ACTORS;
                 }
 
@@ -116,7 +153,7 @@ impl super::WorldModule {
             },
             None => {
                 actor.animation = Some(animation);
-                actor.image_view = Self::fetch_texture_view(core, &mut self.resources, animation.texture_id)?;
+                actor.descriptor_set = Self::fetch_texture_descriptor_set(core, &mut self.resources, animation.texture_id)?;
                 self.flags |= super::WorldFlags::UPDATE_ACTORS;
             }
         }

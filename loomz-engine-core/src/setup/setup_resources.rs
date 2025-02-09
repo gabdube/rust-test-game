@@ -1,5 +1,3 @@
-use std::sync::Arc;
-use parking_lot::Mutex;
 use loomz_shared::{backend_init_err, CommonError};
 use vk::CommandBufferSubmitInfo;
 use crate::{context::VulkanContext, helpers, VulkanDescriptorSubmit, VulkanEngineInfo, VulkanGlobalResources, VulkanOutputInfo, VulkanRecordingInfo, VulkanStaging, VulkanSubmitInfo};
@@ -386,7 +384,7 @@ fn init_staging(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanStaging>, Com
 // Descriptors
 //
 
-fn init_descriptors() -> Arc<Mutex<VulkanDescriptorSubmit>> {
+fn init_descriptors() -> Box<VulkanDescriptorSubmit> {
     let images = vec![vk::DescriptorImageInfo::default(); 16];
     let buffers = vec![vk::DescriptorBufferInfo::default(); 8];
     let writes = vec![vk::WriteDescriptorSet::default(); 24];
@@ -400,5 +398,5 @@ fn init_descriptors() -> Arc<Mutex<VulkanDescriptorSubmit>> {
         writes_count: 0,
     };
 
-    Arc::new(Mutex::new(submit))
+    Box::new(submit)
 }

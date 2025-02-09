@@ -1,105 +1,68 @@
-use loomz_shared::CommonError;
-use loomz_engine_core::descriptors::DescriptorsAllocator;
-use super::{WorldModule, WorldBatch, data::WorldActorData, ACTOR_BATCH_LAYOUT_ID, LAYOUT_COUNT};
+use super::{WorldModule, WorldBatch, data::WorldActorData};
 
-pub(super) struct WorldBatcher<'a> {
-    current_view: vk::ImageView,
-    batches: &'a mut Vec<WorldBatch>,
-    instances: &'a [WorldActorData],
-    descriptors: &'a mut DescriptorsAllocator<LAYOUT_COUNT>,
-    sampler: vk::Sampler,
-    instance_index: usize,
-    batch_index: usize,
+//
+// Actors batching
+//
+
+fn actors_groups<'a>(actors: &'a [WorldActorData]) -> impl Iterator<Item=(vk::DescriptorSet, u32)> +'a {
+    let mut last_descriptor_set = vk::DescriptorSet::null();
+    let mut local_instance_count = 0;
+    let mut instance_index = 0;
+
+    ::std::iter::from_fn(move || {
+        let mut next_descriptor_set = vk::DescriptorSet::null();
+        loop {
+            let actor = match actors.get(instance_index) {
+                Some(actor) => actor,
+                None => { break; }
+            };
+
+            if last_descriptor_set.is_null() {
+                last_descriptor_set = actor.descriptor_set;
+            }
+            
+            if actor.descriptor_set != last_descriptor_set {
+                next_descriptor_set = actor.descriptor_set;
+                break;
+            }
+
+            local_instance_count += 1;
+            instance_index += 1;
+        }
+
+        let set = last_descriptor_set;
+        let count = local_instance_count;
+
+        local_instance_count = 0;
+        last_descriptor_set = next_descriptor_set;
+        instance_index += 1;
+
+        if count > 0 {
+            Some((set, count))
+        } else {
+            None
+        }
+    })
 }
 
-impl<'a> WorldBatcher<'a> {
+pub(super) fn batch_actors(world: &mut WorldModule) {
+    let actors = &world.data.actors_data;
+    let batches = &mut world.render.actors.batches;
+    batches.clear();
 
-    pub(super) fn batch_all(world: &'a mut WorldModule) -> Result<(), CommonError> {
-        let mut batcher = WorldBatcher {
-            current_view: vk::ImageView::null(),
-            batches: &mut world.render.actors.batches,
-            instances: &world.data.actors_data,
-            descriptors: &mut world.resources.descriptors,
-            sampler: world.resources.default_sampler,
-            instance_index: 0,
-            batch_index: 0,
-        };
-
-        batcher.reset_batches();
-        batcher.first_batch()?;
-        batcher.remaining_batches()?;
-
-        Ok(())
-    }
-
-    fn reset_batches(&mut self) {
-        self.descriptors.reset_layout::<ACTOR_BATCH_LAYOUT_ID>();
-        self.batches.clear();
-    }
-
-    fn first_batch(&mut self) -> Result<(), CommonError> {
-        let mut found = false;
-        let max_instance = self.instances.len();
-
-        while !found && self.instance_index != max_instance {
-            let instance = self.instances[self.instance_index];
-            if instance.image_view.is_null() {
-                // Sprite is not renderable
-                self.instance_index += 1;
-                continue;
-            }
-
-            self.next_batch(instance.image_view)?;
-            self.batches[self.batch_index].instances_count += 1;
-            self.instance_index += 1;
-            found = true;
-        }
-
-        Ok(())
-    }
-
-    fn remaining_batches(&mut self) -> Result<(), CommonError> {
-        let max_instance = self.instances.len();
-        while self.instance_index != max_instance {
-            let instance = self.instances[self.instance_index];
-            if instance.image_view.is_null() {
-                // Sprite is not renderable
-                self.instance_index += 1;
-                continue;
-            }
-
-            let image_view = instance.image_view;
-            if self.current_view != image_view {
-                self.next_batch(image_view)?;
-                self.batch_index += 1;
-            }
-
-            self.batches[self.batch_index].instances_count += 1;
-            self.instance_index += 1;
-        }
-
-        Ok(())
-    }
-
-    fn next_batch(&mut self, image_view: vk::ImageView) -> Result<(), CommonError> {
-        use loomz_engine_core::descriptors::DescriptorWriteBinding;
-
-        let set = self.descriptors.write_set::<ACTOR_BATCH_LAYOUT_ID>(&[
-            DescriptorWriteBinding::from_image_and_sampler(
-                image_view,
-                self.sampler,
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL
-            )
-        ])?;
-
-        self.current_view = image_view;
-        self.batches.push(WorldBatch {
-            set,
-            instances_count: 0,
-            instances_offset: self.instance_index as u32,
+    let mut global_instance_count = 0;
+    for (descriptor_set, instances_count) in actors_groups(actors) {
+        batches.push(WorldBatch {
+            set: descriptor_set,
+            instances_count,
+            instances_offset: global_instance_count,
         });
 
-        Ok(())
+        global_instance_count += instances_count;
     }
-
 }
+
+
+//
+// Terrain batching
+//

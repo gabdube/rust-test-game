@@ -1,10 +1,9 @@
 use loomz_shared::CommonError;
 use loomz_shared::api::GuiSpriteType;
 use loomz_engine_core::{alloc::VertexAlloc, LoomzEngineCore};
-use super::{GuiModule, GuiBatch, GuiDescriptor, GuiView, GuiViewSprite, GuiVertex};
+use super::{GuiModule, GuiBatch, GuiView, GuiViewSprite, GuiVertex};
 
 struct NextBatch<'a> {
-    descriptors: &'a mut GuiDescriptor,
     batches: &'a mut Vec<GuiBatch>,
     indices: &'a mut Vec<u32>,
     vertex: &'a mut Vec<GuiVertex>,
@@ -15,8 +14,11 @@ struct NextBatch<'a> {
 }
 
 impl<'a> NextBatch<'a> {
-    fn build_batch(&mut self, sprite_type: GuiSpriteType, view: vk::ImageView, sprites_count: usize) -> Result<(), CommonError> {
-        let set = self.descriptors.write_batch_texture(view)?;
+    fn prepare(&mut self) {
+        self.batches.clear();
+    }
+    
+    fn build_batch(&mut self, sprite_type: GuiSpriteType, set: vk::DescriptorSet, sprites_count: usize) -> Result<(), CommonError> {
         let pipeline = match sprite_type {
             GuiSpriteType::Font(_) => self.text_pipeline,
             GuiSpriteType::Image(_) => self.image_pipeline,
@@ -86,6 +88,7 @@ impl<'a> NextBatch<'a> {
     }
 
     fn upload_vertex(&mut self, core: &mut LoomzEngineCore, alloc: &mut VertexAlloc<GuiVertex>) {
+        // index_count may be 0 if a gui has no visible data
         if self.index_count > 0 {
             let i = self.index_count as usize;
             let v = self.vertex_count as usize;
@@ -117,7 +120,7 @@ fn find_first_sprite_type(gui: &[GuiView], gui_index_out: &mut usize) -> Option<
     current_sprite_type
 }
 
-fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(GuiSpriteType, vk::ImageView, &'a [GuiViewSprite])> {
+fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(GuiSpriteType, vk::DescriptorSet, &'a [GuiViewSprite])> {
     let mut gui_index = 0;
     let mut sprites_start = 0;
     let mut sprites_stop = 0;
@@ -148,10 +151,10 @@ fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(GuiSpriteType, vk::Imag
                 sprites_stop += 1;
             }
 
-            let view = gui.sprites[sprites_start].image_view;
+            let set = gui.sprites[sprites_start].descriptor_set;
             let sprite_type = gui.sprites[sprites_start].sprite.ty;
             let sprites = &gui.sprites[sprites_start..sprites_stop];
-            let value = (sprite_type, view, sprites);
+            let value = (sprite_type, set, sprites);
 
             current_sprite_type = Some(sprite_type);
             sprites_start = sprites_stop;
@@ -168,12 +171,8 @@ fn groups<'a>(gui: &'a [GuiView]) -> impl Iterator<Item=(GuiSpriteType, vk::Imag
 }
 
 pub(super) fn build(core: &mut LoomzEngineCore, gui_module: &mut GuiModule) -> Result<(), CommonError> {
-    gui_module.batches.clear();
-    gui_module.descriptors.reset_batch_layout();
-
     let mut batcher = NextBatch {
-        descriptors: &mut gui_module.descriptors,
-        batches: &mut gui_module.batches,
+        batches: &mut gui_module.render.batches,
         indices: &mut gui_module.data.indices,
         vertex: &mut gui_module.data.vertex,
         text_pipeline: gui_module.resources.text_pipeline.handle(),
@@ -181,6 +180,8 @@ pub(super) fn build(core: &mut LoomzEngineCore, gui_module: &mut GuiModule) -> R
         index_count: 0,
         vertex_count: 0,
     };
+
+    batcher.prepare();
 
     for (sprite_type, image_view, sprites) in groups(&gui_module.data.gui) {
         batcher.build_batch(sprite_type, image_view, sprites.len())?;

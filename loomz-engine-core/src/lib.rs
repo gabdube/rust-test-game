@@ -16,8 +16,6 @@ pub use context::VulkanContext;
 pub use prepare::AcquireReturn;
 pub use texture::Texture;
 
-use std::sync::Arc;
-use parking_lot::Mutex;
 use loomz_shared::CommonError;
 use raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 use staging::VulkanStaging;
@@ -169,7 +167,7 @@ pub struct LoomzEngineCore {
     pub submit: Box<VulkanSubmitInfo>,
     pub output: Box<VulkanOutputInfo>,
     pub staging: Box<VulkanStaging>,
-    pub descriptors: Arc<Mutex<VulkanDescriptorSubmit>>,
+    pub descriptors: Box<VulkanDescriptorSubmit>,
 }
 
 impl LoomzEngineCore {
@@ -275,7 +273,7 @@ impl LoomzEngineCore {
     }
 
     fn update_descriptor_sets(&mut self) {
-        let mut descriptors = self.descriptors.lock();
+        let descriptors = &mut self.descriptors;
         if descriptors.writes_count == 0 {
             return;
         }

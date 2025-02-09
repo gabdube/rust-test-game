@@ -354,10 +354,6 @@ impl<V: Copy> StorageAlloc<V> {
         self.buffer
     }
 
-    pub fn offset(&self) -> vk::DeviceSize {
-        self.offset
-    }
-
     pub fn bytes_range(&self) -> vk::DeviceSize {
         (self.capacity as vk::DeviceSize) * (size_of::<V>() as vk::DeviceSize)
     }

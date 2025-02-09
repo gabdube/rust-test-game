@@ -16,7 +16,7 @@ pub struct LoomzEngine {
     pipeline_cache: vk::PipelineCache,
 }
 
-impl LoomzEngine {
+impl LoomzEngine { 
 
     pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
         let mut core = LoomzEngineCore::init()?;

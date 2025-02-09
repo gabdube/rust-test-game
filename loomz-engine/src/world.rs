@@ -8,7 +8,7 @@ use bitflags::bitflags;
 use std::{slice, sync::Arc, u32, usize};
 use loomz_shared::api::{LoomzApi, WorldUpdate, WorldDebugFlags};
 use loomz_shared::assets::{LoomzAssetsBundle, TextureId, ShaderId, AssetId};
-use loomz_shared::{assets_err, chain_err, size, CommonError, CommonErrorType, RectF32, RgbaU8, SizeF32};
+use loomz_shared::{CommonError, RectF32, RgbaU8, SizeF32, size};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
 use super::pipeline_compiler::PipelineCompiler;
 
@@ -24,8 +24,14 @@ const ACTOR_BATCH_LAYOUT_ID: u32 = 2;
 
 // Index of the descriptor set layout in their respective pipeline
 const TERRAIN_GLOBAL_LAYOUT_INDEX: u32 = 0;
+const TERRAIN_SPRITE_BUFFER_BINDING_INDEX: u32 = 0;
+const TERRAIN_SAMPLER_BINDING_INDEX: u32 = 1;
+
 const ACTOR_GLOBAL_LAYOUT_INDEX: u32 = 0;
+const ACTOR_SPRITE_BUFFER_BINDING_INDEX: u32 = 0;
+
 const ACTOR_BATCH_LAYOUT_INDEX: u32 = 1;
+const ACTOR_SAMPLER_BINDING_INDEX: u32 = 0;
 
 bitflags! {
     #[derive(Copy, Clone, Default)]
@@ -88,20 +94,26 @@ struct WorldPipelines {
     actor_batch_layout: vk::DescriptorSetLayout,
 }
 
+struct WorldTexture {
+    texture: Texture,
+    descriptor_set: vk::DescriptorSet,
+}
+
 /// Graphics resources that are not accessed often (not every frame)
 struct WorldResources {
     assets: Arc<LoomzAssetsBundle>,
 
     pipelines: WorldPipelines,
-    
+
     vertex: VertexAlloc<WorldVertex>,
     debug_vertex: VertexAlloc<WorldDebugVertex>,
 
     descriptors: DescriptorsAllocator<LAYOUT_COUNT>,
 
     default_sampler: vk::Sampler,
-    textures: FnvHashMap<TextureId, Texture>,
-    
+    terrain_texture: Option<Texture>,
+    textures: FnvHashMap<TextureId, WorldTexture>,
+
     grid_params: WorldGridParams,
 }
 
@@ -167,6 +179,7 @@ impl WorldModule {
             descriptors: DescriptorsAllocator::default(),
 
             default_sampler: vk::Sampler::null(),
+            terrain_texture: None,
             textures: FnvHashMap::default(),
          
             grid_params: WorldGridParams {
@@ -194,13 +207,18 @@ impl WorldModule {
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
         self.data.actors_sprites.free(core);
+        self.data.terrain_sprites.free(core);
 
         self.resources.vertex.free(core);
         self.resources.debug_vertex.free(core);
         self.resources.descriptors.destroy(core);
 
-        for texture in self.resources.textures.values() {
+        if let Some(texture) = self.resources.terrain_texture.as_ref() {
             core.destroy_texture(*texture);
+        }
+
+        for texture in self.resources.textures.values() {
+            core.destroy_texture(texture.texture);
         }
 
         let ctx = &core.ctx;
@@ -288,12 +306,12 @@ impl WorldModule {
         let push = Self::push_values(&self.render.push_constants);
         let render = self.render.terrain;
 
-        device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
-        device.cmd_bind_index_buffer(cmd, render.vertex_buffer[0], render.index_offset, vk::IndexType::UINT32);
-        device.cmd_bind_vertex_buffers(cmd, 0, &render.vertex_buffer, &render.vertex_offset);
-        device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push);
-        device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, TERRAIN_GLOBAL_LAYOUT_INDEX, slice::from_ref(&render.terrain_set), &[]);
-        device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
+        // device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
+        // device.cmd_bind_index_buffer(cmd, render.vertex_buffer[0], render.index_offset, vk::IndexType::UINT32);
+        // device.cmd_bind_vertex_buffers(cmd, 0, &render.vertex_buffer, &render.vertex_offset);
+        // device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push);
+        // device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, TERRAIN_GLOBAL_LAYOUT_INDEX, slice::from_ref(&render.terrain_set), &[]);
+        // device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
     }
 
     fn render_actors(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
@@ -334,22 +352,6 @@ impl WorldModule {
     //
     // Updates
     //
-
-    fn fetch_texture_view(core: &mut LoomzEngineCore, resources: &mut WorldResources, texture_id: TextureId) -> Result<vk::ImageView, CommonError> {
-        if let Some(texture) = resources.textures.get(&texture_id) {
-            return Ok(texture.view);
-        }
-
-        let texture_asset = resources.assets.texture(texture_id)
-            .ok_or_else(|| assets_err!("Unkown asset with ID {texture_id:?}") )?;
-
-        let texture = core.create_texture_from_asset(&texture_asset)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
-
-        resources.textures.insert(texture_id, texture);
-
-        Ok(texture.view)
-    }
 
     fn set_view_offset(&mut self, view: RectF32) {
         let push = &mut self.render.push_constants[0];
@@ -425,7 +427,7 @@ impl WorldModule {
         }
 
         if self.flags.contains(WorldFlags::UPDATE_ACTORS) {
-            batch::WorldBatcher::batch_all(self)?;
+            batch::batch_actors(self);
             self.flags.remove(WorldFlags::UPDATE_ACTORS);
         }
 
