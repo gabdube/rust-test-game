@@ -26,10 +26,10 @@ pub(super) struct WorldAnimationWithId {
     animation: WorldAnimation,
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone)]
 pub(super) struct WorldActorData {
     pub descriptor_set: vk::DescriptorSet,
-    pub animation: Option<WorldAnimation>,
+    pub animation: WorldAnimation,
     pub position: PositionF32,
     pub current_frame: u8,
     pub flipped: bool,
@@ -59,6 +59,7 @@ pub(super) struct WorldData {
     pub last_animation_tick: Instant,
     pub animations: Vec<WorldAnimationWithId>,
 
+    pub default_actor: Option<Box<WorldActorData>>,
     pub actors_ids: Vec<u32>,
     pub actors_data: Vec<WorldActorData>,
     pub actors_sprites: StorageAlloc<ActorSpriteData>,
@@ -134,29 +135,24 @@ impl super::WorldModule {
 
     fn create_actor(&mut self, id: u32) -> usize {
         let index = self.data.actors_ids.len();
+        let actor = self.data.default_actor.as_ref()
+            .unwrap_or_else(|| unreachable!("Default actor must have been created at startup") );
+
         self.data.actors_ids.push(id);
-        self.data.actors_data.push(WorldActorData::default());
+        self.data.actors_data.push(**actor);
+
         index
     }
 
     fn update_world_actor_animation(&mut self, core: &mut LoomzEngineCore, actor_index: usize, animation: WorldAnimation) -> Result<(), CommonError> {
-        // Insert or create new animation
         let actor = &mut self.data.actors_data[actor_index];
-        match actor.animation.as_mut() {
-            Some(old_animation) => {
-                if animation.texture_id != old_animation.texture_id {
-                    actor.descriptor_set = Self::fetch_texture_descriptor_set(core, &mut self.resources, animation.texture_id)?;
-                    self.flags |= super::WorldFlags::UPDATE_ACTORS;
-                }
-
-                *old_animation = animation;
-            },
-            None => {
-                actor.animation = Some(animation);
-                actor.descriptor_set = Self::fetch_texture_descriptor_set(core, &mut self.resources, animation.texture_id)?;
-                self.flags |= super::WorldFlags::UPDATE_ACTORS;
-            }
+        let old_animation = actor.animation;
+        if animation.texture_id != old_animation.texture_id {
+            actor.descriptor_set = Self::fetch_texture_descriptor_set(core, &mut self.resources, animation.texture_id)?;
+            self.flags |= super::WorldFlags::UPDATE_ACTORS;
         }
+
+        actor.animation = animation;
 
         Ok(())
 
@@ -169,11 +165,9 @@ impl super::WorldModule {
     }
     
     fn write_world_actor_sprite(&mut self, index: usize) {
-        if index < self.data.actors_data.len() {
-            let actor = &self.data.actors_data[index];
-            let sprite = actor.sprite_data();
-            self.data.actors_sprites.write_data(index, sprite);
-        }
+        let actor = &self.data.actors_data[index];
+        let sprite = actor.sprite_data();
+        self.data.actors_sprites.write_data(index, sprite);
     }
 
     pub(super) fn update_world_actor(&mut self, core: &mut LoomzEngineCore, id: WorldActorId, update: WorldActorUpdate) -> Result<(), CommonError> {
@@ -184,9 +178,11 @@ impl super::WorldModule {
         match update {
             WorldActorUpdate::Position(position) => {
                 self.data.actors_data[index].position = position;
+                self.write_world_actor_sprite(index);
             },
             WorldActorUpdate::Flip(flipped) => {
                 self.data.actors_data[index].flipped = flipped;
+                self.write_world_actor_sprite(index);
             },
             WorldActorUpdate::Animation(animation_id) => {
                 let animation_id = animation_id.value();
@@ -195,13 +191,12 @@ impl super::WorldModule {
                     .ok_or_else(|| backend_err!("Failed to find an animation with ID {animation_id}") )?;
 
                 self.update_world_actor_animation(core, index, animation)?;
+                self.write_world_actor_sprite(index);
             },
             WorldActorUpdate::Destroy => {
                 self.destroy_actor(index);
             }
         }
-
-        self.write_world_actor_sprite(index);
 
         Ok(())
     }
@@ -280,21 +275,20 @@ impl super::WorldModule {
 impl WorldActorData {
     pub(super) fn sprite_data(&self) -> ActorSpriteData {
         let mut sprite = ActorSpriteData::default();
-        if let Some(animation) = self.animation {
-            let i = self.current_frame as f32;
-            sprite.offset[0] = self.position.x - (animation.sprite_width * 0.5);
-            sprite.offset[1] = self.position.y - (animation.sprite_height * 0.5);
-            sprite.size[0] = animation.sprite_width;
-            sprite.size[1] = animation.sprite_height;
-            sprite.uv_offset[0] = animation.x + (animation.sprite_width * i) + (animation.padding * i);
-            sprite.uv_offset[1] = animation.y;
-            sprite.uv_size[0] = animation.sprite_width;
-            sprite.uv_size[1] = animation.sprite_height;
+        let i = self.current_frame as f32;
+        let animation = self.animation;
+        sprite.offset[0] = self.position.x - (animation.sprite_width * 0.5);
+        sprite.offset[1] = self.position.y - (animation.sprite_height * 0.5);
+        sprite.size[0] = animation.sprite_width;
+        sprite.size[1] = animation.sprite_height;
+        sprite.uv_offset[0] = animation.x + (animation.sprite_width * i) + (animation.padding * i);
+        sprite.uv_offset[1] = animation.y;
+        sprite.uv_size[0] = animation.sprite_width;
+        sprite.uv_size[1] = animation.sprite_height;
 
-            if self.flipped {
-                sprite.uv_offset[0] += sprite.size[0];
-                sprite.uv_size[0] *= -1.0;
-            }
+        if self.flipped {
+            sprite.uv_offset[0] += sprite.size[0];
+            sprite.uv_size[0] *= -1.0;
         }
 
         sprite
@@ -308,6 +302,7 @@ impl Default for WorldData {
             last_animation_tick: Instant::now(),
             animations: Vec::with_capacity(16),
 
+            default_actor: None,
             actors_ids: Vec::with_capacity(16),
             actors_data: Vec::with_capacity(16),
             actors_sprites: StorageAlloc::default(),

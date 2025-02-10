@@ -201,6 +201,7 @@ impl WorldModule {
         world.setup_buffers(core)?;
         world.setup_terrain_tilemap(core)?;
         world.setup_render_data();
+        world.setup_default_data(core)?;
 
         Ok(world)
     }
@@ -399,22 +400,18 @@ impl WorldModule {
     }
 
     fn animation_update(&mut self) { 
-        self.data.last_animation_tick = ::std::time::Instant::now();
-
+        let sprites = &mut self.data.actors_sprites;
         for (index, actor) in self.data.actors_data.iter_mut().enumerate() {
-            let animation = match &mut actor.animation {
-                Some(animation) => animation,
-                None => { continue; }
-            };
-
             actor.current_frame += 1;
 
-            if actor.current_frame > animation.last_frame {
+            if actor.current_frame > actor.animation.last_frame {
                 actor.current_frame = 0;
             }
 
-            self.data.actors_sprites.write_data(index, actor.sprite_data());
+            sprites.write_data(index, actor.sprite_data());
         }
+
+        self.data.last_animation_tick = ::std::time::Instant::now();
     }
     
     pub fn update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {

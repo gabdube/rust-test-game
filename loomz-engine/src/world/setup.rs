@@ -448,7 +448,7 @@ impl super::WorldModule {
             super::TERRAIN_SPRITE_BUFFER_BINDING_INDEX,
             vk::DescriptorType::STORAGE_BUFFER
         );
-      
+
         core.descriptors.write_image(
             descriptor_set,
             image_view,
@@ -483,6 +483,59 @@ impl super::WorldModule {
         render.vertex_buffer = [res.debug_vertex.buffer];
         render.index_offset = res.debug_vertex.index_offset();
         render.vertex_offset = res.debug_vertex.vertex_offset();
+    }
+
+    pub(super) fn setup_default_data(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+        use loomz_shared::api::WorldAnimation;
+        use super::{ACTOR_BATCH_LAYOUT_ID, ACTOR_SAMPLER_BINDING_INDEX};
+
+        // Loads and creates a "default" values for the world actors
+        // We use "pawn_blue" as a default texture because it will be loaded in during gameplay anyway
+        let texture_id = self.resources.assets.texture_id_by_name("pawn_blue")
+            .ok_or_else(|| assets_err!("Failed to load pawn_blue asset") )?;
+
+        let texture_asset = self.resources.assets.texture(texture_id)
+            .unwrap_or_else(|| unreachable!("Texture presence already validated") );
+
+        let texture = core.create_texture_from_asset(&texture_asset)
+            .map_err(|err| chain_err!(err, CommonErrorType::BackendGeneric, "Failed to create image from asset") )?;
+
+        let descriptor_set = self.resources.descriptors.get_set::<ACTOR_BATCH_LAYOUT_ID>()
+            .ok_or_else(|| backend_init_err!("No more descriptor set in actor batch layout pool") )?;
+
+        let sampler = self.resources.default_sampler;
+
+        core.descriptors.write_image(
+            descriptor_set,
+            texture.view,
+            sampler,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            ACTOR_SAMPLER_BINDING_INDEX,
+            vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        );
+
+        self.data.default_actor = Some(Box::new(super::data::WorldActorData {
+            descriptor_set,
+            animation: WorldAnimation {
+                texture_id,
+                padding: 0.0,
+                x: 0.0,
+                y: 0.0,
+                sprite_width: 0.0,
+                sprite_height: 0.0,
+                last_frame: u8::MAX
+            },
+            position: Default::default(),
+            current_frame: 0,
+            flipped: false,
+        }));
+
+        self.resources.textures.insert(texture_id, super::WorldTexture {
+            texture,
+            descriptor_set,
+        });
+
+        Ok(())
     }
 
     pub(super) fn reload_shaders(

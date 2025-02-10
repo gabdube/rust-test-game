@@ -20,7 +20,7 @@ fn actors_groups<'a>(actors: &'a [WorldActorData]) -> impl Iterator<Item=(vk::De
             if last_descriptor_set.is_null() {
                 last_descriptor_set = actor.descriptor_set;
             }
-            
+
             if actor.descriptor_set != last_descriptor_set {
                 next_descriptor_set = actor.descriptor_set;
                 break;
