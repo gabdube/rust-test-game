@@ -130,7 +130,6 @@ struct WorldDebugRender {
 }
 
 /// Data used when rendering the world terrain
-#[derive(Copy, Clone)]
 struct WorldTerrainRender {
     pipeline_handle: vk::Pipeline,
     pipeline_layout: vk::PipelineLayout,
@@ -138,7 +137,7 @@ struct WorldTerrainRender {
     vertex_offset: [vk::DeviceSize; 1],
     index_offset: vk::DeviceSize,
     terrain_set: vk::DescriptorSet,
-    terrain_instance_count: u32,
+    batches: Vec<[f32; 2]>,
 }
 
 /// Data used when rendering the world actors
@@ -209,9 +208,6 @@ impl WorldModule {
     }
 
     pub fn destroy(self, core: &mut LoomzEngineCore) {
-        self.data.actors_sprites.free(core);
-        self.data.terrain_sprites.free(core);
-
         self.resources.vertex.free(core);
         self.resources.debug_vertex.free(core);
         self.resources.descriptors.destroy(core);
@@ -309,14 +305,18 @@ impl WorldModule {
 
         let device = &ctx.device;
         let push = Self::push_values(&self.render.push_constants);
-        let render = self.render.terrain;
+        let render = &self.render.terrain;
 
         device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
         device.cmd_bind_index_buffer(cmd, render.vertex_buffer[0], render.index_offset, vk::IndexType::UINT32);
         device.cmd_bind_vertex_buffers(cmd, 0, &render.vertex_buffer, &render.vertex_offset);
         device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push);
         device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, TERRAIN_GLOBAL_LAYOUT_INDEX, slice::from_ref(&render.terrain_set), &[]);
-        device.cmd_draw_indexed(cmd, BATCH_INDEX_COUNT, render.terrain_instance_count, 0, 0, 0);
+
+        for (i, batch_position) in render.batches.iter().enumerate() {
+            device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, PUSH_SIZE, 8, unsafe { batch_position.align_to().1 } ); // Always safe to align
+            device.cmd_draw_indexed(cmd, BATCH_INDEX_COUNT, 1, 0, 0, i as u32);
+        }
     }
 
     fn render_actors(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
@@ -375,7 +375,7 @@ impl WorldModule {
             for (_, update) in messages {
                 match update {
                     WorldUpdate::ShowWorld(visible) => { self.flags.set(WorldFlags::SHOW_WORLD, visible); },
-                    WorldUpdate::WorldView(view) => { 
+                    WorldUpdate::WorldView(view) => {
                         self.set_terrain_view(view);
                     },
                     WorldUpdate::WorldSize(size) => { 
@@ -406,7 +406,7 @@ impl WorldModule {
                 actor.current_frame = 0;
             }
 
-            sprites.write_data(index, actor.sprite_data());
+            sprites.write(index, actor.sprite_data());
         }
 
         self.data.last_animation_tick = ::std::time::Instant::now();
@@ -464,7 +464,7 @@ impl Default for WorldRender {
                 vertex_offset: [0],
                 index_offset: 0,
                 terrain_set: vk::DescriptorSet::null(),
-                terrain_instance_count: 0,
+                batches: Vec::with_capacity(8)
             },
             actors: WorldActorRender {
                 pipeline_handle: vk::Pipeline::null(),

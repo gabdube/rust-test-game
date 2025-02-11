@@ -41,7 +41,7 @@ impl Terrain {
         let batch_y = ((height as usize) + (TERRAIN_CHUNK_STRIDE-1)) / TERRAIN_CHUNK_STRIDE;
         self.batches.clear();
         self.batches_updates.clear();
-        self.flags = TerrainUpdateFlags::UPDATE_SIZE;
+        self.flags |= TerrainUpdateFlags::UPDATE_SIZE;
 
         for y in 0..batch_y {
             for x in 0..batch_x {
@@ -53,7 +53,7 @@ impl Terrain {
 
     pub fn set_view(&mut self, x: f32, y: f32, width: f32, height: f32) {
         self.view = rect(x, y, x+width, y+height);
-        self.flags = TerrainUpdateFlags::UPDATE_VIEW;
+        self.flags |= TerrainUpdateFlags::UPDATE_VIEW;
     }
 
     // Copy cells into the target rect. Cells buffer must match the rect

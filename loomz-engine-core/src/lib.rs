@@ -45,7 +45,7 @@ pub struct VulkanGlobalResources {
     pub surface: vk::SurfaceKHR,
     pub vertex_alloc: alloc::DeviceMemoryAlloc,
     pub images_alloc: alloc::DeviceMemoryAlloc,
-    pub uniforms_alloc: alloc::HostVisibleAlloc,
+    pub storage_alloc: alloc::StorageMemoryAlloc,
     pub attachments: helpers::RenderAttachments,
 }
 
@@ -80,9 +80,14 @@ pub struct VulkanOutputInfo {
 }
 
 pub struct VulkanDescriptorSubmit {
-    pub images: Box<[vk::DescriptorImageInfo]>,
-    pub buffers: Box<[vk::DescriptorBufferInfo]>,
-    pub writes: Box<[vk::WriteDescriptorSet]>,
+    // Storage buffer from the engine [StorageMemoryAlloc]
+    pub storage_buffer: vk::Buffer,
+    // Base pointer in the storage buffer (to compute the offset when writing descriptor sets)
+    pub storage_base: usize,
+
+    pub images: Box<[vk::DescriptorImageInfo; 10]>,
+    pub buffers: Box<[vk::DescriptorBufferInfo; 10]>,
+    pub writes: Box<[vk::WriteDescriptorSet; 20]>,
     pub images_count: u32,
     pub buffers_count: u32,
     pub writes_count: u32,
@@ -90,28 +95,22 @@ pub struct VulkanDescriptorSubmit {
 
 impl VulkanDescriptorSubmit {
 
-    pub fn write_buffer(
-        &mut self,
-        dst_set: vk::DescriptorSet,
-        buffer: vk::Buffer,
-        offset: vk::DeviceSize,
-        range: vk::DeviceSize,
-        dst_binding: u32,
-        descriptor_type: vk::DescriptorType
-    ) {
+    pub fn write_storage_slice<T>(&mut self, dst_set: vk::DescriptorSet, dst_binding: u32, slice: &alloc::DeviceSlice<T>) {
         let buffer_index = self.buffers_count as usize;
         let write_index = self.writes_count as usize;
 
+        let offset = (slice.ptr() as usize) - self.storage_base;
+        let range = slice.range();
         let buffer = vk::DescriptorBufferInfo {
-            buffer,
-            offset,
-            range,
+            buffer: self.storage_buffer,
+            offset: offset as vk::DeviceSize,
+            range: range as vk::DeviceSize,
         };
         
         let write_set = vk::WriteDescriptorSet {
             dst_set,
             dst_binding,
-            descriptor_type,
+            descriptor_type: vk::DescriptorType::STORAGE_BUFFER,
             descriptor_count: 1,
             p_buffer_info: &self.buffers[buffer_index] as *const _,
             ..Default::default()
@@ -203,7 +202,7 @@ impl LoomzEngineCore {
         self.resources.attachments.free(&ctx.device);
         self.resources.vertex_alloc.free(&ctx.device);
         self.resources.images_alloc.free(&ctx.device);
-        self.resources.uniforms_alloc.free(&ctx.device);
+        self.resources.storage_alloc.free(&ctx.device);
         self.staging.destroy(&ctx.device);
 
         ctx.device.destroy();

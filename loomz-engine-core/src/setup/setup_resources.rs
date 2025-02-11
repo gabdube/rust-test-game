@@ -10,7 +10,7 @@ pub(crate) fn setup(setup: &mut VulkanEngineSetup) -> Result<(), CommonError> {
     setup.output = Some(init_output(setup)?);
     setup.submit = Some(init_submit(setup));
     setup.staging = Some(init_staging(setup)?);
-    setup.descriptors = Some(init_descriptors());
+    setup.descriptors = Some(init_descriptors(setup));
 
     Ok(())
 }
@@ -113,14 +113,14 @@ fn init_resources(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanGlobalResou
         surface: vk::SurfaceKHR::null(),
         vertex_alloc: crate::alloc::DeviceMemoryAlloc::default(),
         images_alloc: crate::alloc::DeviceMemoryAlloc::default(),
-        uniforms_alloc: crate::alloc::HostVisibleAlloc::default(),
+        storage_alloc: crate::alloc::StorageMemoryAlloc::default(),
         attachments: helpers::RenderAttachments::default(),
     };
 
     setup_commands(setup, &mut resources)?;
     setup_vertex_memory(setup, &mut resources)?;
     setup_images_memory(setup, &mut resources)?;
-    setup_uniforms_memory(setup, &mut resources)?;
+    setup_storage_memory(setup, &mut resources)?;
     setup_samplers(setup, &mut resources)?;
 
     Ok(Box::new(resources))
@@ -192,8 +192,8 @@ fn setup_images_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlob
     Ok(())
 }
 
-fn setup_uniforms_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResources) -> Result<(), CommonError> {
-    use crate::alloc::{HostVisibleAlloc, KB};
+fn setup_storage_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGlobalResources) -> Result<(), CommonError> {
+    use crate::alloc::{StorageMemoryAlloc, KB};
 
     let ctx = setup.ctx.as_ref().unwrap();
     let instance = &ctx.instance.instance;
@@ -202,9 +202,8 @@ fn setup_uniforms_memory(setup: &mut VulkanEngineSetup, resources: &mut VulkanGl
         .ok_or_else(|| backend_init_err!("Failed to find memory type suitable for uniforms") )?;
 
     let uniforms_size = KB*100;
-    let default_alloc_capacity = 16;
 
-    resources.uniforms_alloc = HostVisibleAlloc::new(&ctx.device, uniforms_size, default_alloc_capacity, host_type_index)
+    resources.storage_alloc = StorageMemoryAlloc::new(&ctx.device, uniforms_size, host_type_index)
         .map_err(|err| backend_init_err!("Failed to create uniforms memory: {err}") )?;
 
     Ok(())
@@ -384,15 +383,17 @@ fn init_staging(setup: &mut VulkanEngineSetup) -> Result<Box<VulkanStaging>, Com
 // Descriptors
 //
 
-fn init_descriptors() -> Box<VulkanDescriptorSubmit> {
-    let images = vec![vk::DescriptorImageInfo::default(); 16];
-    let buffers = vec![vk::DescriptorBufferInfo::default(); 8];
-    let writes = vec![vk::WriteDescriptorSet::default(); 24];
+fn init_descriptors(setup: &mut VulkanEngineSetup) -> Box<VulkanDescriptorSubmit> {
+    let resources = setup.resources.as_ref().unwrap();
+    let storage_buffer = resources.storage_alloc.buffer;
+    let storage_base = resources.storage_alloc.mapped_data.unwrap() as usize;
 
     let submit = VulkanDescriptorSubmit {
-        images: images.into_boxed_slice(),
-        buffers: buffers.into_boxed_slice(),
-        writes: writes.into_boxed_slice(),
+        storage_buffer,
+        storage_base,
+        images: Box::default(),
+        buffers: Box::default(),
+        writes: Box::default(),
         images_count: 0,
         buffers_count: 0,
         writes_count: 0,

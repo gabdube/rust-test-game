@@ -20,6 +20,8 @@ layout (push_constant) uniform ScreenInfo {
     layout(offset=4)  float screen_height;
     layout(offset=8)  float view_x;
     layout(offset=12) float view_y;
+    layout(offset=16) float batch_x;
+    layout(offset=20) float batch_y;
 };
 
 layout (std430, set=0, binding=0) readonly buffer SpriteDataBuffer {
@@ -43,7 +45,7 @@ void main() {
         texcoord.y + (inUv.y * sprite_texel_size)
     );
 
-    vec4 positions = (vec4(0.0, 0.0, sprite_pixel_size, sprite_pixel_size) / vec4(screen_width, screen_height, screen_width, screen_height)) * 2.0;
+    vec4 positions = (vec4(view_x+batch_x, view_y+batch_y, sprite_pixel_size, sprite_pixel_size) / vec4(screen_width, screen_height, screen_width, screen_height)) * 2.0;
     float x = (positions.x - 1.0) + (inPos.x * positions.z);
     float y = (positions.y - 1.0) + (inPos.y * positions.w);
     gl_Position = vec4(x, y, 0.0, 1.0);

@@ -77,6 +77,8 @@ pub(super) fn batch_terrain(world: &mut WorldModule) {
     let view = world.data.world_view;
     let mut batches_count = 0;
 
+    world.render.terrain.batches.clear();
+
     for chunk in chunks {
         if !view.intersects(&chunk.view) {
             continue;
@@ -84,27 +86,26 @@ pub(super) fn batch_terrain(world: &mut WorldModule) {
 
         let mut i = TERRAIN_CHUNK_SIZE * batches_count;
         for row in chunk.cells.iter() {
-            sprites.write_data(i+0, row[0]);
-            sprites.write_data(i+1, row[1]);
-            sprites.write_data(i+2, row[2]);
-            sprites.write_data(i+3, row[3]);
-            sprites.write_data(i+4, row[4]);
-            sprites.write_data(i+5, row[5]);
-            sprites.write_data(i+6, row[6]);
-            sprites.write_data(i+7, row[7]);
-            sprites.write_data(i+8, row[8]);
-            sprites.write_data(i+9, row[9]);
-            sprites.write_data(i+10, row[10]);
-            sprites.write_data(i+11, row[11]);
-            sprites.write_data(i+12, row[12]);
-            sprites.write_data(i+13, row[13]);
-            sprites.write_data(i+14, row[14]);
-            sprites.write_data(i+15, row[15]);
+            sprites.write(i+0, row[0]);
+            sprites.write(i+1, row[1]);
+            sprites.write(i+2, row[2]);
+            sprites.write(i+3, row[3]);
+            sprites.write(i+4, row[4]);
+            sprites.write(i+5, row[5]);
+            sprites.write(i+6, row[6]);
+            sprites.write(i+7, row[7]);
+            sprites.write(i+8, row[8]);
+            sprites.write(i+9, row[9]);
+            sprites.write(i+10, row[10]);
+            sprites.write(i+11, row[11]);
+            sprites.write(i+12, row[12]);
+            sprites.write(i+13, row[13]);
+            sprites.write(i+14, row[14]);
+            sprites.write(i+15, row[15]);
             i += 16;
         }
 
         batches_count += 1;
+        world.render.terrain.batches.push([chunk.view.left, chunk.view.top]);
     }
-
-    world.render.terrain.terrain_instance_count = batches_count as u32;
 }

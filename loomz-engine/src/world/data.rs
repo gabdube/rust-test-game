@@ -4,7 +4,7 @@ use loomz_shared::api::{
     TerrainChunk, TerrainType, TERRAIN_CHUNK_STRIDE, TERRAIN_CELL_SIZE_PX
 };
 use loomz_shared::{CommonError, CommonErrorType, TextureId, PositionF32, SizeU32, RectF32, rect, backend_err, assets_err, chain_err};
-use loomz_engine_core::{LoomzEngineCore, alloc::StorageAlloc};
+use loomz_engine_core::{LoomzEngineCore, alloc::DeviceSlice};
 
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
@@ -62,12 +62,12 @@ pub(super) struct WorldData {
     pub default_actor: Option<Box<WorldActorData>>,
     pub actors_ids: Vec<u32>,
     pub actors_data: Vec<WorldActorData>,
-    pub actors_sprites: StorageAlloc<ActorSpriteData>,
+    pub actors_sprites: DeviceSlice<ActorSpriteData>,
 
     pub terrain_tilemap: Vec<TerrainSpriteData>,
     pub terrain_size: SizeU32,
     pub terrain_chunks: Vec<WorldTerrainChunkData>,
-    pub terrain_sprites: StorageAlloc<TerrainSpriteData>,
+    pub terrain_sprites: DeviceSlice<TerrainSpriteData>,
 }
 
 
@@ -167,7 +167,7 @@ impl super::WorldModule {
     fn write_world_actor_sprite(&mut self, index: usize) {
         let actor = &self.data.actors_data[index];
         let sprite = actor.sprite_data();
-        self.data.actors_sprites.write_data(index, sprite);
+        self.data.actors_sprites.write(index, sprite);
     }
 
     pub(super) fn update_world_actor(&mut self, core: &mut LoomzEngineCore, id: WorldActorId, update: WorldActorUpdate) -> Result<(), CommonError> {
@@ -317,12 +317,12 @@ impl Default for WorldData {
             default_actor: None,
             actors_ids: Vec::with_capacity(16),
             actors_data: Vec::with_capacity(16),
-            actors_sprites: StorageAlloc::default(),
+            actors_sprites: DeviceSlice::default(),
 
             terrain_tilemap: Vec::with_capacity(4),
             terrain_size: SizeU32::default(),
             terrain_chunks: Vec::with_capacity(16),
-            terrain_sprites: StorageAlloc::default(),
+            terrain_sprites: DeviceSlice::default(),
         }
     }
 }

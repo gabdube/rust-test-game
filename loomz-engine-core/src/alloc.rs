@@ -89,32 +89,44 @@ impl Default for DeviceMemoryAlloc {
 
 }
 
-/// Memory allocation for resources that are update often
-pub struct HostVisibleAlloc {
-    pub handle: vk::DeviceMemory,
+/**
+    Memory allocation for uniforms/storage data. Builds a single buffer that maps a HOST VISIBLE memory allocation.
+    [DeviceBox] values are suballocated in that buffer.
+*/
+pub struct StorageMemoryAlloc {
+    pub memory: vk::DeviceMemory,
+    pub buffer: vk::Buffer,
     pub size: vk::DeviceSize,
     pub mapped_data: Option<*mut u8>,
     pub next_offset: vk::DeviceSize,
-    pub allocations: Vec<MemoryRange>,
 }
 
-impl HostVisibleAlloc {
-    pub fn new(device: &Device, size: vk::DeviceSize, alloc_capacity: usize, memory_type_index: u32) -> Result<Self, vk::VkResult> {
+impl StorageMemoryAlloc {
+    pub fn new(device: &Device, size: vk::DeviceSize, memory_type_index: u32) -> Result<Self, vk::VkResult> {
+        let buffer_info = vk::BufferCreateInfo {
+            size,
+            usage: vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::UNIFORM_BUFFER,
+            ..Default::default()
+        };
+        let buffer = device.create_buffer(&buffer_info)?;
+        let buffer_req = device.get_buffer_memory_requirements(buffer);
+
         let alloc_info = vk::MemoryAllocateInfo {
-            allocation_size: size,
+            allocation_size: buffer_req.size,
             memory_type_index,
             ..Default::default()
         };
-        let handle = device.allocate_memory(&alloc_info)?;
-            
-        let mapped_data = device.map_memory(handle, 0, size as _)?;
+        let memory = device.allocate_memory(&alloc_info)?;
+        let mapped_data = device.map_memory(memory, 0, size as _)?;
 
-        let alloc = HostVisibleAlloc {
-            handle,
+        device.bind_buffer_memory(buffer, memory, 0)?;
+
+        let alloc = StorageMemoryAlloc {
+            memory,
+            buffer,
             size,
             mapped_data: Some(mapped_data as *mut u8),
             next_offset: 0,
-            allocations: Vec::with_capacity(alloc_capacity)
         };
 
         Ok(alloc)
@@ -122,45 +134,35 @@ impl HostVisibleAlloc {
 
     pub fn free(mut self, device: &Device) {
         self.mapped_data = None;
-        device.unmap_memory(self.handle);
-        device.free_memory(self.handle);
+        device.destroy_buffer(self.buffer);
+        device.unmap_memory(self.memory);
+        device.free_memory(self.memory);
     }
 
-    pub fn allocate_memory(&mut self, info: &vk::MemoryRequirements) -> vk::DeviceSize {
-        let aligned_offset = crate::helpers::align_device(self.next_offset, info.alignment);
-        let next_offset = aligned_offset + info.size;
+    pub fn allocate_slice<V: Copy>(&mut self, alignment: vk::DeviceSize, capacity: usize) -> *mut V {
+        let data_size = (capacity * size_of::<V>()) as vk::DeviceSize;
+        let aligned_offset = crate::helpers::align_device(self.next_offset, alignment);
+        let next_offset = aligned_offset + data_size;
         if next_offset > self.size {
-            panic!("TODO: reallocate memory, {}({}) > {}", next_offset, info.size, self.size);
+            panic!("TODO: reallocate memory, {}({}) > {}", next_offset, next_offset, self.size);
         }
-
-        self.allocations.push(MemoryRange {
-            base: self.next_offset,
-            offset: aligned_offset,
-        });
 
         self.next_offset = next_offset;
-        
-        aligned_offset
+
+        unsafe { self.mapped_data.unwrap().add(aligned_offset as usize) as *mut V }
     }
 
-    pub fn free_memory(&mut self, offset: vk::DeviceSize) {
-        let index = self.allocations.iter().position(|alloc| alloc.offset == offset );
-        match index {
-            Some(i) => { self.allocations[i].base |= 0b1 << 63; }
-            None => { eprintln!("Allocation at offset {offset} was not found in device memory"); }
-        }
-    }
 }
 
-impl Default for HostVisibleAlloc {
+impl Default for StorageMemoryAlloc {
 
     fn default() -> Self {
-        HostVisibleAlloc {
-            handle: vk::DeviceMemory::null(),
+        StorageMemoryAlloc {
+            memory: vk::DeviceMemory::null(),
+            buffer: vk::Buffer::null(),
             size: 0,
             mapped_data: None,
             next_offset: 0,
-            allocations: Vec::new(),
         }
     }
 
@@ -284,88 +286,84 @@ impl<V: Copy> Default for VertexAlloc<V> {
 
 
 /** 
-    A buffer holding data used for gpu storage buffer. Backed by host visible memory.
-
-    TODO (improvement): Storing the buffer and the buffer offset in the struct doesn't make much
-    sense because we only need the mapped_data and capacity for 99% of operations (aka write_data).
-    Buffer and offset could be moved into the engine core to save 16 bytes of memory.
+    A slice of data allocated on GPU visible memory.
 */
-pub struct StorageAlloc<V: Copy> {
-    buffer: vk::Buffer,
-    offset: vk::DeviceSize,
-    mapped_data: Option<*mut V>,
+pub struct DeviceSlice<V> {
     capacity: usize,
+    ptr: *mut V
 }
 
-impl<V: Copy> StorageAlloc<V> {
+impl<V: Default+Copy> DeviceSlice<V> {
 
-    pub fn new(core: &mut LoomzEngineCore, capacity: usize) -> Result<Self, CommonError> {
-        let device = &core.ctx.device;
+    /// Allocate the slice and initialize the values with the types Default value
+    pub fn new_default(core: &mut LoomzEngineCore, capacity: usize) -> Self {
         let storage_align = core.info.storage_min_align as vk::DeviceSize;
-        let total_size = capacity * size_of::<V>();
-
-        let buffer_info = vk::BufferCreateInfo {
-            size: total_size as _,
-            usage: vk::BufferUsageFlags::STORAGE_BUFFER,
-            ..Default::default()
-        };
-
-        let buffer = device.create_buffer(&buffer_info)
-            .map_err(|err| backend_err!("Failed to create storage buffer: {err}") )?;
-
-        let mut buffer_req = device.get_buffer_memory_requirements(buffer);
-        if buffer_req.alignment < storage_align {
-            buffer_req.alignment = storage_align;
+        let ptr = core.resources.storage_alloc.allocate_slice::<V>(storage_align, capacity);
+        let default = V::default();
+        for i in 0..capacity {
+            unsafe { ptr.add(i).write(default); }
         }
-
-        let uniforms_alloc = &mut core.resources.uniforms_alloc;
-        let offset = uniforms_alloc.allocate_memory(&buffer_req);
-        device.bind_buffer_memory(buffer, uniforms_alloc.handle, offset)
-            .map_err(|err| backend_err!("Failed to bind uniforms buffer memory: {err}") )?;
-
-        let mapped_data = unsafe { uniforms_alloc.mapped_data.map(|ptr| ptr.offset(offset as isize) as *mut V )  };
-
-        Ok(StorageAlloc{
-            buffer,
-            offset,
-            mapped_data,
-            capacity,
-        })
+        DeviceSlice { capacity, ptr }
     }
 
-    pub fn free(&self, core: &mut LoomzEngineCore) {
-        let device = &core.ctx.device;
-        core.resources.uniforms_alloc.free_memory(self.offset);
-        device.destroy_buffer(self.buffer);
+}
+
+impl<V> DeviceSlice<V> {
+    /// The total size of the slice
+    pub fn range(&self) -> usize {
+        size_of::<V>() * self.capacity
     }
 
-    pub fn write_data(&mut self, index: usize, data: V) {
-        assert!(index < self.capacity, "Tried to write data outside of allocated storage: ({} > {}) ", index, self.capacity);
-        assert!(self.mapped_data.is_some(), "Buffer data is not mapped");
-        let mapped_data_ptr = self.mapped_data.unwrap();
-        
-        // Safety, index is not out of bound
-        unsafe {
-            mapped_data_ptr.add(index).write(data);
-        }
+    pub fn ptr(&self) -> *mut V {
+        self.ptr
     }
 
-    pub fn handle(&self) -> vk::Buffer {
-        self.buffer
-    }
-
-    pub fn bytes_range(&self) -> vk::DeviceSize {
-        (self.capacity as vk::DeviceSize) * (size_of::<V>() as vk::DeviceSize)
+    pub fn write(&mut self, index: usize, data: V) {
+        assert!(index < self.capacity, "Index is outside capacity");
+        unsafe { self.ptr.add(index).write(data); }
     }
 }
 
-impl<V: Copy> Default for StorageAlloc<V> {
+impl<V> Default for DeviceSlice<V> {
     fn default() -> Self {
-        StorageAlloc {
-            buffer: vk::Buffer::null(),
-            mapped_data: None,
-            offset: 0,
+        DeviceSlice {
             capacity: 0,
+            ptr: ::std::ptr::null_mut(),
         }
     }
 }
+
+//     pub fn new(core: &mut LoomzEngineCore) -> Result<Self, CommonError> {
+//         let storage_align = core.info.storage_min_align as vk::DeviceSize;
+//         let total_size = capacity * size_of::<V>();
+//         let ptr = core.resources.storage_alloc.allocate_memory::<V>();
+//         Ok(StorageAlloc{
+//             ptr
+//         })
+//     }
+
+//     pub fn free(&self, core: &mut LoomzEngineCore) {
+//         let device = &core.ctx.device;
+//         core.resources.uniforms_alloc.free_memory(self.offset);
+//         device.destroy_buffer(self.buffer);
+//     }
+
+//     pub fn write_data(&mut self, index: usize, data: V) {
+//         assert!(index < self.capacity, "Tried to write data outside of allocated storage: ({} > {}) ", index, self.capacity);
+//         assert!(self.mapped_data.is_some(), "Buffer data is not mapped");
+//         let mapped_data_ptr = self.mapped_data.unwrap();
+        
+//         // Safety, index is not out of bound
+//         unsafe {
+//             mapped_data_ptr.add(index).write(data);
+//         }
+//     }
+
+//     pub fn handle(&self) -> vk::Buffer {
+//         self.buffer
+//     }
+
+//     pub fn bytes_range(&self) -> vk::DeviceSize {
+//         (self.capacity as vk::DeviceSize) * (size_of::<V>() as vk::DeviceSize)
+//     }
+// }

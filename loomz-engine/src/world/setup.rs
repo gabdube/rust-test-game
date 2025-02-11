@@ -1,4 +1,4 @@
-use loomz_engine_core::{LoomzEngineCore, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
+use loomz_engine_core::{LoomzEngineCore, alloc::{VertexAlloc, DeviceSlice}, descriptors::*, pipelines::*};
 use loomz_engine_core::VulkanContext;
 use loomz_shared::api::{TERRAIN_CHUNK_SIZE, TERRAIN_CHUNK_STRIDE};
 use loomz_shared::{CommonError, CommonErrorType, LoomzApi, TerrainType};
@@ -63,7 +63,7 @@ impl super::WorldModule {
 
         let constant_range = vk::PushConstantRange {
             offset: 0,
-            size: ::std::mem::size_of::<WorldPushConstant>() as u32,
+            size: ::std::mem::size_of::<WorldPushConstant>() as u32 + 8,  // + 8 for the batch offset
             stage_flags: vk::ShaderStageFlags::VERTEX,
         };
 
@@ -320,7 +320,7 @@ impl super::WorldModule {
 
     pub(super) fn setup_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         self.setup_vertex_buffer(core)?;
-        self.setup_terrain_sprites_buffer(core)?;
+        self.setup_terrain_sprites_buffer(core);
         self.setup_actor_sprites_buffers(core)?;
         self.setup_debug_vertex_buffer(core)?;
         Ok(())
@@ -363,34 +363,22 @@ impl super::WorldModule {
         Ok(())
     }
 
-    fn setup_terrain_sprites_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
+    fn setup_terrain_sprites_buffer(&mut self, core: &mut LoomzEngineCore) {
         // Enough space to render up to 16 chunk at once.
         // Assuming a 1:1 aspect ratio, this covers a screen size of 4096x4096 which should be more than enough
-        let sprites_capacity = TERRAIN_CHUNK_SIZE * 16;
-        self.data.terrain_sprites = StorageAlloc::new(core, sprites_capacity)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create terrain sprites storage alloc: {err}") )?;
-
-        Ok(())
+        self.data.terrain_sprites = DeviceSlice::new_default(core, TERRAIN_CHUNK_SIZE * 16);
     }
 
     fn setup_actor_sprites_buffers(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         use super::ACTOR_GLOBAL_LAYOUT_ID;
 
         let sprites_capacity = 100;
-        self.data.actors_sprites = StorageAlloc::new(core, sprites_capacity)
-            .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create sprites storage alloc: {err}") )?;
+        self.data.actors_sprites = DeviceSlice::new_default(core, sprites_capacity);
 
         self.render.actors.sprites_set = self.resources.descriptors.get_set::<ACTOR_GLOBAL_LAYOUT_ID>()
             .ok_or_else(|| backend_init_err!("Failed to fetch actors global descriptor set") )?;
 
-        core.descriptors.write_buffer(
-            self.render.actors.sprites_set,
-            self.data.actors_sprites.handle(),
-            0,
-            self.data.actors_sprites.bytes_range(),
-            super::ACTOR_SPRITE_BUFFER_BINDING_INDEX,
-            vk::DescriptorType::STORAGE_BUFFER
-        );
+        core.descriptors.write_storage_slice(self.render.actors.sprites_set, super::ACTOR_SPRITE_BUFFER_BINDING_INDEX, &self.data.actors_sprites);
 
         Ok(())
     }
@@ -472,14 +460,7 @@ impl super::WorldModule {
         let descriptor_set = self.resources.descriptors.get_set::<TERRAIN_GLOBAL_LAYOUT_ID>()
             .ok_or_else(|| backend_init_err!("Failed to fetch terrain global descriptor set") )?;
 
-        core.descriptors.write_buffer(
-            descriptor_set,
-            self.data.terrain_sprites.handle(),
-            0,
-            self.data.terrain_sprites.bytes_range(),
-            super::TERRAIN_SPRITE_BUFFER_BINDING_INDEX,
-            vk::DescriptorType::STORAGE_BUFFER
-        );
+        core.descriptors.write_storage_slice(descriptor_set, super::TERRAIN_SPRITE_BUFFER_BINDING_INDEX, &self.data.terrain_sprites);
 
         core.descriptors.write_image(
             descriptor_set,
