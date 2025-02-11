@@ -1,6 +1,6 @@
 use loomz_engine_core::{LoomzEngineCore, alloc::{VertexAlloc, StorageAlloc}, descriptors::*, pipelines::*};
 use loomz_engine_core::VulkanContext;
-use loomz_shared::api::TERRAIN_CHUNK_SIZE;
+use loomz_shared::api::{TERRAIN_CHUNK_SIZE, TERRAIN_CHUNK_STRIDE};
 use loomz_shared::{CommonError, CommonErrorType, LoomzApi, TerrainType};
 use loomz_shared::{backend_init_err, assets_err, chain_err};
 use super::{WorldPushConstant, WorldVertex, WorldDebugVertex, data::TerrainSpriteData};
@@ -138,6 +138,11 @@ impl super::WorldModule {
                 offset: 0,
                 format: vk::Format::R32G32_SFLOAT,
             },
+            PipelineVertexFormat {
+                location: 1,
+                offset: 8,
+                format: vk::Format::R32G32_SFLOAT,
+            },
         ];
 
         pipeline.set_shader_modules(modules);
@@ -187,6 +192,11 @@ impl super::WorldModule {
             PipelineVertexFormat {
                 location: 0,
                 offset: 0,
+                format: vk::Format::R32G32_SFLOAT,
+            },
+            PipelineVertexFormat {
+                location: 1,
+                offset: 8,
                 format: vk::Format::R32G32_SFLOAT,
             },
         ];
@@ -317,18 +327,36 @@ impl super::WorldModule {
     }
 
     fn setup_vertex_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let vertex_capacity = 4;
-        let index_capacity = 6;
-        self.resources.vertex = VertexAlloc::new(core, index_capacity, vertex_capacity)
+        let index_capacity = 6 * TERRAIN_CHUNK_SIZE;
+        let vertex_capacity = 4 * TERRAIN_CHUNK_SIZE;
+        self.resources.vertex = VertexAlloc::new(core, index_capacity as u32, vertex_capacity as u32)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create vertex alloc: {err}") )?;
 
-        let indices = [0, 1, 2, 2, 3, 1];
-        let vertex = [
-            WorldVertex { pos: [0.0,   0.0] },
-            WorldVertex { pos: [1.0,   0.0] },
-            WorldVertex { pos: [0.0,   1.0] },
-            WorldVertex { pos: [1.0,   1.0] },
-        ];
+        let mut indices = vec![0u32; index_capacity];
+        let mut vertex = vec![WorldVertex::default(); vertex_capacity];
+
+        for i in 0..TERRAIN_CHUNK_SIZE {
+            let index_base = i*6;
+            let vertex_value = (i*4) as u32;
+            indices[index_base+0] = vertex_value;
+            indices[index_base+1] = vertex_value + 1;
+            indices[index_base+2] = vertex_value + 2;
+            indices[index_base+3] = vertex_value + 2;
+            indices[index_base+4] = vertex_value + 3;
+            indices[index_base+5] = vertex_value + 1;
+        }
+
+        for y in 0..TERRAIN_CHUNK_STRIDE {
+            for x in 0..TERRAIN_CHUNK_STRIDE {
+                let vertex_index = ((y*TERRAIN_CHUNK_STRIDE)+x) * 4;
+                let x = x as f32;
+                let y = y as f32;
+                vertex[vertex_index+0] = WorldVertex { pos: [x+0.0,   y+0.0], uv: [0.0, 0.0] };
+                vertex[vertex_index+1] = WorldVertex { pos: [x+1.0,   y+0.0], uv: [1.0, 0.0] };
+                vertex[vertex_index+2] = WorldVertex { pos: [x+0.0,   y+1.0], uv: [0.0, 1.0] };
+                vertex[vertex_index+3] = WorldVertex { pos: [x+1.0,   y+1.0], uv: [1.0, 1.0] };
+            }
+        }
 
         self.resources.vertex.set_data(core, &indices, &vertex);
 
@@ -336,7 +364,9 @@ impl super::WorldModule {
     }
 
     fn setup_terrain_sprites_buffer(&mut self, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
-        let sprites_capacity = TERRAIN_CHUNK_SIZE * TERRAIN_CHUNK_SIZE * 8;
+        // Enough space to render up to 16 chunk at once.
+        // Assuming a 1:1 aspect ratio, this covers a screen size of 4096x4096 which should be more than enough
+        let sprites_capacity = TERRAIN_CHUNK_SIZE * 16;
         self.data.terrain_sprites = StorageAlloc::new(core, sprites_capacity)
             .map_err(|err| chain_err!(err, CommonErrorType::BackendInit, "Failed to create terrain sprites storage alloc: {err}") )?;
 
@@ -411,6 +441,8 @@ impl super::WorldModule {
                 uv_offset: [uv_x, uv_y]
             });
         }
+
+        assert!(tilemap.len() == TerrainType::Max as usize, "Tilemap length must fall in range for some optimization");
 
         Ok(())
     }

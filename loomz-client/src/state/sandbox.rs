@@ -121,8 +121,9 @@ impl LoomzClient {
     fn init_sandbox_terrain(&mut self) -> Result<(), CommonError> {
         let screen_size = self.api.inputs().screen_size_value();
         self.terrain.set_view(0.0, 0.0, screen_size.width, screen_size.height);
-        self.terrain.set_world_size(64, 32);
-        // self.terrain.set_cells(0, 0, 4, 4, &[loomz_shared::api::TerrainType::Sand; 16]);
+        self.terrain.set_world_size(16, 16);
+        self.terrain.set_cells(0, 0, 4, 1, &[loomz_shared::api::TerrainType::Sand; 4]);
+        println!("{:?}", self.terrain.get_cell(0, 5));
         self.terrain.sync(&self.api);
         Ok(())
     }

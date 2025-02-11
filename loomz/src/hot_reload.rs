@@ -226,7 +226,7 @@ fn lib_path() -> Result<PathBuf, CommonError> {
     }
 
     ::std::fs::copy(&src, &dst)
-        .map_err(|err| system_err!("Failed to copy library to temporary folder: {err}"))?;
+        .map_err(|err| system_err!("Failed to copy library to temporary folder. Be sure to toggle \"crate-type = [\"dylib\"]\" in the client Cargo.toml. {err}"))?;
 
     Ok(dst)
 }

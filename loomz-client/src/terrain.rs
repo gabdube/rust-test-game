@@ -1,5 +1,5 @@
 use bitflags::bitflags;
-use loomz_shared::api::{TerrainType, WorldTerrainChunk, TERRAIN_CHUNK_SIZE};
+use loomz_shared::api::{TerrainType, WorldTerrainChunk, TERRAIN_CHUNK_STRIDE};
 use loomz_shared::{LoomzApi, RectF32, SizeU32, rect};
 
 bitflags! {
@@ -37,8 +37,8 @@ impl Terrain {
         self.size.width = width;
         self.size.height = height;
 
-        let batch_x = ((width as usize) + (TERRAIN_CHUNK_SIZE-1)) / TERRAIN_CHUNK_SIZE;
-        let batch_y = ((height as usize) + (TERRAIN_CHUNK_SIZE-1)) / TERRAIN_CHUNK_SIZE;
+        let batch_x = ((width as usize) + (TERRAIN_CHUNK_STRIDE-1)) / TERRAIN_CHUNK_STRIDE;
+        let batch_y = ((height as usize) + (TERRAIN_CHUNK_STRIDE-1)) / TERRAIN_CHUNK_STRIDE;
         self.batches.clear();
         self.batches_updates.clear();
         self.flags = TerrainUpdateFlags::UPDATE_SIZE;
@@ -64,7 +64,7 @@ impl Terrain {
         assert!(width > 0 && height > 0, "Size must be greater than 0");
         assert!(x + width <= self.size.width && y + height <= self.size.height, "Rectangle is out of terrain range");
 
-        let chunk_stride = TERRAIN_CHUNK_SIZE as u32;
+        let chunk_stride = TERRAIN_CHUNK_STRIDE as u32;
         let stride = self.size.width / chunk_stride;
         let mut cell_index = 0usize;
 
@@ -96,6 +96,20 @@ impl Terrain {
                 cell_x += cell_count as u32;
             }
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn get_cell(&mut self, x: u32, y: u32) -> TerrainType {
+        let chunk_stride = TERRAIN_CHUNK_STRIDE as u32;
+        let stride = self.size.width / chunk_stride;
+        let batch_x = x / chunk_stride;
+        let batch_y = y / chunk_stride;
+        
+        let batch_index =  ((batch_y * stride) + batch_x) as usize;
+        let local_x = x - (batch_x * chunk_stride);
+        let local_y = y - (batch_y * chunk_stride);
+
+        self.batches[batch_index].cells[local_y as usize][local_x as usize]
     }
 
     #[inline(always)]

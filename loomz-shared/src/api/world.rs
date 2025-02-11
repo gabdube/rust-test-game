@@ -4,12 +4,13 @@ use crate::assets::TextureId;
 use super::base::{Id, MessageQueue, MessageQueueEx};
 
 /// Number of cells in a chunk row
-pub const TERRAIN_CHUNK_SIZE: usize = 16;
+pub const TERRAIN_CHUNK_STRIDE: usize = 16;
+pub const TERRAIN_CHUNK_SIZE: usize = TERRAIN_CHUNK_STRIDE * TERRAIN_CHUNK_STRIDE;
 
 /// The size of a cell in px on screen
 pub const TERRAIN_CELL_SIZE_PX: usize = 64;
 
-pub type TerrainChunk<T> = [[T; TERRAIN_CHUNK_SIZE]; TERRAIN_CHUNK_SIZE];
+pub type TerrainChunk<T> = [[T; TERRAIN_CHUNK_STRIDE]; TERRAIN_CHUNK_STRIDE];
 
 
 pub struct WorldAnimationTag;
@@ -27,12 +28,13 @@ bitflags! {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum TerrainType {
     #[default]
     Grass,
     Sand,
     Water,
+    Max,
 }
 
 impl TerrainType {
@@ -55,7 +57,7 @@ pub struct WorldTerrainChunk {
 
 impl WorldTerrainChunk {
     pub fn new(chunk_x: usize, chunk_y: usize) -> Self {
-        let stride_px = (TERRAIN_CHUNK_SIZE as f32) * (TERRAIN_CELL_SIZE_PX as f32);
+        let stride_px = (TERRAIN_CHUNK_STRIDE as f32) * (TERRAIN_CELL_SIZE_PX as f32);
         let [x, y] = [(chunk_x as f32) * stride_px, (chunk_y as f32) * stride_px];
         WorldTerrainChunk {
             position: PositionU32 { x: chunk_x as u32, y: chunk_y as u32 },

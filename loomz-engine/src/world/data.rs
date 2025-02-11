@@ -1,7 +1,7 @@
 use std::time::Instant;
 use loomz_shared::api::{
     WorldActorId, WorldAnimationId, WorldAnimation, WorldActorUpdate, WorldTerrainChunk,
-    TerrainChunk, TERRAIN_CHUNK_SIZE, TERRAIN_CELL_SIZE_PX
+    TerrainChunk, TerrainType, TERRAIN_CHUNK_STRIDE, TERRAIN_CELL_SIZE_PX
 };
 use loomz_shared::{CommonError, CommonErrorType, TextureId, PositionF32, SizeU32, RectF32, rect, backend_err, assets_err, chain_err};
 use loomz_engine_core::{LoomzEngineCore, alloc::StorageAlloc};
@@ -16,7 +16,7 @@ pub(super) struct ActorSpriteData {
 }
 
 #[repr(C)]
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, Debug)]
 pub(super) struct TerrainSpriteData {
     pub uv_offset: [f32; 2],
 }
@@ -42,7 +42,7 @@ pub(super) struct WorldTerrainChunkData {
 
 impl WorldTerrainChunkData {
     fn new(x: usize, y: usize) -> Self {
-        let stride_px = (TERRAIN_CHUNK_SIZE as f32) * (TERRAIN_CELL_SIZE_PX as f32);
+        let stride_px = (TERRAIN_CHUNK_STRIDE as f32) * (TERRAIN_CELL_SIZE_PX as f32);
         let [x, y] = [x as f32, y as f32];
         let [x, y] = [x * stride_px, y * stride_px];
         WorldTerrainChunkData {
@@ -205,13 +205,13 @@ impl super::WorldModule {
     // Terrain
     //
 
-    pub(super) fn set_world_size(&mut self, size: SizeU32) {
+    pub(super) fn set_terrain_size(&mut self, size: SizeU32) {
         let data = &mut self.data;
         data.terrain_size = size;
         data.terrain_chunks.clear();
 
-        let batch_x = ((size.width as usize) + (TERRAIN_CHUNK_SIZE-1)) / TERRAIN_CHUNK_SIZE;
-        let batch_y = ((size.height as usize) + (TERRAIN_CHUNK_SIZE-1)) / TERRAIN_CHUNK_SIZE;
+        let batch_x = ((size.width as usize) + (TERRAIN_CHUNK_STRIDE-1)) / TERRAIN_CHUNK_STRIDE;
+        let batch_y = ((size.height as usize) + (TERRAIN_CHUNK_STRIDE-1)) / TERRAIN_CHUNK_STRIDE;
 
         for y in 0..batch_y {
             for x in 0..batch_x {
@@ -220,12 +220,30 @@ impl super::WorldModule {
         }
     }
 
+    pub(super) fn set_terrain_view(&mut self, view: RectF32) {
+        let push = &mut self.render.push_constants[0];
+        push.view_offset_x = view.left;
+        push.view_offset_y = view.top;
+
+        // Only update the terrain if new chunks needs to be displayed
+        let old_view = self.data.world_view;
+        for chunk in self.data.terrain_chunks.iter() {
+            if chunk.view.intersects(&view) != chunk.view.intersects(&old_view) {
+                self.flags |= super::WorldFlags::UPDATE_TERRAIN;
+                break;
+            }
+        }
+
+        self.data.world_view = view;
+    }
+
     pub(super) fn copy_terrain_batch(&mut self, chunk: &WorldTerrainChunk) -> Result<(), CommonError> {
+        assert!(TERRAIN_CHUNK_STRIDE == 16, "This function assumes the chunk stride is 16");
         let data = &mut self.data;
 
         let x = chunk.position.x as usize;
         let y = chunk.position.y as usize;
-        let chunk_index = (y * TERRAIN_CHUNK_SIZE) + x;
+        let chunk_index = (y * TERRAIN_CHUNK_STRIDE) + x;
 
         let chunk_data = data.terrain_chunks.get_mut(chunk_index)
             .ok_or_else(|| backend_err!("Tried to update a chunk outside of the terrain range") )?;
@@ -235,39 +253,33 @@ impl super::WorldModule {
         }
 
         let tiles = &data.terrain_tilemap;
+        let get_tile = |ty: TerrainType| -> TerrainSpriteData {
+            // Safety: ty will always fall in the range of tiles. This is checked in `load_terrain_tilemap`s
+            unsafe { tiles.get(ty as usize).copied().unwrap_unchecked() }
+        };
 
-        for row in 0..TERRAIN_CHUNK_SIZE {
+        for row in 0..TERRAIN_CHUNK_STRIDE {
             let row_type = &chunk.cells[row];
             let row_data = &mut chunk_data.cells[row];
-            for (data, cell_type) in row_data.iter_mut().zip(row_type) {
-                *data = tiles.get(*cell_type as usize)
-                    .copied()
-                    .unwrap_or_default();
-            } 
+            row_data[0] = get_tile(row_type[0]);
+            row_data[1] = get_tile(row_type[1]);
+            row_data[2] = get_tile(row_type[2]);
+            row_data[3] = get_tile(row_type[3]);
+            row_data[4] = get_tile(row_type[4]);
+            row_data[5] = get_tile(row_type[5]);
+            row_data[6] = get_tile(row_type[6]);
+            row_data[7] = get_tile(row_type[7]);
+            row_data[8] = get_tile(row_type[8]);
+            row_data[9] = get_tile(row_type[9]);
+            row_data[10] = get_tile(row_type[10]);
+            row_data[11] = get_tile(row_type[11]);
+            row_data[12] = get_tile(row_type[12]);
+            row_data[13] = get_tile(row_type[13]);
+            row_data[14] = get_tile(row_type[14]);
+            row_data[15] = get_tile(row_type[15]);
         }
 
         Ok(())
-    }
-
-    pub(super) fn generate_terrain_cells(&mut self, core: &mut LoomzEngineCore) {
-        let data = &mut self.data;
-
-        let sprites = &mut data.terrain_sprites;
-        let mut sprites_offset = 0;
-
-        let view = data.world_view;
-        // for chunk in data.terrain_chunks.iter() {
-        //     if !view.intersects(&chunk.view) {
-        //         continue;
-        //     }
-
-        //     for row in chunk.cells.iter() {
-        //         for &cell in row.iter() {
-        //             sprites.write_data(sprites_offset, cell);
-        //             sprites_offset += 1;
-        //         }
-        //     }
-        // }
     }
 
 }

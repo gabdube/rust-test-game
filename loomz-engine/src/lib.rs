@@ -56,8 +56,9 @@ impl LoomzEngine {
         Ok(())
     }
 
-    pub fn resize_output(&mut self, width: u32, height: u32) -> Result<(), CommonError> {
-        self.core.resize_output(width, height)?;
+    pub fn resize_output(&mut self) -> Result<(), CommonError> {
+        let new_size = self.api.inputs().screen_size_value();
+        self.core.resize_output(new_size.width as u32, new_size.height as u32)?;
         self.world.rebuild(&mut self.core);
         self.gui.rebuild(&self.core);
         Ok(())

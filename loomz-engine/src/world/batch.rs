@@ -66,3 +66,45 @@ pub(super) fn batch_actors(world: &mut WorldModule) {
 //
 // Terrain batching
 //
+
+pub(super) fn batch_terrain(world: &mut WorldModule) {
+    use loomz_shared::api::{TERRAIN_CHUNK_STRIDE, TERRAIN_CHUNK_SIZE};
+
+    assert!(TERRAIN_CHUNK_STRIDE == 16, "This function assumes the chunk stride is 16");
+
+    let sprites = &mut world.data.terrain_sprites;
+    let chunks = &world.data.terrain_chunks;
+    let view = world.data.world_view;
+    let mut batches_count = 0;
+
+    for chunk in chunks {
+        if !view.intersects(&chunk.view) {
+            continue;
+        }
+
+        let mut i = TERRAIN_CHUNK_SIZE * batches_count;
+        for row in chunk.cells.iter() {
+            sprites.write_data(i+0, row[0]);
+            sprites.write_data(i+1, row[1]);
+            sprites.write_data(i+2, row[2]);
+            sprites.write_data(i+3, row[3]);
+            sprites.write_data(i+4, row[4]);
+            sprites.write_data(i+5, row[5]);
+            sprites.write_data(i+6, row[6]);
+            sprites.write_data(i+7, row[7]);
+            sprites.write_data(i+8, row[8]);
+            sprites.write_data(i+9, row[9]);
+            sprites.write_data(i+10, row[10]);
+            sprites.write_data(i+11, row[11]);
+            sprites.write_data(i+12, row[12]);
+            sprites.write_data(i+13, row[13]);
+            sprites.write_data(i+14, row[14]);
+            sprites.write_data(i+15, row[15]);
+            i += 16;
+        }
+
+        batches_count += 1;
+    }
+
+    world.render.terrain.terrain_instance_count = batches_count as u32;
+}

@@ -6,9 +6,9 @@ mod debug;
 use fnv::FnvHashMap;
 use bitflags::bitflags;
 use std::{slice, sync::Arc, u32, usize};
-use loomz_shared::api::{LoomzApi, WorldUpdate, WorldDebugFlags};
+use loomz_shared::api::{LoomzApi, WorldUpdate, WorldDebugFlags, TERRAIN_CHUNK_SIZE};
 use loomz_shared::assets::{LoomzAssetsBundle, TextureId, ShaderId, AssetId};
-use loomz_shared::{CommonError, RectF32, RgbaU8, SizeF32, size};
+use loomz_shared::{CommonError, RgbaU8, SizeF32, size};
 use loomz_engine_core::{LoomzEngineCore, VulkanContext, Texture, alloc::VertexAlloc, descriptors::*, pipelines::*};
 use super::pipeline_compiler::PipelineCompiler;
 
@@ -55,6 +55,7 @@ pub struct WorldPushConstant {
 #[derive(Default, Copy, Clone)]
 pub struct WorldVertex {
     pub pos: [f32; 2],
+    pub uv: [f32; 2],
 }
 
 #[repr(C)]
@@ -137,6 +138,7 @@ struct WorldTerrainRender {
     vertex_offset: [vk::DeviceSize; 1],
     index_offset: vk::DeviceSize,
     terrain_set: vk::DescriptorSet,
+    terrain_instance_count: u32,
 }
 
 /// Data used when rendering the world actors
@@ -303,16 +305,18 @@ impl WorldModule {
 
     fn render_terrain(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
         const GRAPHICS: vk::PipelineBindPoint = vk::PipelineBindPoint::GRAPHICS;
+        const BATCH_INDEX_COUNT: u32 = (6 * TERRAIN_CHUNK_SIZE) as u32;
+
         let device = &ctx.device;
         let push = Self::push_values(&self.render.push_constants);
         let render = self.render.terrain;
 
-        // device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
-        // device.cmd_bind_index_buffer(cmd, render.vertex_buffer[0], render.index_offset, vk::IndexType::UINT32);
-        // device.cmd_bind_vertex_buffers(cmd, 0, &render.vertex_buffer, &render.vertex_offset);
-        // device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push);
-        // device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, TERRAIN_GLOBAL_LAYOUT_INDEX, slice::from_ref(&render.terrain_set), &[]);
-        // device.cmd_draw_indexed(cmd, 6, 1, 0, 0, 0);
+        device.cmd_bind_pipeline(cmd, GRAPHICS, render.pipeline_handle);
+        device.cmd_bind_index_buffer(cmd, render.vertex_buffer[0], render.index_offset, vk::IndexType::UINT32);
+        device.cmd_bind_vertex_buffers(cmd, 0, &render.vertex_buffer, &render.vertex_offset);
+        device.cmd_push_constants(cmd, render.pipeline_layout, PUSH_STAGE_FLAGS, 0, PUSH_SIZE, push);
+        device.cmd_bind_descriptor_sets(cmd, GRAPHICS, render.pipeline_layout, TERRAIN_GLOBAL_LAYOUT_INDEX, slice::from_ref(&render.terrain_set), &[]);
+        device.cmd_draw_indexed(cmd, BATCH_INDEX_COUNT, render.terrain_instance_count, 0, 0, 0);
     }
 
     fn render_actors(&self, ctx: &VulkanContext, cmd: vk::CommandBuffer) {
@@ -354,14 +358,6 @@ impl WorldModule {
     // Updates
     //
 
-    fn set_view_offset(&mut self, view: RectF32) {
-        let push = &mut self.render.push_constants[0];
-        push.view_offset_x = view.left;
-        push.view_offset_y = view.top;
-
-        self.data.world_view = view;
-    }
-
     fn api_update(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         if let Some(animations) = api.world().read_animations() {
             for (id, animation) in animations {
@@ -379,9 +375,11 @@ impl WorldModule {
             for (_, update) in messages {
                 match update {
                     WorldUpdate::ShowWorld(visible) => { self.flags.set(WorldFlags::SHOW_WORLD, visible); },
-                    WorldUpdate::WorldView(view) => { self.set_view_offset(view); },
+                    WorldUpdate::WorldView(view) => { 
+                        self.set_terrain_view(view);
+                    },
                     WorldUpdate::WorldSize(size) => { 
-                        self.set_world_size(size);
+                        self.set_terrain_size(size);
                         self.flags |= WorldFlags::UPDATE_TERRAIN;
                     },
                     WorldUpdate::WorldTerrain(chunk) => {
@@ -429,7 +427,7 @@ impl WorldModule {
         }
 
         if self.flags.contains(WorldFlags::UPDATE_TERRAIN) {
-            self.generate_terrain_cells(core);
+            batch::batch_terrain(self);
             self.flags.remove(WorldFlags::UPDATE_TERRAIN);
         }
 
@@ -466,6 +464,7 @@ impl Default for WorldRender {
                 vertex_offset: [0],
                 index_offset: 0,
                 terrain_set: vk::DescriptorSet::null(),
+                terrain_instance_count: 0,
             },
             actors: WorldActorRender {
                 pipeline_handle: vk::Pipeline::null(),

@@ -70,18 +70,18 @@ impl LoomzApplication {
 
     pub fn update(&mut self) -> Result<(), CommonError> {
         self.client.update()?;
-        self.engine.update()?;
         Ok(())
     }
 
     pub fn redraw(&mut self) -> Result<(), CommonError> {
+        self.engine.update()?;
         self.engine.render()?;
         self.window().request_redraw();
         Ok(())
     }
 
-    pub fn resized(&mut self, width: u32, height: u32) -> Result<(), CommonError> {
-        self.engine.resize_output(width, height)
+    pub fn resized(&mut self) -> Result<(), CommonError> {
+        self.engine.resize_output()
     }
 
     pub fn last_error(&mut self) -> Option<CommonError> {

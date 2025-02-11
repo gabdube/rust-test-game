@@ -3,13 +3,15 @@
 #extension GL_ARB_separate_shader_objects : enable
 #extension GL_ARB_shading_language_420pack : enable
 
-layout (location = 0) in vec2 inPos;
-layout (location = 0) out vec2 outUv;
-
 struct SpriteData {
     vec4 position;
     vec4 texture_coordinates;
 };
+
+layout (location = 0) in vec2 inPos;
+layout (location = 1) in vec2 inUv;
+
+layout (location = 0) out vec2 outUv;
 
 layout (push_constant) uniform ScreenInfo {
     layout(offset=0)  float screen_width;
@@ -28,8 +30,8 @@ void main() {
 
     vec4 texcoord = data.texture_coordinates;
     outUv = vec2(
-        texcoord.x + (inPos.x * texcoord.z),  
-        texcoord.y + (inPos.y * texcoord.w)
+        texcoord.x + (inUv.x * texcoord.z),  
+        texcoord.y + (inUv.y * texcoord.w)
     );
 
     vec4 positions = (data.position / vec4(screen_width, screen_height, screen_width, screen_height)) * 2.0;

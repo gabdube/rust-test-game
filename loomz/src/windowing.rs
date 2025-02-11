@@ -27,6 +27,10 @@ impl<'a> ApplicationHandler for LoomzApplication {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        if self.api().must_exit() {
+            event_loop.exit();
+        }
+
         match event {
             WindowEvent::RedrawRequested => {
                 if let Err(e) = self.update() {
@@ -38,18 +42,14 @@ impl<'a> ApplicationHandler for LoomzApplication {
                     self.set_last_error(e);
                     event_loop.exit();
                 }
-
-                if self.api().must_exit() {
-                    event_loop.exit();
-                }
             },
             WindowEvent::Resized(size) => {
-                if let Err(e) = self.resized(size.width, size.height) {
+                self.api().write_inputs().update_screen_size(size.width as f32, size.height as f32);
+
+                if let Err(e) = self.resized() {
                     self.set_last_error(e);
                     event_loop.exit();
                 }
-
-                self.api().write_inputs().update_screen_size(size.width as f32, size.height as f32);
             },
             WindowEvent::CursorMoved { device_id: _, position } => {
                 self.api().write_inputs().update_cursor_position(position.x, position.y);

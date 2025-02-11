@@ -153,8 +153,14 @@ impl LoomzApplication {
         }
     }
 
-    pub fn resized(&mut self, _width: u32, _height: u32) -> Result<(), CommonError> {
-        // TODO. Engine thread can resize itself, but we should send a message just to be sure
+    pub fn resized(&mut self) -> Result<(), CommonError> {
+        match self {
+            LoomzApplication::Runtime(run) => {
+                run.shared.resize();
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 
@@ -226,6 +232,15 @@ fn engine_loop(engine: LoomzEngine, shared: LoomzMultithreadedShared) {
     let shared = shared;
 
     while shared.running() {
+        if shared.must_resize() {
+            if let Err(error) = engine.resize_output() {
+                shared.set_last_error(error);
+                break;
+            }
+
+            continue;
+        }
+
         let result = engine.update()
             .and_then(|_| engine.render() );
 

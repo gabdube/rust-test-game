@@ -9,6 +9,7 @@ struct InnerMutexData {
 struct InnerData {
     data: Mutex<InnerMutexData>,
     exit: AtomicBool,
+    resize: AtomicBool,
 }
 
 /// Synchronization between the container app "loomz" and the client/engine threads
@@ -23,12 +24,21 @@ impl LoomzMultithreadedShared {
             data: Mutex::new(InnerMutexData {
                 last_error: None,
             }),
-            exit: AtomicBool::new(false)
+            exit: AtomicBool::new(false),
+            resize: AtomicBool::new(false),
         };
 
         LoomzMultithreadedShared {
             inner: Arc::new(inner)
         }
+    }
+
+    pub fn resize(&self) {
+        self.inner.resize.store(true, Ordering::SeqCst)
+    }
+
+    pub fn must_resize(&self) -> bool {
+        self.inner.resize.fetch_and(false, Ordering::SeqCst)
     }
 
     pub fn exit(&self) {
