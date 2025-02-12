@@ -65,6 +65,10 @@ impl MouseButtonState {
     pub const fn left_button_down(&self) -> bool {
         self.contains(MouseButtonState::LEFT)
     }
+
+    pub const fn right_button_down(&self) -> bool {
+        self.contains(MouseButtonState::RIGHT)
+    }
 }
 
 

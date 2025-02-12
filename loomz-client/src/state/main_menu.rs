@@ -75,12 +75,12 @@ impl LoomzClient {
 
         self.menu.build(&self.api, &view, |gui| {
             gui.layout(GuiLayoutType::VBox);
-            gui.layout_item(400.0, 440.0);
+            gui.layout_item(500.0, 440.0);
             gui.frame("main_panel_style", |gui| {
                 gui.layout_item(300.0, 100.0);
 
                 gui.label_callback(GuiLabelCallback::Click, START_GAME);
-                gui.label("Start", "menu_item");
+                gui.label("New Game", "menu_item");
 
                 gui.label_callback(GuiLabelCallback::Click, START_SANDBOX);
                 gui.label("Sandbox", "menu_item");

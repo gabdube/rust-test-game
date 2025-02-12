@@ -6,10 +6,18 @@ mod state;
 
 use animations::{Animations, PawnAnimationType};
 
+use bitflags::bitflags;
 use std::time::Instant;
 use loomz_shared::base_types::PositionF32;
 use loomz_shared::api::{WorldActorId, WorldDebugFlags};
 use loomz_shared::{chain_err, CommonError, CommonErrorType, LoomzApi};
+
+bitflags! {
+    #[derive(Copy, Clone, Default, Debug)]
+    pub struct GameInputFlags: u8 {
+        const DRAGGING_VIEW  = 0b0001;
+    }
+}
 
 #[derive(Default)]
 pub struct Player {
@@ -50,18 +58,19 @@ pub struct LoomzClient {
     terrain: terrain::Terrain,
     
     state: GameState,
+    input_flags: GameInputFlags,
     debug_state: DebugState
 }
 
 impl LoomzClient {
 
-    pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
+    fn build_client(api: &LoomzApi) -> Self {
         let timing = ClientTiming {
             last: Instant::now(),
             delta_ms: 0.0,
         };
         
-        let mut client = LoomzClient {
+        LoomzClient {
             api: api.clone(),
             timing,
             animations: Box::default(),
@@ -74,13 +83,15 @@ impl LoomzClient {
             terrain: terrain::Terrain::init(),
 
             state: GameState::Uninitialized,
+            input_flags: GameInputFlags::empty(),
             debug_state: DebugState::default(),
-        };
+        }
+    }
 
+    pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
+        let mut client = Self::build_client(api);
         client.animations.load(api)?;
-
         client.init_sandbox()?;
-
         Ok(client)
     }
 
@@ -88,20 +99,28 @@ impl LoomzClient {
         let mut reader = crate::store::SaveFileReader::new(&bytes)
             .map_err(|err| chain_err!(err, CommonErrorType::SaveLoad, "Failed to initialize client from stored session") )?;
 
-        let mut client = Self::init(api)?;
+        let mut client = Self::build_client(api);
         client.state = reader.read_from_u32();
+        client.input_flags = reader.read_from_u32();
+        client.debug_state = reader.load();
+        client.animations = Box::new(reader.read());
         client.target_position = reader.read();
         client.player = reader.load();
         client.menu = reader.load();
+        client.terrain = reader.load();
 
         Ok(client)
     }
 
     pub fn export(&self, writer: &mut crate::store::SaveFileWriter) {
         writer.write_into_u32(self.state);
+        writer.write_into_u32(self.input_flags);
+        writer.store(&self.debug_state);
+        writer.write(&*self.animations);
         writer.write(&self.target_position);
         writer.store(&self.player);
         writer.store(&self.menu);
+        writer.store(&self.terrain);
     }
 
     pub fn update(&mut self) -> Result<(), CommonError> {
@@ -268,6 +287,19 @@ impl loomz_shared::store::StoreAndLoad for Player {
     }
 }
 
+impl loomz_shared::store::StoreAndLoad for DebugState {
+    fn load(reader: &mut loomz_shared::store::SaveFileReaderBase) -> Self {
+        let world = WorldDebugFlags::from_bits(reader.read_u32() as u8).unwrap_or_default();
+        DebugState {
+            world
+        }
+    }
+
+    fn store(&self, writer: &mut loomz_shared::store::SaveFileWriterBase) {
+        writer.write_u32(self.world.bits() as u32);
+    }
+}
+
 impl From<u32> for GameState {
     fn from(value: u32) -> Self {
         match value {
@@ -287,5 +319,17 @@ impl From<GameState> for u32 {
             GameState::Game => 2,
             GameState::Sandbox => 3,
         }
+    }
+}
+
+impl Into<u32> for GameInputFlags {
+    fn into(self) -> u32 {
+        self.bits() as u32
+    }
+}
+
+impl From<u32> for GameInputFlags {
+    fn from(value: u32) -> Self {
+        GameInputFlags::from_bits(value as u8).unwrap_or_default()
     }
 }

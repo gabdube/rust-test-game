@@ -6,12 +6,12 @@ use super::{
     layout::*,
     style::*,
     callbacks::{IntoGuiCallback, GuiComponentCallbacksValue},
-    Gui, GuiInnerState
+    Gui
 };
 
 pub struct GuiBuilder<'a> {
     api: &'a LoomzApi,
-    gui: &'a mut GuiInnerState,
+    gui: &'a mut Gui,
     layout_item: GuiLayoutItem,
     next_layout: GuiLayoutType,
     item_index: u32,
@@ -24,7 +24,7 @@ impl<'a> GuiBuilder<'a> {
 
         GuiBuilder {
             api,
-            gui: &mut gui.inner_state,
+            gui,
             layout_item: GuiLayoutItem::default(),
             next_layout: GuiLayoutType::VBox,
             item_index: 0,
@@ -32,23 +32,22 @@ impl<'a> GuiBuilder<'a> {
     }
 
     fn clear_gui_components(view: &RectF32, gui: &mut Gui) {
-        let inner = &mut gui.inner_state;
-        inner.base_view = *view;
-        inner.state = Default::default();
-        inner.callbacks.clear();
-        inner.callbacks_output.clear();
-        inner.layouts.clear();
-        inner.layout_items.clear();
-        inner.component_base.clear();
-        inner.component_data.clear();
-        inner.sprites.clear();
+        gui.base_view = *view;
+        gui.state = Default::default();
+        gui.callbacks.clear();
+        gui.callbacks_output.clear();
+        gui.layouts.clear();
+        gui.layout_items.clear();
+        gui.component_base.clear();
+        gui.component_data.clear();
+        gui.sprites.clear();
 
-        let builder_data = &mut inner.builder_data;
+        let builder_data = &mut gui.builder_data;
         builder_data.layouts_stack.clear();
         builder_data.layouts_stack.push((0, GuiLayout::default()));
         builder_data.last_callbacks = GuiComponentCallbacksValue::None;
 
-        inner.layouts.push(GuiLayout::default());
+        gui.layouts.push(GuiLayout::default());
     }
 
     /// Sets the layout used to position the child items of the next component

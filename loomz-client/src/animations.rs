@@ -12,7 +12,7 @@ pub enum PawnAnimationType {
     IdleWalk
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct PawnAnimation {
     pub idle: WorldAnimationId,
     pub walk: WorldAnimationId,
@@ -36,7 +36,7 @@ impl PawnAnimation {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct WarriorAnimation {
     pub idle: WorldAnimationId,
     pub walk: WorldAnimationId,
@@ -65,7 +65,7 @@ impl WarriorAnimation {
 }
 
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub struct Animations {
     pub pawn: PawnAnimation,
     pub warrior: WarriorAnimation,

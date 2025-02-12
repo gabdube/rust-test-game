@@ -77,6 +77,9 @@ impl Terrain {
             while cells_to_copy > 0 {
                 let batch_x = cell_x / chunk_stride;
                 let batch_index = ((batch_y * stride) + batch_x) as usize;
+                if !self.batches_updates.iter().any(|&i| i == batch_index) {
+                    self.batches_updates.push(batch_index);
+                }
 
                 let local_x = cell_x - (batch_x * chunk_stride);
                 let cell_count = u32::min(chunk_stride - local_x, cells_to_copy) as usize; 
@@ -147,6 +150,24 @@ impl Terrain {
         self.flags = TerrainUpdateFlags::empty();
     }
 
+}
+
+impl loomz_shared::store::StoreAndLoad for Terrain {
+    fn load(reader: &mut loomz_shared::store::SaveFileReaderBase) -> Self {
+        let mut terrain = Terrain::init();
+        terrain.view = reader.read();
+        terrain.size = reader.read();
+        terrain.flags = TerrainUpdateFlags::from_bits(reader.read_u32() as u8).unwrap_or_default();
+        terrain.batches = reader.read_slice().to_vec();
+        terrain
+    }
+
+    fn store(&self, writer: &mut loomz_shared::store::SaveFileWriterBase) {
+        writer.write(&self.view);
+        writer.write(&self.size);
+        writer.write_u32(self.flags.bits() as u32);
+        writer.write_slice(&self.batches);
+    }
 }
 
 #[cfg(test)]

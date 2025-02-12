@@ -22,7 +22,7 @@ There will be a article that will go over the architecture at some point in the 
 
 ## Running instructions
 
-You need rust and a system that supports Vulkan 1.2
+You need rust and a gpu that supports Vulkan 1.2
 
 After cloning the repo and downloading the assets from the release section ( https://github.com/gabdube/rust-test-game/releases/tag/0.0.1assets ), just run this command from your console
 

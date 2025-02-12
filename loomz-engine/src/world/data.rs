@@ -229,6 +229,7 @@ impl super::WorldModule {
         let old_view = self.data.world_view;
         for chunk in self.data.terrain_chunks.iter() {
             if chunk.view.intersects(&view) != chunk.view.intersects(&old_view) {
+                
                 self.flags |= super::WorldFlags::UPDATE_TERRAIN;
                 break;
             }

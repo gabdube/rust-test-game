@@ -78,9 +78,14 @@ impl<'a> ApplicationHandler for LoomzApplication {
 }
 
 fn create_window(event_loop: &ActiveEventLoop, window_size: loomz_shared::SizeF32) -> Result<Window, CommonError> {
+    let monitor_size = event_loop.primary_monitor()
+        .map(|m| m.size() )
+        .unwrap_or_default();
+    
     let window_attr = Window::default_attributes()
         .with_title("Loomz App")
         .with_inner_size(winit::dpi::PhysicalSize::new(window_size.width, window_size.height))
+        .with_position(winit::dpi::PhysicalPosition::new(monitor_size.width - (window_size.width as u32), 0))
         .with_visible(false);
 
     event_loop.create_window(window_attr)

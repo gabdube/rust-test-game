@@ -1,6 +1,6 @@
 use loomz_shared::inputs::keys;
 use loomz_shared::{CommonError, rect};
-use crate::{GameState, LoomzClient};
+use crate::{LoomzClient, GameState, GameInputFlags};
 
 const RETURN_SANDBOX: u64 = 200;
 const EXIT_SANDBOX: u64 = 201;
@@ -32,8 +32,20 @@ impl LoomzClient {
             None => { return Ok(()); }
         };
 
-        let size = new_inputs.screen_size_value();
+        if let Some(new_size) = new_inputs.screen_size() {
+            self.terrain.set_view(0.0, 0.0, new_size.width, new_size.height);
+            self.terrain.sync(&self.api);
+        }
 
+        if let Some(new_mouse) = new_inputs.mouse_buttons() {
+            match new_mouse.right_button_down() {
+                true => { self.input_flags.insert(GameInputFlags::DRAGGING_VIEW); },
+                false => { self.input_flags.remove(GameInputFlags::DRAGGING_VIEW);}
+            }
+        }
+
+        // Must be outsude of `keystate` to prevent a deadlock
+        let size = new_inputs.screen_size_value();
         if let Some(keystate) = new_inputs.keystate() {
             if keystate.just_pressed(keys::ESC) {
                 self.menu.resize(&self.api, &rect(0.0, 0.0, size.width, size.height));
@@ -121,7 +133,7 @@ impl LoomzClient {
     fn init_sandbox_terrain(&mut self) -> Result<(), CommonError> {
         let screen_size = self.api.inputs().screen_size_value();
         self.terrain.set_view(0.0, 0.0, screen_size.width, screen_size.height);
-        self.terrain.set_world_size(32, 16);
+        self.terrain.set_world_size(48, 32);
         //self.terrain.set_cells(0, 0, 31, 1, &[loomz_shared::api::TerrainType::Sand; 31]);
         self.terrain.sync(&self.api);
         Ok(())

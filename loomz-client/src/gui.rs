@@ -47,8 +47,7 @@ struct GuiBuilderData {
     root_layout_type: GuiLayoutType,
 }
 
-#[repr(C)]
-struct GuiInnerState {
+pub struct Gui {
     state: GuiComponentState,
     styles: Vec<GuiComponentStyle>,
     callbacks: Vec<GuiComponentCallbacksValue>,
@@ -68,10 +67,6 @@ struct GuiInnerState {
     visible: bool,
 }
 
-pub struct Gui {
-    inner_state: Box<GuiInnerState>,
-}
-
 impl Gui {
 
     pub fn build_style<F: FnOnce(&mut GuiStyleBuilder)>(&mut self, api: &LoomzApi, cb: F) -> Result<(), CommonError> {
@@ -89,7 +84,7 @@ impl Gui {
 
         self.check_errors()?;
 
-        self.inner_state.layouts[0] = self.get_root_layout();
+        self.layouts[0] = self.get_root_layout();
 
         layout::compute(self);
 
@@ -125,35 +120,35 @@ impl Gui {
     }
 
     pub fn drain_events<'a, E: IntoGuiCallback>(&'a mut self) -> impl Iterator<Item=E> + 'a {
-        let callback_outputs = &mut self.inner_state.callbacks_output;
+        let callback_outputs = &mut self.callbacks_output;
         callback_outputs.drain(..)
                 .map(|raw| E::from_u64(raw) )
     }
 
     pub fn toggle(&mut self, api: &LoomzApi, visible: bool) {
-        self.inner_state.visible = visible;
-        api.gui().toggle_gui(&self.inner_state.id, visible);
+        self.visible = visible;
+        api.gui().toggle_gui(&self.id, visible);
     }
 
     pub fn visible(&self) -> bool {
-        self.inner_state.visible
+        self.visible
     }
 
     fn sync_with_engine(&mut self, api: &LoomzApi) {
         self.generate_sprites();
-        api.gui().update_gui(&self.inner_state.id, &self.inner_state.sprites);
+        api.gui().update_gui(&self.id, &self.sprites);
     }
 
     fn inner_resize(&mut self, view: &RectF32) {
-        self.inner_state.base_view = *view;
+        self.base_view = *view;
         layout::compute(self);
     }
 
     fn on_style_update(&mut self, old_state: GuiComponentState) {
-        let styles = &self.inner_state.styles;
-        let base = &self.inner_state.component_base;
-        let data = &mut self.inner_state.component_data;
-        let state = self.inner_state.state;
+        let styles = &self.styles;
+        let base = &self.component_base;
+        let data = &mut self.component_data;
+        let state = self.state;
         let component_count = data.len() as u32;
 
         let mut update_style = |index: u32, new_state: GuiStyleState| {
@@ -190,25 +185,22 @@ impl Gui {
     }
 
     fn on_events(&mut self, component_index: usize, inner_event: GuiInnerEvent) {
-        let inner = &mut self.inner_state;
-        let base = inner.component_base[component_index];
+        let base = self.component_base[component_index];
         if base.callbacks_index != u32::MAX {
-            let callbacks = inner.callbacks[base.callbacks_index as usize];
-            let callback_output = &mut inner.callbacks_output;
-            inner.component_data[component_index].on_events(&callbacks, callback_output, inner_event);
+            let callbacks = self.callbacks[base.callbacks_index as usize];
+            let callback_output = &mut self.callbacks_output;
+            self.component_data[component_index].on_events(&callbacks, callback_output, inner_event);
         }
     }
 
     fn update_cursor_position(&mut self, position: PositionF32, need_sync: &mut bool) {
-        let inner_state = &mut self.inner_state;
-
-        let old_state = inner_state.state;
+        let old_state = self.state;
         let mut new_hovered_index = u32::MAX;
 
         let mut index = 0;
-        let max_components = inner_state.layout_items.len();
+        let max_components = self.layout_items.len();
         while index < max_components {
-            let item = inner_state.layout_items[index];
+            let item = self.layout_items[index];
             let view = RectF32::from_position_and_size(item.position, item.size);
             if view.is_point_inside(position)  {
                 new_hovered_index = index as u32;
@@ -218,21 +210,21 @@ impl Gui {
         }
 
         if old_state.hovered_index != new_hovered_index {
-            inner_state.state.hovered_index = new_hovered_index;
+            self.state.hovered_index = new_hovered_index;
             self.on_style_update(old_state);
             *need_sync = true;
         }
     }
 
     fn update_mouse_button(&mut self, left_button_pressed: bool, need_sync: &mut bool) {
-        let old_state = self.inner_state.state;
+        let old_state = self.state;
         let mut new_selected_index = u32::MAX;
         if left_button_pressed {
             new_selected_index = old_state.hovered_index;
         }
 
         if old_state.selected_index != new_selected_index {
-            self.inner_state.state.selected_index = new_selected_index;
+            self.state.selected_index = new_selected_index;
             self.on_style_update(old_state);
             *need_sync = true;
         }
@@ -245,27 +237,26 @@ impl Gui {
     }
 
     fn generate_sprites(&mut self) {
-        let inner = &mut self.inner_state;
-        let sprites = &mut inner.sprites;
+        let sprites = &mut self.sprites;
         sprites.clear();
 
-        let component_count = inner.layout_items.len();
+        let component_count = self.layout_items.len();
         for i in 0..component_count {
-            let view = &inner.layout_items[i];
-            let component_type = &inner.component_data[i];
+            let view = &self.layout_items[i];
+            let component_type = &self.component_data[i];
             component_type.generate_sprites(view, sprites);
         }
     }
 
     fn get_root_layout(&self) -> GuiLayout {
-        match self.inner_state.builder_data.layouts_stack.get(0).copied() {
+        match self.builder_data.layouts_stack.get(0).copied() {
             Some((_, root)) => root,
             None => unreachable!("Root layout will always be present")
         }
     }
 
     fn check_errors(&mut self) -> Result<(), CommonError> {
-        let errors = &mut self.inner_state.builder_data.errors;
+        let errors = &mut self.builder_data.errors;
         if errors.len() == 0 {
             return Ok(());
         }
@@ -283,7 +274,7 @@ impl Gui {
     //
 
     fn store_components_data(&self, writer: &mut SaveFileWriterBase) {
-        let inner = &self.inner_state;
+        let inner = &self;
         writer.write_u32(inner.component_data.len() as u32);
         for component_type in inner.component_data.iter() {
             match component_type {
@@ -301,20 +292,20 @@ impl Gui {
         }
     }
 
-    fn load_components_data(reader: &mut SaveFileReaderBase, inner_state: &mut GuiInnerState) {
+    fn load_components_data(&mut self, reader: &mut SaveFileReaderBase) {
         let component_types_count = reader.read_u32() as usize;
-        inner_state.component_data = Vec::with_capacity(component_types_count);
+        self.component_data = Vec::with_capacity(component_types_count);
         for _ in 0..component_types_count {
             let enum_identifier = reader.read_u32();
             match enum_identifier {
                 0 => {
-                    inner_state.component_data.push(GuiComponentData::Frame(reader.read()));
+                    self.component_data.push(GuiComponentData::Frame(reader.read()));
                 },
                 1 => {
                     let font = reader.read();
                     let color = reader.read_from_u32();
                     let glyphs = reader.read_slice().to_vec().into_boxed_slice();
-                    inner_state.component_data.push(GuiComponentData::Label(GuiLabel {
+                    self.component_data.push(GuiComponentData::Label(GuiLabel {
                         font,
                         color,
                         glyphs,
@@ -333,7 +324,7 @@ impl StoreAndLoad for Gui {
 
     fn store(&self, writer: &mut SaveFileWriterBase) {
         // Note: no need to store builder data or the generated sprites in components
-        let inner = &self.inner_state;
+        let inner = &self;
 
         writer.store(&inner.id);
         writer.write(&inner.base_view);
@@ -347,7 +338,7 @@ impl StoreAndLoad for Gui {
     }
 
     fn load(reader: &mut SaveFileReaderBase) -> Self {
-        let mut inner_state = GuiInnerState {
+        let mut gui = Gui {
             id: GuiId::default(),
             base_view: RectF32::default(),
             state: GuiComponentState::default(),
@@ -367,19 +358,17 @@ impl StoreAndLoad for Gui {
             visible: true,
         };
 
-        inner_state.id = reader.load();
-        inner_state.base_view = reader.read();
-        inner_state.state = reader.read();
-        inner_state.layouts = reader.read_slice().to_vec();
-        inner_state.styles = reader.read_slice().to_vec();
-        inner_state.callbacks = reader.read_slice().to_vec();
-        inner_state.layout_items = reader.read_slice().to_vec();
-        inner_state.component_base = reader.read_slice().to_vec();
-        Self::load_components_data(reader, &mut inner_state);
+        gui.id = reader.load();
+        gui.base_view = reader.read();
+        gui.state = reader.read();
+        gui.layouts = reader.read_slice().to_vec();
+        gui.styles = reader.read_slice().to_vec();
+        gui.callbacks = reader.read_slice().to_vec();
+        gui.layout_items = reader.read_slice().to_vec();
+        gui.component_base = reader.read_slice().to_vec();
+        gui.load_components_data(reader);
 
-        Gui {
-            inner_state: Box::new(inner_state),
-        }
+        gui
     }
 
 }
@@ -387,26 +376,24 @@ impl StoreAndLoad for Gui {
 impl Default for Gui {
     fn default() -> Self {
         Gui {
-            inner_state: Box::new(GuiInnerState {
-                id: GuiId::default(),
-                base_view: RectF32::default(),
-                state: GuiComponentState::default(),
-                
-                styles: Vec::with_capacity(8),
-                callbacks: Vec::with_capacity(8),
-                callbacks_output: Vec::with_capacity(8),
+            id: GuiId::default(),
+            base_view: RectF32::default(),
+            state: GuiComponentState::default(),
+            
+            styles: Vec::with_capacity(8),
+            callbacks: Vec::with_capacity(8),
+            callbacks_output: Vec::with_capacity(8),
 
-                layouts: Vec::with_capacity(8),
-                layout_items: Vec::with_capacity(16),
-                component_base: Vec::with_capacity(16),
-                component_data: Vec::with_capacity(16),
+            layouts: Vec::with_capacity(8),
+            layout_items: Vec::with_capacity(16),
+            component_base: Vec::with_capacity(16),
+            component_data: Vec::with_capacity(16),
 
-                sprites: Vec::with_capacity(64),
+            sprites: Vec::with_capacity(64),
 
-                builder_data: Box::default(),
+            builder_data: Box::default(),
 
-                visible: true,
-            }),
+            visible: true,
         }
     }
 }
