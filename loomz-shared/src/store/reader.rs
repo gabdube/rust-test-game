@@ -30,9 +30,15 @@ impl<'a> SaveFileReaderBase<'a> {
     }
 
     pub fn read_slice<T: Copy>(&mut self) -> &[T] {
-        assert!(align_of::<T>() >= ALIGN, "Alignment of T must be at least 4 bytes");
+        let align = align_of::<T>();
+        assert!(align >= ALIGN, "Alignment of T must be at least 4 bytes");
 
         let length = self.read_u32();
+
+        // Skip padding
+        while (self.current_offset*ALIGN) % align != 0 {
+            self.current_offset += 1;
+        }
 
         let data = unsafe {
             let data_ptr = self.data.as_ptr().offset(self.current_offset as isize) as *const T;

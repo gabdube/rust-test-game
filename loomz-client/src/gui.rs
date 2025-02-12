@@ -324,16 +324,14 @@ impl StoreAndLoad for Gui {
 
     fn store(&self, writer: &mut SaveFileWriterBase) {
         // Note: no need to store builder data or the generated sprites in components
-        let inner = &self;
-
-        writer.store(&inner.id);
-        writer.write(&inner.base_view);
-        writer.write(&inner.state);
-        writer.write_slice(&inner.layouts);
-        writer.write_slice(&inner.styles);
-        writer.write_slice(&inner.callbacks);
-        writer.write_slice(&inner.layout_items);
-        writer.write_slice(&inner.component_base);
+        writer.store(&self.id);
+        writer.write(&self.base_view);
+        writer.write(&self.state);
+        writer.write_slice(&self.layouts);
+        writer.write_slice(&self.styles);
+        writer.write_slice(&self.callbacks);
+        writer.write_slice(&self.layout_items);
+        writer.write_slice(&self.component_base);
         self.store_components_data(writer);
     }
 

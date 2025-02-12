@@ -70,7 +70,7 @@ impl<'a> SaveFileReader<'a> {
 }
 
 pub struct SaveFileWriter {
-    base: SaveFileWriterBase
+    pub base: SaveFileWriterBase
 }
 
 impl SaveFileWriter {

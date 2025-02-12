@@ -1,4 +1,4 @@
-use super::StoreAndLoad;
+use super::{StoreAndLoad, ALIGN};
 
 pub struct SaveFileWriterBase {
     pub data_offset: u32,
@@ -36,15 +36,18 @@ impl SaveFileWriterBase {
     }
 
     pub fn write_slice<T: Copy>(&mut self, values: &[T]) {
-        let (x, aligned, y) = unsafe { values.align_to::<u32>() };
-        if !x.is_empty() || !y.is_empty() {
-            panic!("slice must be aligned to 4 bytes");
-        }
+        let align = align_of::<T>();
+        assert!(align >= ALIGN, "Data align must be at least {ALIGN}");
 
-        let u32_count = aligned.len();
-        self.try_realloc(u32_count + 1);
+        let (_, aligned, _) = unsafe { values.align_to::<u32>() };
+        self.try_realloc(aligned.len() + 1);
 
         self.write_u32_inner(values.len() as u32);
+
+        // Padding
+        while ((self.data_offset as usize) * ALIGN) % align != 0 {
+            self.write_u32_inner(0);
+        }
 
         for &value in aligned {
             self.write_u32_inner(value);

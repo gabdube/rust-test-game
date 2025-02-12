@@ -32,7 +32,7 @@ pub enum GameState {
     Uninitialized,
     MainMenu,
     Game,
-    Sandbox,
+    Editor,
 }
 
 struct ClientTiming {
@@ -50,11 +50,7 @@ pub struct LoomzClient {
     timing: ClientTiming,
     animations: Box<Animations>,
 
-    player: Player,
-    target_position: PositionF32,
-
-    menu: gui::Gui,
-
+    gui: gui::Gui,
     terrain: terrain::Terrain,
     
     state: GameState,
@@ -75,11 +71,7 @@ impl LoomzClient {
             timing,
             animations: Box::default(),
 
-            player: Player::default(),
-            target_position: PositionF32::default(),
-
-            menu: gui::Gui::default(),
-
+            gui: gui::Gui::default(),
             terrain: terrain::Terrain::init(),
 
             state: GameState::Uninitialized,
@@ -91,7 +83,7 @@ impl LoomzClient {
     pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
         let mut client = Self::build_client(api);
         client.animations.load(api)?;
-        client.init_sandbox()?;
+        client.init_gameplay()?;
         Ok(client)
     }
 
@@ -100,13 +92,12 @@ impl LoomzClient {
             .map_err(|err| chain_err!(err, CommonErrorType::SaveLoad, "Failed to initialize client from stored session") )?;
 
         let mut client = Self::build_client(api);
+        
         client.state = reader.read_from_u32();
         client.input_flags = reader.read_from_u32();
         client.debug_state = reader.load();
         client.animations = Box::new(reader.read());
-        client.target_position = reader.read();
-        client.player = reader.load();
-        client.menu = reader.load();
+        client.gui = reader.load();
         client.terrain = reader.load();
 
         Ok(client)
@@ -117,9 +108,7 @@ impl LoomzClient {
         writer.write_into_u32(self.input_flags);
         writer.store(&self.debug_state);
         writer.write(&*self.animations);
-        writer.write(&self.target_position);
-        writer.store(&self.player);
-        writer.store(&self.menu);
+        writer.store(&self.gui);
         writer.store(&self.terrain);
     }
 
@@ -130,7 +119,7 @@ impl LoomzClient {
             GameState::Uninitialized => self.uninitialized()?,
             GameState::MainMenu => self.main_menu()?,
             GameState::Game => self.gameplay()?,
-            GameState::Sandbox => self.sandbox()?,
+            GameState::Editor => self.editor()?,
         }
 
         self.update_debug_state();
@@ -305,7 +294,7 @@ impl From<u32> for GameState {
         match value {
             1 => GameState::MainMenu,
             2 => GameState::Game,
-            3 => GameState::Sandbox,
+            3 => GameState::Editor,
             _ => GameState::Uninitialized,
         }
     }
@@ -317,7 +306,7 @@ impl From<GameState> for u32 {
             GameState::Uninitialized => 0,
             GameState::MainMenu => 1,
             GameState::Game => 2,
-            GameState::Sandbox => 3,
+            GameState::Editor => 3,
         }
     }
 }

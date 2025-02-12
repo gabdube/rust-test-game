@@ -1,9 +1,7 @@
-use loomz_shared::api::WorldActorId;
-use loomz_shared::base_types::{PositionF64, PositionF32, rect};
+use loomz_shared::base_types::rect;
 use loomz_shared::inputs::keys;
 use loomz_shared::CommonError;
-use crate::animations::PawnAnimationType;
-use crate::{GameState, LoomzClient, Player};
+use crate::{GameState, LoomzClient};
 
 const RETURN_GAMEPLAY: u64 = 300;
 const EXIT_GAMEPLAY: u64 = 301;
@@ -13,7 +11,6 @@ impl LoomzClient {
 
     pub(crate) fn init_gameplay(&mut self) -> Result<(), CommonError> {
         self.init_gameplay_gui()?;
-        self.init_player();
         self.api.world().toggle_world(true);
         self.state = GameState::Game;
         Ok(())
@@ -22,7 +19,7 @@ impl LoomzClient {
     pub(crate) fn gameplay(&mut self) -> Result<(), CommonError> {
         self.gameplay_updates();
 
-        if self.menu.visible() {
+        if self.gui.visible() {
             self.gameplay_gui_updates();
             self.gameplay_gui_events()?;
         } else {
@@ -39,18 +36,14 @@ impl LoomzClient {
         };
 
         let size = new_inputs.screen_size_value();
-
         if let Some(keystate) = new_inputs.keystate() {
             if keystate.just_pressed(keys::ESC) {
-                self.menu.resize(&self.api, &rect(0.0, 0.0, size.width, size.height));
-                self.menu.toggle(&self.api, !self.menu.visible());
+                self.gui.resize(&self.api, &rect(0.0, 0.0, size.width, size.height));
+                self.gui.toggle(&self.api, !self.gui.visible());
             }
         }
 
-        if let Some(cursor_position) = new_inputs.cursor_position() {
-            self.target_position = cursor_position.as_f32();
-        }
-
+        ()
     }
 
     fn gameplay_gui_updates(&mut self) {
@@ -73,14 +66,14 @@ impl LoomzClient {
             gui_updates.left_mouse_down = Some(buttons.left_button_down());
         }
 
-        self.menu.update(&self.api, &gui_updates);
+        self.gui.update(&self.api, &gui_updates);
     }
 
     fn gameplay_gui_events(&mut self) -> Result<(), CommonError> {
         let mut ret_gameplay = false;
         let mut exit_gameplay = false;
 
-        for event in self.menu.drain_events() {
+        for event in self.gui.drain_events() {
             match event {
                 RETURN_GAMEPLAY => { ret_gameplay = true },
                 EXIT_GAMEPLAY => { exit_gameplay = true; },
@@ -89,9 +82,8 @@ impl LoomzClient {
         }
 
         if ret_gameplay {
-            self.menu.toggle(&self.api, false);
+            self.gui.toggle(&self.api, false);
         } else if exit_gameplay {
-            self.destroy_gameplay_state();
             self.init_main_menu()?;
         }
 
@@ -99,57 +91,57 @@ impl LoomzClient {
     }
 
     fn gameplay_loop(&mut self) {
-        let world = self.api.world();
-        let position = self.player.position;
-        let target = self.target_position;
+        // let world = self.api.world();
+        // let position = self.player.position;
+        // let target = self.target_position;
 
-        if position.out_of_range(target, 16.0) {
-            let speed = 200.0 * self.timing.delta_ms;
-            let angle = f32::atan2(target.y - position.y, target.x - position.x) as f64;
-            let speed_x = speed * f64::cos(angle);
-            let speed_y = speed * f64::sin(angle);
+        // if position.out_of_range(target, 16.0) {
+        //     let speed = 200.0 * self.timing.delta_ms;
+        //     let angle = f32::atan2(target.y - position.y, target.x - position.x) as f64;
+        //     let speed_x = speed * f64::cos(angle);
+        //     let speed_y = speed * f64::sin(angle);
 
-            self.player.position += PositionF64 { x: speed_x, y: speed_y };
-            world.update_actor_position(&self.player.id, self.player.position);
+        //     self.player.position += PositionF64 { x: speed_x, y: speed_y };
+        //     world.update_actor_position(&self.player.id, self.player.position);
 
-            if self.player.animation != PawnAnimationType::Walk {
-                world.update_actor_animation(&self.player.id, &self.animations.warrior.walk);
-                self.player.animation = PawnAnimationType::Walk;
-            }
+        //     if self.player.animation != PawnAnimationType::Walk {
+        //         world.update_actor_animation(&self.player.id, &self.animations.warrior.walk);
+        //         self.player.animation = PawnAnimationType::Walk;
+        //     }
 
-            if speed_x < 0.0 && !self.player.flip {
-                self.player.flip = true;
-                world.flip_actor(&self.player.id, true);
-            } else if speed_x > 0.0 && self.player.flip {
-                self.player.flip = false;
-                world.flip_actor(&self.player.id, false);
-            }
-        } else {
-            if self.player.animation != PawnAnimationType::Idle {
-                world.update_actor_animation(&self.player.id, &self.animations.warrior.idle);
-                self.player.animation = PawnAnimationType::Idle;
-            }
-        }
+        //     if speed_x < 0.0 && !self.player.flip {
+        //         self.player.flip = true;
+        //         world.flip_actor(&self.player.id, true);
+        //     } else if speed_x > 0.0 && self.player.flip {
+        //         self.player.flip = false;
+        //         world.flip_actor(&self.player.id, false);
+        //     }
+        // } else {
+        //     if self.player.animation != PawnAnimationType::Idle {
+        //         world.update_actor_animation(&self.player.id, &self.animations.warrior.idle);
+        //         self.player.animation = PawnAnimationType::Idle;
+        //     }
+        // }
     }
 
-    fn init_player(&mut self) {
-        let start_position = PositionF32 { x: 100.0, y: 500.0 };
-        let player = Player {
-            id: WorldActorId::new(),
-            position: start_position,
-            animation: PawnAnimationType::Idle,
-            flip: false,
-        };
+    // fn init_player(&mut self) {
+    //     let start_position = PositionF32 { x: 100.0, y: 500.0 };
+    //     let player = Player {
+    //         id: WorldActorId::new(),
+    //         position: start_position,
+    //         animation: PawnAnimationType::Idle,
+    //         flip: false,
+    //     };
 
-        self.api.world().create_actor(
-            &player.id,
-            player.position,
-            &self.animations.warrior.idle,
-        );
+    //     self.api.world().create_actor(
+    //         &player.id,
+    //         player.position,
+    //         &self.animations.warrior.idle,
+    //     );
 
-        self.player = player;
-        self.target_position = start_position;
-    }
+    //     self.player = player;
+    //     self.target_position = start_position;
+    // }
 
     fn init_gameplay_gui(&mut self) -> Result<(), CommonError> {
         use crate::gui::{GuiLayoutType, GuiLabelCallback};
@@ -157,14 +149,14 @@ impl LoomzClient {
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32::from_size(screen_size);
 
-        self.menu.toggle(&self.api, false);
+        self.gui.toggle(&self.api, false);
 
-        self.menu.build_style(&self.api, |style| {
+        self.gui.build_style(&self.api, |style| {
             style.root_layout(GuiLayoutType::VBox);
             super::shared::main_panel_style(style);
         })?;
 
-        self.menu.build(&self.api, &view, |gui| {
+        self.gui.build(&self.api, &view, |gui| {
             gui.layout(GuiLayoutType::VBox);
             gui.layout_item(400.0, 300.0);
             gui.frame("main_panel_style", |gui| {
@@ -181,9 +173,5 @@ impl LoomzClient {
         Ok(())
     }
 
-    fn destroy_gameplay_state(&mut self) {
-        self.api.world().destroy_actor(&self.player.id);
-        self.player = Player::default();
-    }
 
 }

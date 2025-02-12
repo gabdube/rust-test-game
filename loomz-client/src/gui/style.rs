@@ -47,6 +47,7 @@ impl<'a> GuiStyleBuilder<'a> {
     fn clear_gui_styles(gui: &mut Gui) {
         let data = &mut gui.builder_data;
         data.styles.clear();
+        gui.styles.clear();
         data.root_layout_type = GuiLayoutType::VBox;
     }
 

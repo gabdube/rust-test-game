@@ -4,7 +4,7 @@ use loomz_shared::{backend_init_err, assets_err, chain_err};
 use super::{GuiPushConstant, GuiVertex};
 
 impl super::GuiModule {
-    pub(super) fn setup_pipelines(&mut self, core: &mut LoomzEngineCore, api: &LoomzApi) -> Result<(), CommonError> {
+    pub(super) fn setup_pipelines(&mut self, api: &LoomzApi, core: &mut LoomzEngineCore) -> Result<(), CommonError> {
         let ctx = &core.ctx;
 
         // Descriptor set layouts
@@ -185,5 +185,5 @@ impl super::GuiModule {
 
         Ok(())
     }
-    
+
 }

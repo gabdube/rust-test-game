@@ -138,7 +138,7 @@ impl GuiModule {
             update_batches: false,
         };
 
-        gui.setup_pipelines(core, api)?;
+        gui.setup_pipelines(api, core)?;
         gui.setup_vertex_buffers(core)?;
         gui.setup_descriptors(core)?;
         gui.setup_render_data();

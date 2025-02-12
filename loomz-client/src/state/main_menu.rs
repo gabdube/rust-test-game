@@ -35,7 +35,7 @@ impl LoomzClient {
             gui_updates.view = Some(rect(0.0, 0.0, new_size.width, new_size.height));
         }
 
-        self.menu.update(&self.api, &gui_updates);
+        self.gui.update(&self.api, &gui_updates);
         self.main_menu_gui_events()?;
         Ok(())
     }
@@ -44,7 +44,7 @@ impl LoomzClient {
         let mut start_game = false;
         let mut start_sandbox = false;
 
-        for event in self.menu.drain_events() {
+        for event in self.gui.drain_events() {
             match event {
                 START_GAME => { start_game = true; },
                 START_SANDBOX => { start_sandbox = true; },
@@ -56,7 +56,7 @@ impl LoomzClient {
         if start_game {
             self.init_gameplay()?;
         } else if start_sandbox {
-            self.init_sandbox()?;
+            self.init_editor()?;
         }
 
         Ok(())
@@ -68,22 +68,22 @@ impl LoomzClient {
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32::from_size(screen_size);
 
-        self.menu.build_style(&self.api, |style| {
+        self.gui.build_style(&self.api, |style| {
             style.root_layout(GuiLayoutType::VBox);
             super::shared::main_panel_style(style);
         })?;
 
-        self.menu.build(&self.api, &view, |gui| {
+        self.gui.build(&self.api, &view, |gui| {
             gui.layout(GuiLayoutType::VBox);
             gui.layout_item(500.0, 440.0);
             gui.frame("main_panel_style", |gui| {
-                gui.layout_item(300.0, 100.0);
+                gui.layout_item(300.0, 110.0);
 
                 gui.label_callback(GuiLabelCallback::Click, START_GAME);
                 gui.label("New Game", "menu_item");
 
                 gui.label_callback(GuiLabelCallback::Click, START_SANDBOX);
-                gui.label("Sandbox", "menu_item");
+                gui.label("Editor", "menu_item");
 
                 gui.label_callback(GuiLabelCallback::Click, EXIT_GAME);
                 gui.label("Exit", "menu_item");
