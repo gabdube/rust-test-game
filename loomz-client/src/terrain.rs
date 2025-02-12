@@ -51,6 +51,12 @@ impl Terrain {
         }
     }
 
+    pub fn move_view(&mut self, dx: f32, dy: f32) {
+        let width = self.view.width();
+        let height = self.view.height();
+        self.set_view(self.view.left + dx, self.view.top + dy, width, height);
+    }
+
     pub fn set_view(&mut self, x: f32, y: f32, width: f32, height: f32) {
         self.view = rect(x, y, x+width, y+height);
         self.flags |= TerrainUpdateFlags::UPDATE_VIEW;

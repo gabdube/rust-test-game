@@ -48,6 +48,8 @@ struct GuiBuilderData {
 }
 
 pub struct Gui {
+    id: GuiId,
+
     state: GuiComponentState,
     styles: Vec<GuiComponentStyle>,
     callbacks: Vec<GuiComponentCallbacksValue>,
@@ -59,7 +61,6 @@ pub struct Gui {
     component_base: Vec<GuiComponentBase>,
     component_data: Vec<GuiComponentData>,
 
-    id: GuiId,
     sprites: Vec<GuiSprite>,
 
     builder_data: Box<GuiBuilderData>,
@@ -327,6 +328,7 @@ impl StoreAndLoad for Gui {
         writer.store(&self.id);
         writer.write(&self.base_view);
         writer.write(&self.state);
+        writer.write_into_u32(self.visible);
         writer.write_slice(&self.layouts);
         writer.write_slice(&self.styles);
         writer.write_slice(&self.callbacks);
@@ -359,6 +361,7 @@ impl StoreAndLoad for Gui {
         gui.id = reader.load();
         gui.base_view = reader.read();
         gui.state = reader.read();
+        gui.visible = reader.read_u32() != 0;
         gui.layouts = reader.read_slice().to_vec();
         gui.styles = reader.read_slice().to_vec();
         gui.callbacks = reader.read_slice().to_vec();

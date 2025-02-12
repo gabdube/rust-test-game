@@ -167,6 +167,11 @@ impl InputBuffer {
         self.inputs().cursor_position()
     }
 
+    pub fn cursor_position_delta(&self) -> PositionF64 {
+        let inputs = self.inputs();
+        inputs.cursor_position - inputs.cursor_position_old
+    }
+
     pub fn update_cursor_position(&self, x: f64, y: f64) {
         self.inputs().update_cursor_position(x, y);
     }
@@ -199,7 +204,7 @@ impl InputBuffer {
         let mut inputs = self.inputs();
 
         // Toggle released keys to default state
-        if inputs.update_flags.intersects(InputUpdateFlags::UPDATED_KEYSTATE) {
+        if inputs.update_flags.contains(InputUpdateFlags::UPDATED_KEYSTATE) {
             for v in inputs.keys.values_mut() {
                 let state = *v;
                 if state == keys::SingleKeyState::JustReleased {
@@ -209,6 +214,10 @@ impl InputBuffer {
                     *v = keys::SingleKeyState::Pressed;
                 }
             }
+        }
+
+        if inputs.update_flags.contains(InputUpdateFlags::MOUSE_MOVE) {
+            inputs.cursor_position_old = inputs.cursor_position;
         }
 
         inputs.update_flags = InputUpdateFlags::empty();

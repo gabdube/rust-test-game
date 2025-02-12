@@ -26,9 +26,12 @@ impl WorldModule {
 
         let mut line;
 
+        let offset_x = -(self.data.world_view.left % 64.0);
+        let offset_y = -(self.data.world_view.top % 64.0);
+
         if show_main {
-            let mut x = 0.0;
-            let mut y = 0.0;
+            let mut x = offset_x;
+            let mut y = offset_y;
             while x < grid.screen_size.width {
                 line = rect(x-0.5, 0.0, x+0.5, grid.screen_size.height);
                 write_indices(&mut index, vertex_count);

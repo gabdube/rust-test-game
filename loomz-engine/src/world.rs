@@ -377,6 +377,7 @@ impl WorldModule {
                     WorldUpdate::ShowWorld(visible) => { self.flags.set(WorldFlags::SHOW_WORLD, visible); },
                     WorldUpdate::WorldView(view) => {
                         self.set_terrain_view(view);
+                        self.toggle_debug(core);
                     },
                     WorldUpdate::WorldSize(size) => { 
                         self.set_terrain_size(size);

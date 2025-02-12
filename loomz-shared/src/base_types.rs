@@ -1,4 +1,4 @@
-use std::ops::{Mul, AddAssign};
+use std::ops::{Mul, Sub, AddAssign};
 
 /// Technically an AABB
 #[derive(Copy, Clone, PartialEq, Default, Debug)]
@@ -35,8 +35,8 @@ impl RectF32 {
     }
 
     #[inline]
-    pub const fn offset(&self) -> [f32; 2] {
-        [self.left, self.top]
+    pub const fn offset(&self) -> PositionF32 {
+        pos(self.left, self.right)
     }
 
     #[inline]
@@ -167,6 +167,16 @@ impl PositionF64 {
         PositionF32 {
             x: self.x as f32,
             y: self.y as f32
+        }
+    }
+}
+
+impl Sub for PositionF64 {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self::Output {
+        PositionF64 {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y
         }
     }
 }

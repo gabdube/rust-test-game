@@ -83,7 +83,7 @@ impl LoomzClient {
     pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
         let mut client = Self::build_client(api);
         client.animations.load(api)?;
-        client.init_gameplay()?;
+        client.init_editor()?;
         Ok(client)
     }
 
