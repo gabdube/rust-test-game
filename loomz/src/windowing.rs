@@ -76,6 +76,7 @@ impl<'a> ApplicationHandler for LoomzApplication {
 
 fn create_window(event_loop: &ActiveEventLoop, window_size: loomz_shared::SizeF32) -> Result<Window, CommonError> {
     let monitor_size = event_loop.primary_monitor()
+        .or_else(|| event_loop.available_monitors().next() )
         .map(|m| m.size() )
         .unwrap_or_default();
     
