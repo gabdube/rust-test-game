@@ -2,7 +2,7 @@
 
 Rust test game (codename Loomz), is a game / game-engine built from scratch, with minimal dependencies, using the Rust programming language and Vulkan for the graphics. The goal of this project is to create a light, powerful, and reusable template for game development.
 
-The project has been tested on Windows and Linux. MacOs will soon be supported as soon as I figure what's wrong with MoltenVk on my setup.
+The project has been tested on Windows, Linux, and MacOs.  
 
 This project is under heavy development, and currently only display a tiny guy to following your cursor with some basic GUI.
 
