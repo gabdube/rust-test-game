@@ -1,5 +1,4 @@
-use loomz_shared::inputs::InputBuffer;
-use loomz_shared::{system_err, CommonError};
+use loomz_shared::{system_err, LoomzApi, CommonError};
 
 use winit::application::ApplicationHandler;
 use winit::event_loop::{ActiveEventLoop, EventLoop, ControlFlow};
@@ -44,7 +43,7 @@ impl<'a> ApplicationHandler for LoomzApplication {
                 }
             },
             WindowEvent::Resized(size) => {
-                self.api().write_inputs().update_screen_size(size.width as f32, size.height as f32);
+                self.api().inputs_ref().update_screen_size(size.width as f32, size.height as f32);
 
                 if let Err(e) = self.resized() {
                     self.set_last_error(e);
@@ -52,16 +51,14 @@ impl<'a> ApplicationHandler for LoomzApplication {
                 }
             },
             WindowEvent::CursorMoved { device_id: _, position } => {
-                self.api().write_inputs().update_cursor_position(position.x, position.y);
+                self.api().inputs_ref().update_cursor_position(position.x, position.y);
             },
             WindowEvent::MouseInput { device_id: _, state, button } => {
-                let mut inputs = self.api().write_inputs();
-                parse_mouse_input(&mut inputs, state, button);
+                parse_mouse_input(self.api(), state, button);
             },
             WindowEvent::KeyboardInput { device_id: _, is_synthetic: _, event } => {
                 if !event.repeat {
-                    let mut inputs = self.api().write_inputs();
-                    parse_keyboard_input(&mut inputs, &event);
+                    parse_keyboard_input(self.api(), &event);
                 }
             },
             WindowEvent::CloseRequested => {
@@ -92,10 +89,9 @@ fn create_window(event_loop: &ActiveEventLoop, window_size: loomz_shared::SizeF3
         .map_err(|err| system_err!("Failed to create system window: {}", err) )
 }
 
-fn parse_mouse_input(inputs: &mut InputBuffer, state: ElementState, btn: MouseButton) {
+fn parse_mouse_input(api: &LoomzApi, state: ElementState, btn: MouseButton) {
     use loomz_shared::inputs::MouseButtonState;
 
-    let mut button_state = inputs.mouse_buttons_value();
     let flag = match btn {
         MouseButton::Left => MouseButtonState::LEFT,
         MouseButton::Right => MouseButtonState::RIGHT,
@@ -103,25 +99,24 @@ fn parse_mouse_input(inputs: &mut InputBuffer, state: ElementState, btn: MouseBu
     };
 
     if !flag.is_empty() {
+        let inputs = api.inputs_ref();
         if state.is_pressed() {
-            button_state |= flag;
+            inputs.add_mouse_button(flag);
         } else {
-            button_state.remove(flag);
+            inputs.remove_mouse_button(flag);
         }
-
-        inputs.update_mouse_button(button_state);
     }
 }
 
-fn parse_keyboard_input(inputs: &mut InputBuffer, key: &winit::event::KeyEvent) {
+fn parse_keyboard_input(api: &LoomzApi, key: &winit::event::KeyEvent) {
     let key_code = match key.physical_key {
         winit::keyboard::PhysicalKey::Code(code) => code as u32,
         _ => 0,
     };
 
-    // println!("{:?}", key_code);
-
-    inputs.set_key(key_code, key.state.is_pressed());
+    if key_code > 0 {
+        api.keys_ref().write().set_key(key_code, key.state.is_pressed());
+    }
 }
 
 pub fn run(app: &mut LoomzApplication) {

@@ -16,27 +16,24 @@ impl LoomzClient {
     }
 
     pub(crate) fn main_menu(&mut self) -> Result<(), CommonError> {
-        let new_inputs = match self.api.read_inputs() {
-            Some(inputs) => inputs,
-            None => { return Ok(()); }
-        };
-
+        let inputs = self.api.inputs_ref();
         let mut gui_updates = crate::gui::GuiUpdates::default();
 
-        if let Some(cursor_position) = new_inputs.cursor_position() {
+        if let Some(cursor_position) = inputs.cursor_position() {
             gui_updates.cursor_position = Some(cursor_position.as_f32());
         }
 
-        if let Some(buttons) = new_inputs.mouse_buttons() {
+        if let Some(buttons) = inputs.mouse_buttons() {
             gui_updates.left_mouse_down = Some(buttons.left_button_down());
         }
 
-        if let Some(new_size) = new_inputs.screen_size() {
+        if let Some(new_size) = inputs.screen_size() {
             gui_updates.view = Some(rect(0.0, 0.0, new_size.width, new_size.height));
         }
 
         self.gui.update(&self.api, &gui_updates);
         self.main_menu_gui_events()?;
+
         Ok(())
     }
 

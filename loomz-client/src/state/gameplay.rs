@@ -30,13 +30,8 @@ impl LoomzClient {
     }
 
     fn gameplay_updates(&mut self) {
-        let new_inputs = match self.api.read_inputs() {
-            Some(inputs) => inputs,
-            None => { return; }
-        };
-
-        let size = new_inputs.screen_size_value();
-        if let Some(keystate) = new_inputs.keystate() {
+        if let Some(keystate) = self.api.keys_ref().read_updates() {
+            let size = self.api.inputs_ref().screen_size_value();
             if keystate.just_pressed(keys::ESC) {
                 self.gui.resize(&self.api, &rect(0.0, 0.0, size.width, size.height));
                 self.gui.toggle(&self.api, !self.gui.visible());
@@ -47,22 +42,18 @@ impl LoomzClient {
     }
 
     fn gameplay_gui_updates(&mut self) {
-        let new_inputs = match self.api.read_inputs() {
-            Some(inputs) => inputs,
-            None => { return; }
-        };
-
+        let inputs = self.api.inputs_ref();
         let mut gui_updates = crate::gui::GuiUpdates::default();
 
-        if let Some(cursor_position) = new_inputs.cursor_position() {
+        if let Some(cursor_position) = inputs.cursor_position() {
             gui_updates.cursor_position = Some(cursor_position.as_f32());
         }
 
-        if let Some(new_size) = new_inputs.screen_size() {
+        if let Some(new_size) = inputs.screen_size() {
             gui_updates.view = Some(rect(0.0, 0.0, new_size.width, new_size.height));
         }
 
-        if let Some(buttons) = new_inputs.mouse_buttons() {
+        if let Some(buttons) = inputs.mouse_buttons() {
             gui_updates.left_mouse_down = Some(buttons.left_button_down());
         }
 
@@ -124,24 +115,24 @@ impl LoomzClient {
         // }
     }
 
-    // fn init_player(&mut self) {
-    //     let start_position = PositionF32 { x: 100.0, y: 500.0 };
-    //     let player = Player {
-    //         id: WorldActorId::new(),
-    //         position: start_position,
-    //         animation: PawnAnimationType::Idle,
-    //         flip: false,
-    //     };
+    fn init_player(&mut self) {
+        // let start_position = PositionF32 { x: 100.0, y: 500.0 };
+        // let player = Player {
+        //     id: WorldActorId::new(),
+        //     position: start_position,
+        //     animation: PawnAnimationType::Idle,
+        //     flip: false,
+        // };
 
-    //     self.api.world().create_actor(
-    //         &player.id,
-    //         player.position,
-    //         &self.animations.warrior.idle,
-    //     );
+        // self.api.world().create_actor(
+        //     &player.id,
+        //     player.position,
+        //     &self.animations.warrior.idle,
+        // );
 
-    //     self.player = player;
-    //     self.target_position = start_position;
-    // }
+        // self.player = player;
+        // self.target_position = start_position;
+    }
 
     fn init_gameplay_gui(&mut self) -> Result<(), CommonError> {
         use crate::gui::{GuiLayoutType, GuiLabelCallback};

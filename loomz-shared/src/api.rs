@@ -10,20 +10,16 @@ pub use gui::*;
 
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crate::assets::LoomzAssetsBundle;
-use crate::inputs::InputBuffer;
+use crate::inputs::{SharedInputBuffer, SharedKeysState};
 use crate::{CommonError, SizeF32};
-
-struct InnerInputs {
-    buffer: InputBuffer,
-    new_inputs: AtomicBool,
-    exit: AtomicBool,
-}
 
 struct ApiInner {
     assets: Arc<LoomzAssetsBundle>,
-    inputs: InnerInputs,
+    inputs: SharedInputBuffer,
+    keys: SharedKeysState,
     world: WorldApi,
     gui: GuiApi,
+    exit: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -34,21 +30,13 @@ pub struct LoomzApi {
 impl LoomzApi {
 
     pub fn init(screen_size: SizeF32) -> Result<Self, CommonError> {
-        let assets = LoomzAssetsBundle::load()?;
-        let world = WorldApi::init();
-        let gui = GuiApi::init();
-
-        let inputs = InnerInputs {
-            buffer: InputBuffer::new(screen_size),
-            new_inputs: AtomicBool::new(false),
-            exit: AtomicBool::new(false),
-        };
-
         let inner = ApiInner {
-            assets,
-            inputs,
-            world,
-            gui,
+            assets: LoomzAssetsBundle::load()?,
+            inputs: SharedInputBuffer::new(screen_size),
+            keys: SharedKeysState::new(),
+            world: WorldApi::init(),
+            gui: GuiApi::init(),
+            exit: AtomicBool::new(false),
         };
 
         let api = LoomzApi {
@@ -66,25 +54,20 @@ impl LoomzApi {
         &self.inner.assets
     }
 
-    pub fn write_inputs(&self) -> InputBuffer {
-        self.inner.inputs.new_inputs.store(true, Ordering::Relaxed);
-        self.inner.inputs.buffer.clone()
+    pub fn inputs(&self) -> SharedInputBuffer {
+        self.inner.inputs.clone()
     }
 
-    pub fn read_inputs(&self) -> Option<InputBuffer> {
-        match self.inner.inputs.new_inputs.load(Ordering::Relaxed) {
-            true => Some(self.inner.inputs.buffer.clone()),
-            false => None
-        }
+    pub fn inputs_ref(&self) -> &SharedInputBuffer {
+        &self.inner.inputs
     }
 
-    pub fn clear_inputs_update_flags(&self) {
-        self.inner.inputs.new_inputs.store(false, Ordering::Relaxed);
-        self.inner.inputs.buffer.clear_update_flags();
+    pub fn keys(&self) -> SharedKeysState {
+        self.inner.keys.clone()
     }
 
-    pub fn inputs(&self) -> &InputBuffer {
-        &self.inner.inputs.buffer
+    pub fn keys_ref(&self) -> &SharedKeysState {
+        &self.inner.keys
     }
 
     pub fn world(&self) -> &WorldApi {
@@ -96,11 +79,16 @@ impl LoomzApi {
     }
 
     pub fn exit(&self) {
-        self.inner.inputs.exit.store(true, Ordering::SeqCst);
+        self.inner.exit.store(true, Ordering::SeqCst);
     }
 
     pub fn must_exit(&self) -> bool {
-        self.inner.inputs.exit.load(Ordering::SeqCst)
+        self.inner.exit.load(Ordering::SeqCst)
+    }
+
+    pub fn client_update_finished(&self) {
+        self.inner.keys.clear_update_flags();
+        self.inner.inputs.clear_update_flags();
     }
 
 }

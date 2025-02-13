@@ -1,51 +1,16 @@
+mod keys_state;
+pub use keys_state::*;
+
 use bitflags::bitflags;
 use parking_lot::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use std::sync::Arc;
 use crate::base_types::{PositionF64, SizeF32};
 
-pub mod keys {
-    use fnv::FnvHashMap;
-    use super::MutexGuard;
-
-    pub(super) type KeysCollection = FnvHashMap<u32, SingleKeyState>;
-
-    pub const _1: u32 = 6;
-    pub const _2: u32 = 7;
-    pub const _3: u32 = 8;
-    pub const ESC: u32 = 114;
-
-    #[derive(Copy, Clone, PartialEq)]
-    pub enum SingleKeyState {
-        Released,
-        JustReleased,
-        Pressed,
-        JustPressed,
-    }
-
-    pub struct KeyState<'a> {
-        pub(super) guard: MutexGuard<'a, super::InnerInputBuffer>,
-    }
-
-    impl<'a> KeyState<'a> {
-        pub fn just_released(&self, key_code: u32) -> bool {
-            self.guard.keys.get(&key_code)
-                .map(|key| *key == SingleKeyState::JustReleased )
-                .unwrap_or(false)
-        }
-
-        pub fn just_pressed(&self, key_code: u32) -> bool {
-            self.guard.keys.get(&key_code)
-                .map(|key| *key == SingleKeyState::JustPressed )
-                .unwrap_or(false)
-        }
-    }
-
-}
-
 bitflags! {
     #[derive(Copy, Clone)]
-    pub struct InputUpdateFlags: u32 {
+    pub struct InputUpdateFlags: u8 {
         const SCREEN_RESIZED   = 0b00000001;
         const MOUSE_MOVE       = 0b00000010;
         const MOUSE_BTN        = 0b00000100;
@@ -72,171 +37,146 @@ impl MouseButtonState {
 }
 
 
-struct InnerInputBuffer {
-    pub update_flags: InputUpdateFlags,
+#[derive(Copy, Clone)]
+pub struct InputBuffer {
     pub cursor_position_old: PositionF64,
     pub cursor_position: PositionF64,
     pub mouse_buttons_old: MouseButtonState,
     pub mouse_buttons: MouseButtonState,
     pub screen_size: SizeF32,
-    pub keys: keys::KeysCollection,
 }
 
-impl InnerInputBuffer {
+impl InputBuffer {
 
     fn new(screen_size: SizeF32) -> Self {
-        InnerInputBuffer {
-            update_flags: InputUpdateFlags::empty(),
+        InputBuffer {
             cursor_position_old: PositionF64 { x: 0.0, y: 0.0 },
             cursor_position: PositionF64 { x: 0.0, y: 0.0 },
             mouse_buttons_old: MouseButtonState::empty(),
             mouse_buttons: MouseButtonState::empty(),
             screen_size,
-            keys: keys::KeysCollection::default()
         }
-    }
-
-    fn cursor_position(&self) -> Option<PositionF64> {
-        match self.update_flags.contains(InputUpdateFlags::MOUSE_MOVE) {
-            true => Some(self.cursor_position),
-            false => None
-        }
-    }
-
-    fn update_cursor_position(&mut self, x: f64, y: f64) {
-        self.update_flags |= InputUpdateFlags::MOUSE_MOVE;
-        self.cursor_position_old = self.cursor_position;
-        self.cursor_position = PositionF64 { x, y };
-    }
-
-    fn mouse_buttons(&self) -> Option<MouseButtonState> {
-        match self.update_flags.contains(InputUpdateFlags::MOUSE_BTN) {
-            true =>  Some(self.mouse_buttons),
-            false => None
-        }
-    }
-
-    fn update_mouse_button(&mut self, btns: MouseButtonState) {
-        self.update_flags |= InputUpdateFlags::MOUSE_BTN;
-        self.mouse_buttons_old = self.mouse_buttons;
-        self.mouse_buttons = btns;
-    }
-
-    fn screen_size(&self) -> Option<SizeF32> {
-        match self.update_flags.contains(InputUpdateFlags::SCREEN_RESIZED) {
-            true => Some(self.screen_size),
-            false => None
-        }
-    }
-
-    fn screen_size_value(&self) -> SizeF32 {
-        self.screen_size
-    }
-
-    pub fn set_key(&mut self, key_code: u32, pressed: bool) {
-        let state = match pressed {
-            true => keys::SingleKeyState::JustPressed,
-            false => keys::SingleKeyState::JustReleased,
-        };
-
-        self.keys.insert(key_code, state);
-        self.update_flags |= InputUpdateFlags::UPDATED_KEYSTATE;
-    }
-
-    fn update_screen_size(&mut self, width: f32, height: f32) {
-        self.update_flags |= InputUpdateFlags::SCREEN_RESIZED;
-        self.screen_size = SizeF32 { width, height };
     }
 
 }
 
-#[derive(Clone)]
-pub struct InputBuffer {
-    inner: Arc<Mutex<InnerInputBuffer>>,
+struct InnerInputBuffer {
+    buffer: Mutex<InputBuffer>,
+    flags: AtomicU8
 }
 
-impl InputBuffer {
+pub struct SharedInputBuffer {
+    inner: Arc<InnerInputBuffer>,
+}
 
-    pub fn new(screen_size: SizeF32) -> Self {
-        InputBuffer {
-            inner: Arc::new(Mutex::new(InnerInputBuffer::new(screen_size)))
+impl SharedInputBuffer {
+
+    pub(super) fn new(screen_size: SizeF32) -> Self {
+        let buffer = Mutex::new(InputBuffer::new(screen_size));
+        let flags = AtomicU8::new(0);
+        SharedInputBuffer {
+            inner: Arc::new(InnerInputBuffer {
+                buffer,
+                flags,
+            })
         }
     }
 
     pub fn cursor_position(&self) -> Option<PositionF64> {
-        self.inputs().cursor_position()
+        match self.flags().contains(InputUpdateFlags::MOUSE_MOVE) {
+            true => Some(self.lock().cursor_position),
+            false => None
+        }
     }
 
     pub fn cursor_position_delta(&self) -> PositionF64 {
-        let inputs = self.inputs();
+        let inputs = self.lock();
         inputs.cursor_position - inputs.cursor_position_old
     }
 
     pub fn update_cursor_position(&self, x: f64, y: f64) {
-        self.inputs().update_cursor_position(x, y);
+        let mut buffer = self.lock();
+        buffer.cursor_position_old = buffer.cursor_position;
+        buffer.cursor_position = PositionF64 { x, y };
+        self.set_flags(InputUpdateFlags::MOUSE_MOVE);
     }
     
-    pub fn update_mouse_button(&self, btns: MouseButtonState) {
-        self.inputs().update_mouse_button(btns)
+    pub fn mouse_buttons(&self) -> Option<MouseButtonState> {
+        match self.flags().contains(InputUpdateFlags::MOUSE_BTN) {
+            true => Some(self.lock().mouse_buttons),
+            false => None
+        }
     }
 
     pub fn mouse_buttons_value(&self) -> MouseButtonState {
-        self.inputs().mouse_buttons
+        self.lock().mouse_buttons
     }
 
-    pub fn mouse_buttons(&self) -> Option<MouseButtonState> {
-        self.inputs().mouse_buttons()
+    pub fn add_mouse_button(&self, btns: MouseButtonState) {
+        let mut buffer = self.lock();
+        let new = buffer.mouse_buttons | btns;
+        buffer.mouse_buttons_old = buffer.mouse_buttons;
+        buffer.mouse_buttons = new;
+
+        self.set_flags(InputUpdateFlags::MOUSE_BTN);
+    }
+
+    pub fn remove_mouse_button(&self, btns: MouseButtonState) {
+        let mut buffer = self.lock();
+        
+        let mut new = buffer.mouse_buttons;
+        new.remove(btns);
+
+        buffer.mouse_buttons_old = buffer.mouse_buttons;
+        buffer.mouse_buttons = new;
+
+        self.set_flags(InputUpdateFlags::MOUSE_BTN);
     }
 
     pub fn screen_size(&self) -> Option<SizeF32> {
-        self.inputs().screen_size()
+        match self.flags().contains(InputUpdateFlags::SCREEN_RESIZED) {
+            true => Some(self.lock().screen_size),
+            false => None
+        }
     }
 
     pub fn screen_size_value(&self) -> SizeF32 {
-        self.inputs().screen_size_value()
+        self.lock().screen_size
     }
 
     pub fn update_screen_size(&self, width: f32, height: f32) {
-        self.inputs().update_screen_size(width, height);
+        self.lock().screen_size = SizeF32 { width, height };
+        self.set_flags(InputUpdateFlags::SCREEN_RESIZED);
     }
 
     pub fn clear_update_flags(&self) {
-        let mut inputs = self.inputs();
+        let flags = self.flags();
 
-        // Toggle released keys to default state
-        if inputs.update_flags.contains(InputUpdateFlags::UPDATED_KEYSTATE) {
-            for v in inputs.keys.values_mut() {
-                let state = *v;
-                if state == keys::SingleKeyState::JustReleased {
-                    *v = keys::SingleKeyState::Released;
-                }
-                else if state == keys::SingleKeyState::JustPressed {
-                    *v = keys::SingleKeyState::Pressed;
-                }
-            }
+        if flags.contains(InputUpdateFlags::MOUSE_MOVE) {
+            let mut buffer = self.lock();
+            buffer.cursor_position_old = buffer.cursor_position;
         }
 
-        if inputs.update_flags.contains(InputUpdateFlags::MOUSE_MOVE) {
-            inputs.cursor_position_old = inputs.cursor_position;
+        self.inner.flags.store(0, Ordering::Relaxed);
+    }
+
+    fn flags(&self) -> InputUpdateFlags {
+        InputUpdateFlags::from_bits_retain(self.inner.flags.load(Ordering::Relaxed))
+    }
+
+    fn set_flags(&self, value: InputUpdateFlags) {
+        self.inner.flags.fetch_or(value.bits(), Ordering::Relaxed);
+    }
+
+    fn lock<'a>(&'a self) -> MutexGuard<'a, InputBuffer> {
+        self.inner.buffer.lock()
+    }
+}
+
+impl Clone for SharedInputBuffer {
+    fn clone(&self) -> Self {
+        SharedInputBuffer {
+            inner: Arc::clone(&self.inner)
         }
-
-        inputs.update_flags = InputUpdateFlags::empty();
-    }
-
-    pub fn keystate<'a>(&'a self) -> Option<keys::KeyState<'a>> {
-        let guard = self.inner.lock();
-        if guard.update_flags.contains(InputUpdateFlags::UPDATED_KEYSTATE) {
-            Some(keys::KeyState { guard })
-        } else {
-            None
-        }
-    }
-
-    pub fn set_key(&self, key_code: u32, pressed: bool) {
-        self.inputs().set_key(key_code, pressed);
-    }
-
-    fn inputs<'a>(&'a self) -> MutexGuard<'a, InnerInputBuffer> {
-        self.inner.lock()
     }
 }

@@ -100,6 +100,8 @@ impl LoomzClient {
         client.gui = reader.load();
         client.terrain = reader.load();
 
+        client.init_editor()?;
+
         Ok(client)
     }
 
@@ -123,8 +125,7 @@ impl LoomzClient {
         }
 
         self.update_debug_state();
-
-        self.api.clear_inputs_update_flags();
+        self.api.client_update_finished();
 
         Ok(())
     }
@@ -138,24 +139,24 @@ impl LoomzClient {
     fn update_debug_state(&mut self) {
         use loomz_shared::inputs::keys;
 
-        if let Some(inputs) = self.api.read_inputs() {
-            if let Some(keystate) = inputs.keystate() {
-                let mut update_debug = false;
-                if keystate.just_pressed(keys::_1) {
-                    self.debug_state.world.toggle(WorldDebugFlags::SHOW_MAIN_GRID);
-                    update_debug = true;
-                }
-                if keystate.just_pressed(keys::_2) {
-                    self.debug_state.world.toggle(WorldDebugFlags::SHOW_SUB_GRID);
-                    update_debug = true;
-                }
-                if keystate.just_pressed(keys::_3) {
-                    self.debug_state.world.toggle(WorldDebugFlags::SHOW_MAIN_GRID_TYPES);
-                    update_debug = true;
-                }
-                if update_debug {
-                    self.api.world().toggle_debug(self.debug_state.world);
-                }
+        if let Some(keystate) = self.api.keys_ref().read_updates() {
+            let mut update_debug = false;
+
+            if keystate.just_pressed(keys::_1) {
+                self.debug_state.world.toggle(WorldDebugFlags::SHOW_MAIN_GRID);
+                update_debug = true;
+            }
+            if keystate.just_pressed(keys::_2) {
+                self.debug_state.world.toggle(WorldDebugFlags::SHOW_SUB_GRID);
+                update_debug = true;
+            }
+            if keystate.just_pressed(keys::_3) {
+                self.debug_state.world.toggle(WorldDebugFlags::SHOW_MAIN_GRID_TYPES);
+                update_debug = true;
+            }
+
+            if update_debug {
+                self.api.world().toggle_debug(self.debug_state.world);
             }
         }
     }

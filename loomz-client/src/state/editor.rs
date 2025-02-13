@@ -29,27 +29,23 @@ impl LoomzClient {
     }
 
     fn editor_global_update(&mut self) {
-        let new_inputs = match self.api.read_inputs() {
-            Some(inputs) => inputs,
-            None => { return; }
-        };
+        let inputs = self.api.inputs_ref();
 
-        if let Some(new_size) = new_inputs.screen_size() {
+        if let Some(new_size) = inputs.screen_size() {
             self.terrain.set_view(0.0, 0.0, new_size.width, new_size.height);
             self.terrain.sync(&self.api);
         }
 
-        if let Some(new_mouse) = new_inputs.mouse_buttons() {
+        if let Some(new_mouse) = inputs.mouse_buttons() {
             match new_mouse.right_button_down() {
                 true => { self.input_flags.insert(GameInputFlags::DRAGGING_VIEW); },
                 false => { self.input_flags.remove(GameInputFlags::DRAGGING_VIEW); }
             }
         }
 
-        // size must be outside of `keystate` to prevent a deadlock
-        let size = new_inputs.screen_size_value();
-        if let Some(keystate) = new_inputs.keystate() {
+        if let Some(keystate) = self.api.keys_ref().read_updates() {
             if keystate.just_pressed(keys::ESC) {
+                let size = inputs.screen_size_value();
                 self.gui.resize(&self.api, &rect(0.0, 0.0, size.width, size.height));
                 self.gui.toggle(&self.api, !self.gui.visible());
             }
@@ -59,22 +55,18 @@ impl LoomzClient {
     }
 
     fn editor_gui_updates(&mut self) {
-        let new_inputs = match self.api.read_inputs() {
-            Some(inputs) => inputs,
-            None => { return; }
-        };
-
+        let inputs = self.api.inputs_ref();
         let mut gui_updates = crate::gui::GuiUpdates::default();
 
-        if let Some(cursor_position) = new_inputs.cursor_position() {
+        if let Some(cursor_position) = inputs.cursor_position() {
             gui_updates.cursor_position = Some(cursor_position.as_f32());
         }
 
-        if let Some(buttons) = new_inputs.mouse_buttons() {
+        if let Some(buttons) = inputs.mouse_buttons() {
             gui_updates.left_mouse_down = Some(buttons.left_button_down());
         }
 
-        if let Some(new_size) = new_inputs.screen_size() {
+        if let Some(new_size) = inputs.screen_size() {
             gui_updates.view = Some(rect(0.0, 0.0, new_size.width, new_size.height));
         }
 
@@ -125,15 +117,18 @@ impl LoomzClient {
 
         self.gui.build(&self.api, &view, |gui| {
             gui.layout(GuiLayoutType::VBox);
-            gui.layout_item(400.0, 300.0);
-            gui.frame("main_panel_style", |gui| {
-                gui.layout_item(300.0, 105.0);
-
-                gui.label_callback(GuiLabelCallback::Click, RETURN_EDITOR);
-                gui.label("Continue", "menu_item");
-
-                gui.label_callback(GuiLabelCallback::Click, EXIT_EDITOR);
-                gui.label("Exit", "menu_item");
+            gui.layout_item(screen_size.width, screen_size.height);
+            gui.frame("shadow", |gui| {
+                gui.layout_item(400.0, 300.0);
+                gui.frame("main_panel_style", |gui| {
+                    gui.layout_item(300.0, 105.0);
+    
+                    gui.label_callback(GuiLabelCallback::Click, RETURN_EDITOR);
+                    gui.label("Continue", "menu_item");
+    
+                    gui.label_callback(GuiLabelCallback::Click, EXIT_EDITOR);
+                    gui.label("Exit", "menu_item");
+                });
             });
         })?;
 
