@@ -233,13 +233,16 @@ fn setup_device(setup: &mut VulkanCtxSetup) -> Result<(), CommonError> {
     let mut physical_device: Option<vk::PhysicalDevice> = None;
     let mut queue_create_info: vk::DeviceQueueCreateInfo = Default::default();
 
-    let required_extensions: [&[u8]; 5] = [
+    let mut required_extensions: Vec<&[u8]> = vec![
         b"VK_KHR_swapchain\0",
         b"VK_EXT_descriptor_indexing\0",
         b"VK_KHR_dynamic_rendering\0",
         b"VK_KHR_synchronization2\0",
-        b"VK_KHR_portability_subset\0",
     ];
+
+    if cfg!(target_os="macos") {
+        required_extensions.push(b"VK_KHR_portability_subset\0");
+    }
 
     let device_extension_names: Vec<&CStr> = required_extensions.iter()
         .map(|name| CStr::from_bytes_with_nul(name).unwrap() )
