@@ -84,6 +84,30 @@ fn setup_surface(engine: &mut LoomzEngineCore, params: &SetupTargetParams) -> Re
     }
 }
 
+#[cfg(target_os="macos")]
+fn setup_surface(engine: &mut LoomzEngineCore, params: &SetupTargetParams) -> Result<(), CommonError> {
+    use raw_window_metal::Layer;
+
+    let layer = match params.window {
+        RawWindowHandle::AppKit(handle) => unsafe { Layer::from_ns_view(handle.ns_view) },
+        RawWindowHandle::UiKit(handle) => unsafe { Layer::from_ui_view(handle.ui_view) },
+        h => {
+            return Err(backend_init_err!("Bad window handle, expected AppKit or UiKit, got {:?}", h));
+        }
+    };
+
+    let create_info = vk::MetalSurfaceCreateInfoEXT {
+        p_layer: layer.into_raw().as_ptr(),
+        ..Default::default()
+    };
+
+    engine.resources.surface = engine.ctx.extensions.metal_surface.create_metal_surface(&create_info)
+        .map_err(|err| backend_init_err!("Failed to create window surface: {err}") )?;
+
+    Ok(())
+}
+
+
 //
 // Swapchain
 //

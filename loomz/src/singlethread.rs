@@ -99,5 +99,9 @@ impl LoomzApplication {
         }
     }
 
+    pub fn try_window(&self) -> Option<&Box<Window>> {
+        self.window.as_ref()
+    }
+
 }
 

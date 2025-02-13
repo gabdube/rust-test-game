@@ -69,7 +69,9 @@ impl<'a> ApplicationHandler for LoomzApplication {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        self.window().set_visible(false);
+        if let Some(window) = self.try_window() {
+            window.set_visible(false);
+        }
     }
 
 }

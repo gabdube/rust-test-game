@@ -209,6 +209,14 @@ impl LoomzApplication {
         }
     }
 
+    pub fn try_window(&self) -> Option<&Box<Window>> {
+        match self {
+            LoomzApplication::Setup(Some(setup)) => setup.window.as_ref(),
+            LoomzApplication::Runtime(run) => run.window.as_ref(),
+            _ => unreachable!(),
+        }
+    }
+
 }
 
 fn client_loop(client: LoomzClient, shared: LoomzMultithreadedShared) {

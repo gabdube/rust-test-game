@@ -95,8 +95,17 @@ fn setup_instance(setup: &mut VulkanCtxSetup) -> Result<(), CommonError> {
     let layers_name_ptr: Vec<*const u8> = layers.iter().map(|c| c.as_bytes_with_nul().as_ptr() ).collect();
     let extension_names_ptr: Vec<*const u8> = instance_extensions.iter().map(|c| c.as_bytes_with_nul().as_ptr() ).collect();
 
+    let instance_flags;
+
+    if cfg!(target_os="macos") {
+        instance_flags = vk::InstanceCreateFlags::INSTANCE_CREATE_ENUMERATE_PORTABILITY;
+    } else {
+        instance_flags = vk::InstanceCreateFlags::default();
+    }
+    
     // Instance creation
     let create_info = vk::InstanceCreateInfo {
+        flags: instance_flags,
         p_application_info: &app_info,
         enabled_layer_count: layers.len() as _,
         pp_enabled_layer_names: layers_name_ptr.as_ptr(),
@@ -135,16 +144,24 @@ fn linux_surface_extensions(entry: &vk::wrapper::Entry, extensions_in: &mut Vec<
 fn setup_layers_and_extensions(entry: &vk::wrapper::Entry, layers: &mut Vec<CString>, extensions: &mut Vec<CString>) -> Result<(), CommonError> {
     let layers_in: &[&[u8]] = &[
         #[cfg(debug_assertions)]
-        b"VK_LAYER_KHRONOS_validation\0"
+        b"VK_LAYER_KHRONOS_validation\0",
     ];
 
-    let mut extensions_in: Vec<&'static [u8]> = vec![b"VK_KHR_surface\0"];
+    let mut extensions_in: Vec<&'static [u8]> = vec![
+        b"VK_KHR_surface\0",
+    ];
 
     #[cfg(debug_assertions)]
     extensions_in.push(b"VK_EXT_debug_utils\0");
 
     #[cfg(windows)]
     extensions_in.push(b"VK_KHR_win32_surface\0");
+
+    #[cfg(target_os = "macos")]
+    extensions_in.push(b"VK_KHR_portability_enumeration\0");
+
+    #[cfg(target_os = "macos")]
+    extensions_in.push(b"VK_EXT_metal_surface\0");
 
     #[cfg(target_os = "linux")]
     linux_surface_extensions(entry, &mut extensions_in)?;
@@ -218,10 +235,10 @@ fn setup_device(setup: &mut VulkanCtxSetup) -> Result<(), CommonError> {
 
     let required_extensions: [&[u8]; 5] = [
         b"VK_KHR_swapchain\0",
-        b"VK_KHR_draw_indirect_count\0",
         b"VK_EXT_descriptor_indexing\0",
         b"VK_KHR_dynamic_rendering\0",
         b"VK_KHR_synchronization2\0",
+        b"VK_KHR_portability_subset\0",
     ];
 
     let device_extension_names: Vec<&CStr> = required_extensions.iter()
@@ -412,6 +429,9 @@ fn load_extensions(setup: &mut VulkanCtxSetup) {
 
         #[cfg(windows)]
         win32_surface: vk::wrapper::Win32Surface::new(entry, instance),
+
+        #[cfg(target_os="macos")]
+        metal_surface: vk::wrapper::MetalSurface::new(entry, instance),
 
         #[cfg(target_os="linux")]
         linux_surface: crate::context::VulkanLinuxSurfaces { 

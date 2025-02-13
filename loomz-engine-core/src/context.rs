@@ -21,6 +21,9 @@ pub struct VulkanContextExtensions {
 
     #[cfg(target_os="linux")]
     pub linux_surface: VulkanLinuxSurfaces,
+
+    #[cfg(target_os="macos")]
+    pub metal_surface: vk::wrapper::MetalSurface,
 }
 
 pub struct VulkanContext {

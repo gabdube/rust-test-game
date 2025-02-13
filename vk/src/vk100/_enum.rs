@@ -2,7 +2,6 @@
 
 use std::fmt;
 
-vk_enum!(InstanceCreateFlags);
 vk_enum!(DeviceQueueCreateFlags);
 vk_enum!(DeviceCreateFlags);
 vk_enum!(ImageViewCreateFlags);
@@ -26,6 +25,11 @@ vk_enum!(PipelineLayoutCreateFlags);
 vk_enum!(SamplerCreateFlags);
 vk_enum!(BufferViewCreateFlags);
 
+vk_enum!(InstanceCreateFlags);
+vk_bitflags!(InstanceCreateFlags);
+impl InstanceCreateFlags {
+    pub const INSTANCE_CREATE_ENUMERATE_PORTABILITY: Self = Self(0b1);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
@@ -105,6 +109,7 @@ impl fmt::Display for VkResult {
         }
     }
 }
+
 
 vk_enum!(StructureType);
 impl StructureType {

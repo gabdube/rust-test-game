@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-raw-window-handle = { version = "0.6" }
+raw-window-handle = "0.6"
 png = "0.17.14"
 parking_lot = "0.12.3"
 
 loomz-shared = { path = "../loomz-shared" }
 vk = { path = "../vk" }
+
+raw-window-metal = "1.1.0"
