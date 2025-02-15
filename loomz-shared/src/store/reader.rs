@@ -75,7 +75,7 @@ impl<'a> SaveFileReaderBase<'a> {
     }
 
     pub fn read<T: Copy>(&mut self) -> T {
-        assert!(align_of::<T>() >= ALIGN, "Alignment of T must be at least 4 bytes");
+        assert!(align_of::<T>() == ALIGN, "Alignment of T must be at least 4 bytes");
         let u32_count = size_of::<T>() / ALIGN;
         
         let data = unsafe {

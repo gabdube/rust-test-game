@@ -1,5 +1,5 @@
 use loomz_shared::inputs::keys;
-use loomz_shared::{CommonError, rect};
+use loomz_shared::CommonError;
 use crate::{LoomzClient, GameState, GameInputFlags};
 
 const RETURN_EDITOR: u64 = 200;
@@ -8,18 +8,22 @@ const EXIT_EDITOR: u64 = 201;
 impl LoomzClient {
 
     pub(crate) fn init_editor(&mut self) -> Result<(), CommonError> {
+        self.gui.toggle(&self.api, false);
+
         self.init_editor_gui()?;
+        self.build_editor_gui()?;
+    
         self.init_editor_terrain()?;
         self.api.world().toggle_world(true);
         self.state = GameState::Editor;
+
         Ok(())
     }
 
     pub(crate) fn editor(&mut self) -> Result<(), CommonError> {
-        self.editor_global_update();
+        self.editor_global_update()?;
 
         if self.gui.visible() {
-            self.editor_gui_updates();
             self.editor_gui_events()?;
         } else {
             self.editor_updates();
@@ -28,16 +32,16 @@ impl LoomzClient {
         Ok(())
     }
 
-    fn editor_global_update(&mut self) {
+    fn editor_global_update(&mut self) -> Result<(), CommonError> {
         let inputs = self.api.inputs_ref();
 
         if let Some(new_size) = inputs.screen_size() {
-            self.terrain.set_view(0.0, 0.0, new_size.width, new_size.height);
+            self.terrain.resize_view(new_size.width, new_size.height);
             self.terrain.sync(&self.api);
         }
 
-        if let Some(new_mouse) = inputs.mouse_buttons() {
-            match new_mouse.right_button_down() {
+        if let Some(buttons) = inputs.mouse_buttons() {
+            match buttons.right_button_down() {
                 true => { self.input_flags.insert(GameInputFlags::DRAGGING_VIEW); },
                 false => { self.input_flags.remove(GameInputFlags::DRAGGING_VIEW); }
             }
@@ -45,50 +49,26 @@ impl LoomzClient {
 
         if let Some(keystate) = self.api.keys_ref().read_updates() {
             if keystate.just_pressed(keys::ESC) {
-                let size = inputs.screen_size_value();
-                self.gui.resize(&self.api, &rect(0.0, 0.0, size.width, size.height));
                 self.gui.toggle(&self.api, !self.gui.visible());
             }
         }
 
-        ()
-    }
-
-    fn editor_gui_updates(&mut self) {
-        let inputs = self.api.inputs_ref();
-        let mut gui_updates = crate::gui::GuiUpdates::default();
-
-        if let Some(cursor_position) = inputs.cursor_position() {
-            gui_updates.cursor_position = Some(cursor_position.as_f32());
+        if inputs.screen_size().is_some() {
+            self.build_editor_gui()?;
         }
 
-        if let Some(buttons) = inputs.mouse_buttons() {
-            gui_updates.left_mouse_down = Some(buttons.left_button_down());
-        }
-
-        if let Some(new_size) = inputs.screen_size() {
-            gui_updates.view = Some(rect(0.0, 0.0, new_size.width, new_size.height));
-        }
-
-        self.gui.update(&self.api, &gui_updates);
+        Ok(())
     }
 
     fn editor_gui_events(&mut self) -> Result<(), CommonError> { 
-        let mut ret = false;
-        let mut ext = false;
+        self.gui.read_inputs(&self.api);
 
-        for event in self.gui.drain_events() {
+        while let Some(event) = self.gui.next_event() {
             match event {
-                RETURN_EDITOR => { ret = true },
-                EXIT_EDITOR => { ext = true; },
+                RETURN_EDITOR => { self.gui.toggle(&self.api, false); },
+                EXIT_EDITOR => { self.init_main_menu()?; },
                 _ => {}
             }
-        }
-
-        if ret {
-            self.gui.toggle(&self.api, false);
-        } else if ext {
-            self.init_main_menu()?;
         }
 
         Ok(())
@@ -103,20 +83,21 @@ impl LoomzClient {
     }
 
     fn init_editor_gui(&mut self) -> Result<(), CommonError> {
-        use crate::gui::{GuiLayoutType, GuiLabelCallback};
+        use crate::gui::{GuiLayoutType, GuiLayoutPosition};
+
+        self.gui.build_style(&self.api, |style| {
+            style.root_layout(GuiLayoutType::VBox, GuiLayoutPosition::Center);
+            super::shared::main_panel_style(style);
+        })
+    }
+
+    fn build_editor_gui(&mut self) -> Result<(), CommonError> {
+        use crate::gui::GuiLabelCallback;
 
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32::from_size(screen_size);
 
-        self.gui.toggle(&self.api, false);
-
-        self.gui.build_style(&self.api, |style| {
-            style.root_layout(GuiLayoutType::VBox);
-            super::shared::main_panel_style(style);
-        })?;
-
         self.gui.build(&self.api, &view, |gui| {
-            gui.layout(GuiLayoutType::VBox);
             gui.layout_item(screen_size.width, screen_size.height);
             gui.frame("shadow", |gui| {
                 gui.layout_item(400.0, 300.0);

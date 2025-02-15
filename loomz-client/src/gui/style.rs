@@ -1,6 +1,6 @@
 use fnv::FnvHashMap;
 use loomz_shared::{LoomzApi, RgbaU8, RectF32, assets_err};
-use crate::gui::{Gui, GuiBuilderData, GuiLayoutType, components::{GuiComponentTag, GuiLabelStyle, GuiFrameStyle}};
+use crate::gui::{Gui, GuiBuilderData, GuiLayoutType, GuiLayoutPosition, components::{GuiComponentTag, GuiLabelStyle, GuiFrameStyle}};
 
 type StyleKey = (&'static str, GuiComponentTag);
 pub(super) type GuiStyleMap = FnvHashMap<StyleKey, u32>;
@@ -52,8 +52,9 @@ impl<'a> GuiStyleBuilder<'a> {
     }
 
     /// Sets the layout of the root elements in the gui
-    pub fn root_layout(&mut self, ty: GuiLayoutType) {
+    pub fn root_layout(&mut self, ty: GuiLayoutType, pos: GuiLayoutPosition) {
         self.builder_data.root_layout_type = ty;
+        self.builder_data.root_layout_pos = pos;
     }
 
     pub fn label(

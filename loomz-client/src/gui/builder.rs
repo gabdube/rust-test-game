@@ -13,7 +13,7 @@ pub struct GuiBuilder<'a> {
     api: &'a LoomzApi,
     gui: &'a mut Gui,
     layout_item: GuiLayoutItem,
-    next_layout: GuiLayoutType,
+    next_layout: (GuiLayoutType, GuiLayoutPosition),
     item_index: u32,
 }
 
@@ -26,7 +26,7 @@ impl<'a> GuiBuilder<'a> {
             api,
             gui,
             layout_item: GuiLayoutItem::default(),
-            next_layout: GuiLayoutType::VBox,
+            next_layout: (GuiLayoutType::VBox, GuiLayoutPosition::Center),
             item_index: 0,
         }
     }
@@ -42,17 +42,21 @@ impl<'a> GuiBuilder<'a> {
         gui.component_data.clear();
         gui.sprites.clear();
 
+        let mut root = GuiLayout::default();
+        root.ty = gui.builder_data.root_layout_type;
+        root.position = gui.builder_data.root_layout_pos;
+
         let builder_data = &mut gui.builder_data;
         builder_data.layouts_stack.clear();
-        builder_data.layouts_stack.push((0, GuiLayout::default()));
+        builder_data.layouts_stack.push((0, root));
         builder_data.last_callbacks = GuiComponentCallbacksValue::None;
 
-        gui.layouts.push(GuiLayout::default());
+        gui.layouts.push(root);
     }
 
     /// Sets the layout used to position the child items of the next component
-    pub fn layout(&mut self, layout_type: GuiLayoutType) {
-        self.next_layout = layout_type;
+    pub fn layout(&mut self, layout_type: GuiLayoutType, layout_pos: GuiLayoutPosition) {
+        self.next_layout = (layout_type, layout_pos);
     }
 
     /// Sets the layout item of the next components
@@ -172,6 +176,10 @@ impl<'a> GuiBuilder<'a> {
             GuiLayoutType::VBox => {
                 current_layout.width = f32::max(current_layout.width, item_size.width);
                 current_layout.height += item_size.height;
+            },
+            GuiLayoutType::HBox => {
+                current_layout.width += item_size.width;
+                current_layout.height = f32::max(current_layout.height, item_size.height);
             }
         }
     }
@@ -179,7 +187,8 @@ impl<'a> GuiBuilder<'a> {
     fn push_next_layout(&mut self) {
         let next_layout_index = self.gui.layouts.len();
         let new_layout = GuiLayout {
-            ty: self.next_layout,
+            ty: self.next_layout.0,
+            position: self.next_layout.1,
             width: 0.0,
             height: 0.0,
             children_count: 0,

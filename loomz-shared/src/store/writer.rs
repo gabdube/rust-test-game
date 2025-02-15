@@ -74,11 +74,10 @@ impl SaveFileWriterBase {
     }
 
     pub fn write<T: Copy>(&mut self, data: &T) {
+        assert!(align_of::<T>() == ALIGN, "Data alignment must be 4 bytes");
+
         let data_array = ::std::slice::from_ref(data);
-        let (x, aligned, y) = unsafe { data_array.align_to::<u32>() };
-        if !x.is_empty() || !y.is_empty() {
-            panic!("Data must be aligned to 4 bytes");
-        }
+        let (_, aligned, _) = unsafe { data_array.align_to::<u32>() };
 
         let u32_count = aligned.len();
         self.try_realloc(u32_count);

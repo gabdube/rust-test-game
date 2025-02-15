@@ -1,6 +1,6 @@
 use loomz_shared::RectF32;
 use super::super::Gui;
-use super::{GuiLayout, GuiLayoutType, GuiLayoutItem};
+use super::{GuiLayout, GuiLayoutType, GuiLayoutPosition, GuiLayoutItem};
 
 struct LayoutComputeState<'a> {
     layout_items: &'a mut [GuiLayoutItem],
@@ -38,6 +38,7 @@ fn compute_layout(state: &mut LayoutComputeState) {
 
     match layout.ty {
         GuiLayoutType::VBox => vbox_layout(state, layout),
+        GuiLayoutType::HBox => hbox_layout(state, layout),
     }
 }
 
@@ -45,8 +46,16 @@ fn vbox_layout(state: &mut LayoutComputeState, layout: GuiLayout) {
     let view = state.view;
     let view_width = view.width();
     let view_height = view.height();
-    let offset_x = view.left + ((view_width - layout.width) * 0.5);
-    let mut offset_y = view.top + ((view_height - layout.height) * 0.5);
+    let mut offset_x = 0.0; 
+    let mut offset_y = 0.0; 
+
+    match layout.position {
+        GuiLayoutPosition::TopLeft => {},
+        GuiLayoutPosition::Center => {
+            offset_x = view.left + ((view_width - layout.width) * 0.5);
+            offset_y = view.top + ((view_height - layout.height) * 0.5);
+        }
+    }
 
     for _ in 0..layout.children_count {
         let item_index = state.item_index as usize;
@@ -66,11 +75,44 @@ fn vbox_layout(state: &mut LayoutComputeState, layout: GuiLayout) {
     }
 }
 
+fn hbox_layout(state: &mut LayoutComputeState, layout: GuiLayout) {
+    let view = state.view;
+    let view_width = view.width();
+    let view_height = view.height();
+    let mut offset_x = 0.0;
+    let mut offset_y = 0.0;
+
+    match layout.position {
+        GuiLayoutPosition::TopLeft => {},
+        GuiLayoutPosition::Center => {
+            offset_x =  view.left + ((view_width - layout.width) * 0.5);
+            offset_y =  view.top + ((view_height - layout.height) * 0.5);
+        }
+    }
+
+    for _ in 0..layout.children_count {
+        let item_index = state.item_index as usize;
+        let mut item = state.layout_items[item_index];
+
+        item.position.x = offset_x;
+        item.position.y = offset_y;
+        offset_x += item.size.width;
+
+        state.layout_items[item_index] = item;
+        state.item_index += 1;
+
+        if item.has_layout {
+            state.view = RectF32::from_position_and_size(item.position, item.size);
+            compute_layout(state);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use loomz_shared::{LoomzApi, RectF32, PositionF32, SizeF32, rect, rgb};
     use super::super::super::{Gui, GuiStyleState};
-    use super::super::GuiLayoutType::VBox;
+    use super::super::{GuiLayoutType::VBox, GuiLayoutPosition};
     
 
     macro_rules! assert_layout {
@@ -109,7 +151,7 @@ mod tests {
         let mut gui = Gui::default();
 
         let style_result = gui.build_style(&api, |style| {
-            style.root_layout(VBox);
+            style.root_layout(VBox, GuiLayoutPosition::Center);
             style.label("item", GuiStyleState::Base, "bubblegum", 100.0, rgb(204, 142, 100));
             style.frame("frame", GuiStyleState::Base, "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(27, 19, 15));
         });
@@ -117,14 +159,14 @@ mod tests {
         assert!(style_result.is_ok(), "Gui styling failed: {:?}", style_result);
 
         let build_result = gui.build(&api, &view, |gui| {
-            gui.layout(VBox);
+            gui.layout(VBox, GuiLayoutPosition::Center);
             gui.layout_item(300.0, 300.0);
             gui.frame("frame", |gui| {
                 gui.layout_item(200.0, 200.0);
                 gui.frame("frame", |_| {});
             }); 
 
-            gui.layout(VBox);
+            gui.layout(VBox, GuiLayoutPosition::Center);
             gui.layout_item(300.0, 300.0);
             gui.frame("frame", |gui| {
                 gui.layout_item(200.0, 200.0);

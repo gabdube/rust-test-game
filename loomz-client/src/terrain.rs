@@ -22,16 +22,6 @@ pub struct Terrain {
 
 impl Terrain {
 
-    pub fn init() -> Terrain {
-        Terrain {
-            batches: Vec::with_capacity(16),
-            batches_updates: Vec::with_capacity(16),
-            view: RectF32::default(),
-            size: SizeU32::default(),
-            flags: TerrainUpdateFlags::empty(),
-        }
-    }
-
     // Resize the world. Clears all the existing data.
     pub fn set_world_size(&mut self, width: u32, height: u32) {
         self.size.width = width;
@@ -55,6 +45,10 @@ impl Terrain {
         let width = self.view.width();
         let height = self.view.height();
         self.set_view(self.view.left + dx, self.view.top + dy, width, height);
+    }
+
+    pub fn resize_view(&mut self, width: f32, height: f32) {
+        self.set_view(self.view.left, self.view.top, width, height);
     }
 
     pub fn set_view(&mut self, x: f32, y: f32, width: f32, height: f32) {
@@ -160,7 +154,7 @@ impl Terrain {
 
 impl loomz_shared::store::StoreAndLoad for Terrain {
     fn load(reader: &mut loomz_shared::store::SaveFileReaderBase) -> Self {
-        let mut terrain = Terrain::init();
+        let mut terrain = Terrain::default();
         terrain.view = reader.read();
         terrain.size = reader.read();
         terrain.flags = TerrainUpdateFlags::from_bits(reader.read_u32() as u8).unwrap_or_default();
@@ -176,13 +170,25 @@ impl loomz_shared::store::StoreAndLoad for Terrain {
     }
 }
 
+impl Default for Terrain {
+    fn default() -> Terrain {
+        Terrain {
+            batches: Vec::with_capacity(16),
+            batches_updates: Vec::with_capacity(16),
+            view: RectF32::default(),
+            size: SizeU32::default(),
+            flags: TerrainUpdateFlags::empty(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod terrain_tests {
     use super::*;
 
     #[test]
     fn set_cells() {
-        let mut terrain = Terrain::init();
+        let mut terrain = Terrain::default();
         terrain.set_world_size(32, 32);
 
         terrain.set_cells(1, 1, 3, 1, &[TerrainType::Sand; 3]);

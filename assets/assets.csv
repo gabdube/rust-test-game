@@ -8,6 +8,7 @@ JSON;warrior_sprites;Warrior_Blue.json;
 JSON;terrain_sprites;terrain.json;
 
 MSDF_FONT;bubblegum;BubblegumSans.png;BubblegumSans.bin;
+MSDF_FONT;roboto;roboto.png;roboto.bin;
 
 SHADER;gui_component;gui.vert.spv;gui_component.frag.spv;
 SHADER;gui_text;gui.vert.spv;gui_text.frag.spv;

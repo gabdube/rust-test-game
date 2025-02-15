@@ -50,9 +50,10 @@ pub struct LoomzClient {
     timing: ClientTiming,
     animations: Box<Animations>,
 
-    gui: gui::Gui,
-    terrain: terrain::Terrain,
-    
+    gui: Box<gui::Gui>,
+    debug_gui: Box<gui::Gui>,
+    terrain: Box<terrain::Terrain>,
+
     state: GameState,
     input_flags: GameInputFlags,
     debug_state: DebugState
@@ -71,8 +72,9 @@ impl LoomzClient {
             timing,
             animations: Box::default(),
 
-            gui: gui::Gui::default(),
-            terrain: terrain::Terrain::init(),
+            gui: Box::default(),
+            debug_gui: Box::default(),
+            terrain: Box::default(),
 
             state: GameState::Uninitialized,
             input_flags: GameInputFlags::empty(),
@@ -83,6 +85,7 @@ impl LoomzClient {
     pub fn init(api: &LoomzApi) -> Result<Self, CommonError> {
         let mut client = Self::build_client(api);
         client.animations.load(api)?;
+        client.on_reload()?;
         client.init_editor()?;
         Ok(client)
     }
@@ -97,10 +100,11 @@ impl LoomzClient {
         client.input_flags = reader.read_from_u32();
         client.debug_state = reader.load();
         client.animations = Box::new(reader.read());
-        client.gui = reader.load();
-        client.terrain = reader.load();
+        client.gui = Box::new(reader.load());
+        client.debug_gui = Box::new(reader.load());
+        client.terrain = Box::new(reader.load());
 
-        client.init_editor()?;
+        client.on_reload()?;
 
         Ok(client)
     }
@@ -109,9 +113,10 @@ impl LoomzClient {
         writer.write_into_u32(self.state);
         writer.write_into_u32(self.input_flags);
         writer.store(&self.debug_state);
-        writer.write(&*self.animations);
-        writer.store(&self.gui);
-        writer.store(&self.terrain);
+        writer.write(self.animations.as_ref());
+        writer.store(self.gui.as_ref());
+        writer.store(self.debug_gui.as_ref());
+        writer.store(self.terrain.as_ref());
     }
 
     pub fn update(&mut self) -> Result<(), CommonError> {
@@ -125,6 +130,7 @@ impl LoomzClient {
         }
 
         self.update_debug_state();
+        self.update_debug_gui();
         self.api.client_update_finished();
 
         Ok(())
@@ -164,6 +170,56 @@ impl LoomzClient {
     fn uninitialized(&mut self) -> Result<(), CommonError> {
         self.init_main_menu()?;
         Ok(())
+    }
+
+    fn on_reload(&mut self) -> Result<(), CommonError> {
+        println!("RELOAD");
+        self.debug_gui()?;
+        Ok(())
+    }
+
+    fn debug_gui(&mut self) -> Result<(), CommonError> {
+        use crate::gui::{GuiLayoutType, GuiLayoutPosition, GuiStyleState, GuiLabelCallback};
+        use loomz_shared::{rect, rgb};
+
+        let screen_size = self.api.inputs().screen_size_value();
+        let view = loomz_shared::RectF32::from_size(screen_size);
+
+        self.debug_gui.build_style(&self.api, |style| {
+            style.root_layout(GuiLayoutType::HBox, GuiLayoutPosition::TopLeft);
+            style.frame("menubar", GuiStyleState::Base, "gui", rect(0.0, 0.0, 2.0, 2.0), rgb(51, 51, 51));
+            style.label("menubar_item", GuiStyleState::Base, "roboto", 20.0, rgb(200, 200, 200));
+            style.label("menubar_item", GuiStyleState::Hovered, "roboto", 20.0, rgb(150, 150, 250));
+        })?;
+
+        self.debug_gui.build(&self.api, &view, |gui| {
+            gui.layout(GuiLayoutType::HBox, GuiLayoutPosition::TopLeft);
+            gui.layout_item(view.width(), 25.0);
+            gui.frame("menubar", |gui| {
+                gui.layout_item(45.0, 20.0);
+                gui.label_callback(GuiLabelCallback::Click, 1000u64);
+                gui.label("File", "menubar_item");
+
+                gui.layout_item(45.0, 20.0);
+                gui.label_callback(GuiLabelCallback::Click, 1001u64);
+                gui.label("Exit", "menubar_item");
+            });
+        })?;
+
+        Ok(())
+    }
+
+    fn update_debug_gui(&mut self) {
+        self.debug_gui.read_inputs(&self.api);
+        while let Some(event) = self.debug_gui.next_event() {
+            match event {
+                1000 => { },
+                1001u64 => {
+                    self.api.exit();
+                },
+                _ => {}
+            }
+        }
     }
 
 }

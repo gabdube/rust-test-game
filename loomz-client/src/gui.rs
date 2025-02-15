@@ -11,7 +11,7 @@ pub use components::GuiLabelCallback;
 
 mod layout;
 use layout::{GuiLayout, GuiLayoutItem};
-pub use layout::GuiLayoutType;
+pub use layout::{GuiLayoutType, GuiLayoutPosition};
 
 mod builder;
 use builder::GuiBuilder;
@@ -32,19 +32,13 @@ struct GuiComponentState {
     selected_index: u32,
 }
 
-#[derive(Default, Copy, Clone)]
-pub struct GuiUpdates {
-    pub cursor_position: Option<PositionF32>,
-    pub view: Option<RectF32>,
-    pub left_mouse_down: Option<bool>,
-}
-
 struct GuiBuilderData {
     errors: Vec<crate::CommonError>,
     layouts_stack: Vec<(usize, GuiLayout)>,
     styles: GuiStyleMap,
     last_callbacks: GuiComponentCallbacksValue,
     root_layout_type: GuiLayoutType,
+    root_layout_pos: GuiLayoutPosition,
 }
 
 pub struct Gui {
@@ -54,6 +48,7 @@ pub struct Gui {
     styles: Vec<GuiComponentStyle>,
     callbacks: Vec<GuiComponentCallbacksValue>,
     callbacks_output: Vec<RawCallbackValue>,
+    callbacks_iter: usize,
 
     base_view: RectF32,
     layouts: Vec<GuiLayout>,
@@ -94,20 +89,17 @@ impl Gui {
         Ok(())
     }
 
-    pub fn update(&mut self, api: &LoomzApi, updates: &GuiUpdates) {
+    pub fn read_inputs(&mut self, api: &LoomzApi) {
+        let inputs = api.inputs();
+
         let mut need_sync = false;
 
-        if let Some(view) = updates.view {
-            self.inner_resize(&view);
-            need_sync = true;
+        if let Some(cursor_position) = inputs.cursor_position() {
+            self.update_cursor_position(cursor_position.as_f32(), &mut need_sync);
         }
 
-        if let Some(cursor_position) = updates.cursor_position {
-            self.update_cursor_position(cursor_position, &mut need_sync);
-        }
-
-        if let Some(left_button) = updates.left_mouse_down {
-            self.update_mouse_button(left_button, &mut need_sync);
+        if let Some(buttons) = inputs.mouse_buttons() {
+            self.update_mouse_button(buttons.left_button_down(), &mut need_sync);
         }
 
         if need_sync {
@@ -120,10 +112,18 @@ impl Gui {
         self.sync_with_engine(api);
     }
 
-    pub fn drain_events<'a, E: IntoGuiCallback>(&'a mut self) -> impl Iterator<Item=E> + 'a {
-        let callback_outputs = &mut self.callbacks_output;
-        callback_outputs.drain(..)
-                .map(|raw| E::from_u64(raw) )
+    pub fn next_event<'a, E: IntoGuiCallback>(&'a mut self) -> Option<E> {
+        match self.callbacks_output.get(self.callbacks_iter) {
+            Some(raw) => {
+                self.callbacks_iter += 1;
+                Some(E::from_u64(*raw))
+            },
+            None => {
+                self.callbacks_iter = 0;
+                self.callbacks_output.clear();
+                None
+            }
+        }
     }
 
     pub fn toggle(&mut self, api: &LoomzApi, visible: bool) {
@@ -338,26 +338,7 @@ impl StoreAndLoad for Gui {
     }
 
     fn load(reader: &mut SaveFileReaderBase) -> Self {
-        let mut gui = Gui {
-            id: GuiId::default(),
-            base_view: RectF32::default(),
-            state: GuiComponentState::default(),
-
-            styles: Vec::new(),
-            callbacks: Vec::new(),
-            callbacks_output: Vec::with_capacity(8),
-
-            layouts: Vec::new(),
-            layout_items: Vec::new(),
-            component_base: Vec::new(),
-            component_data: Vec::new(),
-
-            sprites: Vec::with_capacity(64),
-            builder_data: Box::default(),
-
-            visible: true,
-        };
-
+        let mut gui = Gui::default();
         gui.id = reader.load();
         gui.base_view = reader.read();
         gui.state = reader.read();
@@ -384,6 +365,7 @@ impl Default for Gui {
             styles: Vec::with_capacity(8),
             callbacks: Vec::with_capacity(8),
             callbacks_output: Vec::with_capacity(8),
+            callbacks_iter: 0,
 
             layouts: Vec::with_capacity(8),
             layout_items: Vec::with_capacity(16),
@@ -408,6 +390,7 @@ impl Default for GuiBuilderData {
             last_callbacks: GuiComponentCallbacksValue::None,
             layouts_stack: Vec::with_capacity(4),
             root_layout_type: GuiLayoutType::VBox,
+            root_layout_pos: GuiLayoutPosition::Center,
         }
     }
 

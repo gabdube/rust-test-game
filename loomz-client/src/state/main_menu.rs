@@ -1,4 +1,4 @@
-use loomz_shared::{CommonError, rect};
+use loomz_shared::CommonError;
 use crate::{LoomzClient, GameState};
 
 const START_GAME: u64 = 100;
@@ -16,62 +16,38 @@ impl LoomzClient {
     }
 
     pub(crate) fn main_menu(&mut self) -> Result<(), CommonError> {
-        let inputs = self.api.inputs_ref();
-        let mut gui_updates = crate::gui::GuiUpdates::default();
-
-        if let Some(cursor_position) = inputs.cursor_position() {
-            gui_updates.cursor_position = Some(cursor_position.as_f32());
-        }
-
-        if let Some(buttons) = inputs.mouse_buttons() {
-            gui_updates.left_mouse_down = Some(buttons.left_button_down());
-        }
-
-        if let Some(new_size) = inputs.screen_size() {
-            gui_updates.view = Some(rect(0.0, 0.0, new_size.width, new_size.height));
-        }
-
-        self.gui.update(&self.api, &gui_updates);
         self.main_menu_gui_events()?;
-
         Ok(())
     }
 
     fn main_menu_gui_events(&mut self) -> Result<(), CommonError> {
-        let mut start_game = false;
-        let mut start_sandbox = false;
+        self.gui.read_inputs(&self.api);
 
-        for event in self.gui.drain_events() {
+        while let Some(event) = self.gui.next_event() {
             match event {
-                START_GAME => { start_game = true; },
-                START_SANDBOX => { start_sandbox = true; },
+                START_GAME => { self.init_gameplay()?; },
+                START_SANDBOX => { self.init_editor()?; },
                 EXIT_GAME => { self.api.exit(); },
                 _ => {}
             }
-        }
-
-        if start_game {
-            self.init_gameplay()?;
-        } else if start_sandbox {
-            self.init_editor()?;
         }
 
         Ok(())
     }
 
     fn init_main_menu_menu(&mut self) -> Result<(), CommonError> {
-        use crate::gui::{GuiLayoutType, GuiLabelCallback};
+        use crate::gui::{GuiLayoutType, GuiLabelCallback, GuiLayoutPosition};
 
         let screen_size = self.api.inputs().screen_size_value();
         let view = loomz_shared::RectF32::from_size(screen_size);
 
         self.gui.build_style(&self.api, |style| {
-            style.root_layout(GuiLayoutType::VBox);
+            style.root_layout(GuiLayoutType::VBox, GuiLayoutPosition::Center);
             super::shared::main_panel_style(style);
         })?;
 
         self.gui.build(&self.api, &view, |gui| {
-            gui.layout(GuiLayoutType::VBox);
+            gui.layout(GuiLayoutType::VBox, GuiLayoutPosition::Center);
             gui.layout_item(500.0, 440.0);
             gui.frame("main_panel_style", |gui| {
                 gui.layout_item(300.0, 110.0);
